@@ -1,22 +1,15 @@
-import {
-  DummyDriver,
-  PostgresAdapter,
-  PostgresIntrospector,
-  PostgresQueryCompiler,
-} from 'kysely';
 import { PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { defineConfig } from 'kysely-ctl';
 
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is required for Kysely migrations');
+}
+
 export default defineConfig({
-  // replace me with a real dialect instance OR a dialect name + `dialectConfig` prop.
   dialect: new PostgresDialect({
     pool: new Pool({
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT),
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
+      connectionString: process.env.DATABASE_URL,
     }),
   }),
   migrations: {

@@ -3,11 +3,12 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from "kysely";
+import type { ColumnType } from 'kysely';
 
-export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
-  ? ColumnType<S, I | undefined, U>
-  : ColumnType<T, T | undefined, T>;
+export type Generated<T> =
+  T extends ColumnType<infer S, infer I, infer U>
+    ? ColumnType<S, I | undefined, U>
+    : ColumnType<T, T | undefined, T>;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -18,6 +19,25 @@ export interface AuthSessions {
   revoked_at: Timestamp | null;
   token_hash: string;
   user_id: string;
+}
+
+export interface AuthTokenFamilies {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  revoked_at: Timestamp | null;
+  user_id: string;
+}
+
+export interface AuthRefreshTokens {
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  family_id: string;
+  id: Generated<string>;
+  replaced_by_id: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
 }
 
 export interface AuthUsers {
@@ -31,6 +51,8 @@ export interface AuthUsers {
 }
 
 export interface DB {
-  "auth.sessions": AuthSessions;
-  "auth.users": AuthUsers;
+  'auth.refresh_tokens': AuthRefreshTokens;
+  'auth.sessions': AuthSessions;
+  'auth.token_families': AuthTokenFamilies;
+  'auth.users': AuthUsers;
 }

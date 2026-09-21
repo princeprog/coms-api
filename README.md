@@ -57,6 +57,28 @@ $ pnpm run test:e2e
 $ pnpm run test:cov
 ```
 
+## Create an account
+
+Use the account script after applying the database migrations. It prompts for
+the account details, validates them using the auth contract, and stores the
+password as an Argon2id hash. The password is never accepted as a command-line
+argument.
+
+```bash
+pnpm run account:create
+```
+
+For automation, provide the non-secret fields as options and pipe the password
+through standard input:
+
+```bash
+printf '%s\n' 'a long password' | pnpm run account:create -- \
+  --email staff@example.com \
+  --full-name "Staff User" \
+  --contact-number "09171234567" \
+  --password-stdin
+```
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

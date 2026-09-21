@@ -1,3 +1,5 @@
+import './config/load-env';
+
 import { Module } from '@nestjs/common';
 import { createObserveModule } from '@nestjs/observe';
 import { AppController } from './app.controller';
