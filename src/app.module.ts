@@ -12,6 +12,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { StockItemsModule } from './modules/stock-items/stock-items.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { SupplierReceiptsModule } from './modules/supplier-receipts/supplier-receipts.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -32,6 +33,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     StockItemsModule,
     ProductsModule,
     InventoryModule,
+    SupplierReceiptsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
