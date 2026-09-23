@@ -472,6 +472,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         code: 'DB_STAFF_BRANCH',
         branch_name: 'Staff Test Branch',
       });
+      const externalBranch = await branches.create({
+        code: 'DB_STAFF_BRANCH_B',
+        branch_name: 'Staff Other Branch',
+      });
       const staff = new StaffService(new StaffRepository(db));
       const password = 'Database staff password 2026';
       const member = await staff.create({
@@ -480,12 +484,12 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         contact_number: '09179990000',
         password,
         role_id: staffRole.id,
-        branch_ids: [branch.id],
-      });
+        branch_ids: [branch.id, externalBranch.id],
+      }, [], true);
       expect(member).toMatchObject({
         email: 'staff.integration@example.com',
         role_code: 'DB_STAFF_CLERK',
-        branch_ids: [branch.id],
+        branch_ids: expect.arrayContaining([branch.id, externalBranch.id]),
         is_active: true,
       });
       expect(member).not.toHaveProperty('hashed_password');
@@ -530,9 +534,29 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .where('id', '=', existingAdmin.id)
         .execute();
 
+      const branchManagerId = 'c174b793-8871-4d46-9337-182a521eac01';
+      await expect(
+        staff.assignBranches(
+          member.id,
+          branchManagerId,
+          [],
+          [branch.id],
+          false,
+        ),
+      ).resolves.toMatchObject({ branch_ids: [externalBranch.id] });
+      await expect(
+        staff.assignBranches(
+          member.id,
+          branchManagerId,
+          [externalBranch.id],
+          [branch.id],
+          false,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+
       await staff.deactivate(
         member.id,
-        'c174b793-8871-4d46-9337-182a521eac01',
+        branchManagerId,
         false,
       );
       await expect(

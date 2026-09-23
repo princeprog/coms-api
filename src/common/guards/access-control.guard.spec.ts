@@ -10,6 +10,7 @@ import {
   BRANCH_SCOPE_KEY,
 } from '../decorators/access-policy.decorator';
 import { AccessControlGuard } from './access-control.guard';
+import { StaffController } from '../../modules/staff/staff.controller';
 
 vi.mock('../../database/database.module', () => ({
   DATABASE: Symbol('DATABASE'),
@@ -133,6 +134,77 @@ describe('AccessControlGuard', () => {
     await expect(guard.canActivate(executionContext(request))).resolves.toBe(
       true,
     );
+  });
+
+  it('scopes staff branch collection updates to every branch the actor can manage', async () => {
+    const context = {
+      userId: 'user-1',
+      accountActive: true,
+      role: { code: 'MANAGER', isSystem: false, isActive: true },
+      permissions: ['staff.branch_assign'],
+      branchIds: ['branch-1'],
+    };
+    const service = { findAccessContext: vi.fn().mockResolvedValue(context) };
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) =>
+        key === ACCESS_PERMISSION_KEY
+          ? 'staff.branch_assign'
+          : key === BRANCH_SCOPE_KEY
+            ? true
+            : undefined,
+      ),
+    };
+    const guard = new AccessControlGuard(service as never, reflector as never);
+
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          params: { userId: 'staff-2' },
+          body: { branch_ids: ['branch-1'] },
+        }),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          params: { userId: 'staff-2' },
+          body: { branch_ids: ['branch-1', 'branch-2'] },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          params: { userId: 'staff-2' },
+          body: { branch_ids: [] },
+        }),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          params: { userId: 'staff-2' },
+          body: {},
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('declares branch scope on staff creation and branch-assignment endpoints', () => {
+    const reflector = new Reflector();
+    for (const handlerName of ['create', 'assignBranches'] as const) {
+      const handler = Reflect.get(StaffController.prototype, handlerName);
+      expect(
+        reflector.getAllAndOverride<boolean>(BRANCH_SCOPE_KEY, [
+          handler,
+          StaffController,
+        ]),
+      ).toBe(true);
+    }
   });
 
   it('returns 401 when a session guard has not established a user', async () => {

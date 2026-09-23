@@ -26,19 +26,32 @@ export class StaffService {
     return member;
   }
 
-  async create(input: {
-    email: string;
-    full_name: string;
-    contact_number: string;
-    password: string;
-    role_id: string;
-    branch_ids: string[];
-  }) {
+  async create(
+    input: {
+      email: string;
+      full_name: string;
+      contact_number: string;
+      password: string;
+      role_id: string;
+      branch_ids: string[];
+    },
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
     const email = input.email.trim().toLowerCase();
     const fullName = input.full_name.trim();
     const contactNumber = input.contact_number.trim();
     this.validateRoleId(input.role_id);
     this.validateBranches(input.branch_ids);
+    if (!actorIsSuperAdmin && actorBranchIds.length === 0)
+      throw new ForbiddenException('Branch access required');
+    if (
+      !actorIsSuperAdmin &&
+      input.branch_ids.some((branchId) => !actorBranchIds.includes(branchId))
+    )
+      throw new ForbiddenException(
+        'You cannot assign staff outside your branch access',
+      );
     if (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw new BadRequestException('A valid staff email is required');
     if (fullName.length < 2 || fullName.length > 160)
@@ -104,13 +117,32 @@ export class StaffService {
     return this.repository.assignRole(id, roleId, actorIsSuperAdmin);
   }
 
-  async assignBranches(id: string, actorId: string, branchIds: string[]) {
+  async assignBranches(
+    id: string,
+    actorId: string,
+    branchIds: string[],
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
     this.validateUserId(id);
     this.validateUserId(actorId);
     this.validateBranches(branchIds);
     if (id === actorId)
       throw new ForbiddenException('You cannot change your own branch access');
-    return this.repository.assignBranches(id, branchIds);
+    if (!actorIsSuperAdmin && actorBranchIds.length === 0)
+      throw new ForbiddenException('Branch access required');
+    if (
+      !actorIsSuperAdmin &&
+      branchIds.some((branchId) => !actorBranchIds.includes(branchId))
+    )
+      throw new ForbiddenException(
+        'You cannot assign staff outside your branch access',
+      );
+    return this.repository.assignBranches(
+      id,
+      branchIds,
+      actorIsSuperAdmin ? undefined : actorBranchIds,
+    );
   }
 
   async deactivate(id: string, actorId: string, actorIsSuperAdmin: boolean) {

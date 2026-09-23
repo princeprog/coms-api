@@ -187,18 +187,36 @@ export class StaffRepository {
     });
   }
 
-  async assignBranches(id: string, branchIds: string[]) {
+  async assignBranches(
+    id: string,
+    branchIds: string[],
+    actorBranchIds?: string[],
+  ) {
     return this.db.transaction().execute(async (trx) => {
       await this.lockUser(trx, id);
       await this.assertActiveBranches(trx, branchIds);
+      let assignedBranchIds = branchIds;
+      if (actorBranchIds) {
+        const existingBranchIds =
+          (await this.activeBranchesForUsers([id], trx)).get(id) ?? [];
+        const outsideScope = existingBranchIds.filter(
+          (branchId) => !actorBranchIds.includes(branchId),
+        );
+        assignedBranchIds = [...new Set([...outsideScope, ...branchIds])];
+      }
       await trx
         .deleteFrom('auth.branch_users')
         .where('user_id', '=', id)
         .execute();
-      if (branchIds.length)
+      if (assignedBranchIds.length)
         await trx
           .insertInto('auth.branch_users')
-          .values(branchIds.map((branch_id) => ({ user_id: id, branch_id })))
+          .values(
+            assignedBranchIds.map((branch_id) => ({
+              user_id: id,
+              branch_id,
+            })),
+          )
           .execute();
       return this.findById(id, trx);
     });

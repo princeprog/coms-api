@@ -61,8 +61,21 @@ export class AccessControlGuard implements CanActivate {
     }
     if (branchScoped && !superAdmin) {
       const branchIds = this.requestBranchIds(request);
+      const body = request.body as { branch_ids?: unknown } | undefined;
+      const requestedBranchList = Array.isArray(body?.branch_ids)
+        ? body.branch_ids
+        : undefined;
+      const branchListProvided = requestedBranchList !== undefined;
+      const hasInvalidBranchList =
+        requestedBranchList?.some(
+          (branchId) => typeof branchId !== 'string',
+        ) ?? false;
       if (
-        !branchIds.length ||
+        (!branchIds.length && !branchListProvided) ||
+        hasInvalidBranchList ||
+        (branchListProvided &&
+          branchIds.length === 0 &&
+          accessContext.branchIds.length === 0) ||
         branchIds.some(
           (branchId) => !accessContext.branchIds.includes(branchId),
         )
@@ -80,8 +93,9 @@ export class AccessControlGuard implements CanActivate {
       request.query?.branch_id,
     ];
     const body = request.body as
-      { branchId?: unknown; branch_id?: unknown } | undefined;
+      { branchId?: unknown; branch_id?: unknown; branch_ids?: unknown } | undefined;
     candidates.push(body?.branchId, body?.branch_id);
+    if (Array.isArray(body?.branch_ids)) candidates.push(...body.branch_ids);
     return candidates.filter(
       (value): value is string => typeof value === 'string',
     );

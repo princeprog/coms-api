@@ -11,7 +11,10 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
-import { RequirePermission } from '../../common/decorators/access-policy.decorator';
+import {
+  RequireBranchScope,
+  RequirePermission,
+} from '../../common/decorators/access-policy.decorator';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -44,8 +47,16 @@ export class StaffController {
 
   @Post()
   @RequirePermission('staff.create')
-  create(@Body() dto: CreateStaffDto) {
-    return this.service.create(dto);
+  @RequireBranchScope()
+  create(
+    @CurrentAccessContext() access: AccessContext,
+    @Body() dto: CreateStaffDto,
+  ) {
+    return this.service.create(
+      dto,
+      access.branchIds,
+      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+    );
   }
 
   @Patch(':userId')
@@ -72,12 +83,20 @@ export class StaffController {
 
   @Put(':userId/branches')
   @RequirePermission('staff.branch_assign')
+  @RequireBranchScope()
   assignBranches(
     @Param('userId') userId: string,
     @CurrentUser() actor: RequestUser,
+    @CurrentAccessContext() access: AccessContext,
     @Body() dto: AssignStaffBranchesDto,
   ) {
-    return this.service.assignBranches(userId, actor.id, dto.branch_ids);
+    return this.service.assignBranches(
+      userId,
+      actor.id,
+      dto.branch_ids,
+      access.branchIds,
+      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+    );
   }
 
   @Post(':userId/deactivate')
