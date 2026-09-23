@@ -152,6 +152,19 @@ async function main(): Promise<void> {
   });
 
   try {
+    const noAccessRole = await db
+      .selectFrom('auth.roles')
+      .select('id')
+      .where('code', '=', 'NO_ACCESS')
+      .where('is_active', '=', true)
+      .executeTakeFirst();
+
+    if (!noAccessRole) {
+      throw new Error(
+        'The NO_ACCESS role is missing. Apply the access-control migration first.',
+      );
+    }
+
     const existing = await db
       .selectFrom('auth.users')
       .select(['email', 'contact_number'])
@@ -177,6 +190,7 @@ async function main(): Promise<void> {
         full_name: account.fullName,
         contact_number: account.contactNumber,
         hashed_password: hashedPassword,
+        role_id: noAccessRole.id,
       })
       .returning(['id', 'email', 'full_name', 'contact_number'])
       .executeTakeFirstOrThrow();

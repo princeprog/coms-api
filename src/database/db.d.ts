@@ -3,14 +3,29 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from 'kysely';
+import type { ColumnType } from "kysely";
 
-export type Generated<T> =
-  T extends ColumnType<infer S, infer I, infer U>
-    ? ColumnType<S, I | undefined, U>
-    : ColumnType<T, T | undefined, T>;
+export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S, I | undefined, U>
+  : ColumnType<T, T | undefined, T>;
+
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
+export interface AuthBranchUsers {
+  assigned_at: Generated<Timestamp>;
+  branch_id: string;
+  id: Generated<string>;
+  user_id: string;
+}
+
+export interface AuthPermissions {
+  action_key: string;
+  description: string;
+  id: Generated<Int8>;
+  module_key: string;
+}
 
 export interface AuthRateLimitBuckets {
   count: number;
@@ -28,6 +43,22 @@ export interface AuthRefreshTokens {
   replaced_by_id: string | null;
   revoked_at: Timestamp | null;
   token_hash: string;
+}
+
+export interface AuthRolePermissions {
+  created_at: Generated<Timestamp>;
+  permission_id: Int8;
+  role_id: Int8;
+}
+
+export interface AuthRoles {
+  code: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  is_active: Generated<boolean>;
+  is_system: Generated<boolean>;
+  role_name: string;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface AuthSessions {
@@ -54,13 +85,32 @@ export interface AuthUsers {
   full_name: string;
   hashed_password: string;
   id: Generated<string>;
+  is_active: Generated<boolean>;
+  role_id: Int8;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface Branches {
+  address: string | null;
+  branch_name: string;
+  code: string;
+  created_at: Generated<Timestamp>;
+  date_opened: Timestamp | null;
+  has_dine_in: Generated<boolean>;
+  id: Generated<string>;
+  status: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface DB {
-  'auth.rate_limit_buckets': AuthRateLimitBuckets;
-  'auth.refresh_tokens': AuthRefreshTokens;
-  'auth.sessions': AuthSessions;
-  'auth.token_families': AuthTokenFamilies;
-  'auth.users': AuthUsers;
+  "auth.branch_users": AuthBranchUsers;
+  "auth.permissions": AuthPermissions;
+  "auth.rate_limit_buckets": AuthRateLimitBuckets;
+  "auth.refresh_tokens": AuthRefreshTokens;
+  "auth.role_permissions": AuthRolePermissions;
+  "auth.roles": AuthRoles;
+  "auth.sessions": AuthSessions;
+  "auth.token_families": AuthTokenFamilies;
+  "auth.users": AuthUsers;
+  branches: Branches;
 }

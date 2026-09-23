@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { parse } from 'dotenv';
 import { Pool } from 'pg';
-import { Kysely, PostgresDialect } from 'kysely';
+import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -85,15 +85,15 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
       expect((await migrator.migrateDown()).error).toBeUndefined();
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
-      await db
-        .insertInto('auth.users')
-        .values({
-          email: credentials.email,
-          full_name: 'Auth Test',
-          contact_number: 'test-account',
-          hashed_password: await hashPassword(credentials.password),
-        })
-        .execute();
+      await sql`
+        INSERT INTO auth.users (email, full_name, contact_number, hashed_password)
+        VALUES (
+          ${credentials.email},
+          'Auth Test',
+          'test-account',
+          ${await hashPassword(credentials.password)}
+        )
+      `.execute(db);
       for (const connection of [db, db2]) {
         const module = await Test.createTestingModule({
           controllers: [AuthController],
