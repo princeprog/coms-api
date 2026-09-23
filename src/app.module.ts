@@ -13,6 +13,7 @@ import { StockItemsModule } from './modules/stock-items/stock-items.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { SupplierReceiptsModule } from './modules/supplier-receipts/supplier-receipts.module';
+import { StockRequestsModule } from './modules/stock-requests/stock-requests.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -34,6 +35,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     ProductsModule,
     InventoryModule,
     SupplierReceiptsModule,
+    StockRequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
