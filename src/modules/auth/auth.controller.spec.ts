@@ -1,111 +1,51 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { AuthController } from './auth.controller';
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
+  TOKEN_COOKIE_OPTIONS,
 } from '../../common/constants/auth.constants';
-import { AuthController } from './auth.controller';
-
 vi.mock('../../database/database.module', () => ({
   DATABASE: Symbol('DATABASE'),
 }));
-
-process.env.JWT_ACCESS_SECRET = 'a'.repeat(64);
-process.env.JWT_REFRESH_SECRET = 'b'.repeat(64);
-process.env.JWT_ACCESS_EXPIRES_IN = '15m';
-process.env.JWT_REFRESH_EXPIRES_IN = '30d';
-
-describe('AuthController', () => {
-  let controller: AuthController;
-  let authService: Record<string, ReturnType<typeof vi.fn>>;
-  let rateLimiter: { assertAllowed: ReturnType<typeof vi.fn> };
-
-  beforeEach(() => {
-    authService = {
-      register: vi
-        .fn()
-        .mockResolvedValue({
-          tokens: {
-            accessToken: 'register-access',
-            refreshToken: 'register-refresh',
-          },
-          user: { id: '1', email: 'alice@example.com' },
-        }),
-      login: vi
-        .fn()
-        .mockResolvedValue({
-          tokens: {
-            accessToken: 'login-access',
-            refreshToken: 'login-refresh',
-          },
-          user: { id: '1', email: 'alice@example.com' },
-        }),
-      refresh: vi
-        .fn()
-        .mockResolvedValue({
-          tokens: { accessToken: 'new-access', refreshToken: 'new-refresh' },
-          user: { id: '1', email: 'alice@example.com' },
-        }),
-      logout: vi.fn().mockResolvedValue(undefined),
+describe('auth cookies', () => {
+  it('uses actual token expiry for rotated refresh cookies', async () => {
+    const expiry = new Date(Date.now() + 60000);
+    const service = {
+      refresh: vi.fn().mockResolvedValue({
+        user: { id: 'test' },
+        tokens: {
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          accessExpiresAt: expiry,
+          refreshExpiresAt: expiry,
+        },
+      }),
     };
-    rateLimiter = { assertAllowed: vi.fn() };
-    controller = new AuthController(authService as never, rateLimiter as never);
-  });
-
-  it('sets both HttpOnly auth cookies after login', async () => {
     const response = { cookie: vi.fn(), header: vi.fn() };
-    await controller.login(
-      { email: 'alice@example.com', password: 'password' },
-      { ip: '127.0.0.1' } as never,
+    await new AuthController(service as never, {} as never).refresh(
+      { cookies: { [REFRESH_COOKIE]: 'old' } } as never,
       response as never,
-    );
-    expect(response.cookie).toHaveBeenCalledWith(
-      ACCESS_COOKIE,
-      'login-access',
-      expect.objectContaining({ httpOnly: true, maxAge: 900000 }),
     );
     expect(response.cookie).toHaveBeenCalledWith(
       REFRESH_COOKIE,
-      'login-refresh',
-      expect.objectContaining({ httpOnly: true }),
+      'refresh',
+      expect.objectContaining({ ...TOKEN_COOKIE_OPTIONS, expires: expiry }),
     );
+    expect(response.cookie.mock.calls[1][2]).not.toHaveProperty('maxAge');
   });
-
-  it('rotates both cookies on refresh', async () => {
+  it('expires both cookies with all issuance attributes', async () => {
+    const service = { logout: vi.fn() };
     const response = { cookie: vi.fn(), header: vi.fn() };
-    await controller.refresh(
-      {
-        ip: '127.0.0.1',
-        cookies: { [REFRESH_COOKIE]: 'old-refresh' },
-      } as never,
+    await new AuthController(service as never, {} as never).logout(
+      { cookies: {} } as never,
       response as never,
     );
-    expect(authService.refresh).toHaveBeenCalledWith('old-refresh');
-    expect(response.cookie).toHaveBeenCalledWith(
-      ACCESS_COOKIE,
-      'new-access',
-      expect.any(Object),
-    );
-    expect(response.cookie).toHaveBeenCalledWith(
-      REFRESH_COOKIE,
-      'new-refresh',
-      expect.any(Object),
-    );
-  });
-
-  it('revokes the family and clears both cookies on logout', async () => {
-    const response = { clearCookie: vi.fn(), header: vi.fn() };
-    await controller.logout(
-      {
-        cookies: { [ACCESS_COOKIE]: 'access', [REFRESH_COOKIE]: 'refresh' },
-      } as never,
-      response as never,
-    );
-    expect(authService.logout).toHaveBeenCalledWith('access', 'refresh');
-    expect(response.clearCookie).toHaveBeenCalledWith(ACCESS_COOKIE, {
-      path: '/',
-    });
-    expect(response.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE, {
-      path: '/',
-    });
+    for (const name of [ACCESS_COOKIE, REFRESH_COOKIE])
+      expect(response.cookie).toHaveBeenCalledWith(name, '', {
+        ...TOKEN_COOKIE_OPTIONS,
+        maxAge: 0,
+        expires: new Date(0),
+      });
   });
 });

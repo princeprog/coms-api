@@ -12,6 +12,24 @@ export type Generated<T> =
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AuthRateLimitBuckets {
+  count: number;
+  key_hash: string;
+  reset_at: Timestamp;
+  scope: string;
+}
+
+export interface AuthRefreshTokens {
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  family_id: string;
+  id: Generated<string>;
+  replaced_by_id: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+}
+
 export interface AuthSessions {
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
@@ -29,17 +47,6 @@ export interface AuthTokenFamilies {
   user_id: string;
 }
 
-export interface AuthRefreshTokens {
-  consumed_at: Timestamp | null;
-  created_at: Generated<Timestamp>;
-  expires_at: Timestamp;
-  family_id: string;
-  id: Generated<string>;
-  replaced_by_id: string | null;
-  revoked_at: Timestamp | null;
-  token_hash: string;
-}
-
 export interface AuthUsers {
   contact_number: string;
   created_at: Generated<Timestamp>;
@@ -51,6 +58,7 @@ export interface AuthUsers {
 }
 
 export interface DB {
+  'auth.rate_limit_buckets': AuthRateLimitBuckets;
   'auth.refresh_tokens': AuthRefreshTokens;
   'auth.sessions': AuthSessions;
   'auth.token_families': AuthTokenFamilies;

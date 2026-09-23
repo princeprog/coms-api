@@ -8,6 +8,11 @@ export const REFRESH_TOKEN_TYPE = 'refresh';
 export type AuthConfig = {
   accessSecret: string;
   refreshSecret: string;
+  gatewaySecret: string;
+  webOrigin: string;
+  loginLimit: number;
+  refreshLimit: number;
+  capacityLimit: number;
   accessExpiresIn: string;
   refreshExpiresIn: string;
   accessTtlSeconds: number;
@@ -39,24 +44,57 @@ function parseDuration(value: string, name: string): number {
 
 function requiredSecret(name: string): string {
   const value = process.env[name]?.trim();
-  if (!value || Buffer.byteLength(value, 'utf8') < 32) {
-    throw new BadRequestException(`${name} must contain at least 32 bytes`);
+  if (
+    !value ||
+    !/^[a-fA-F0-9]{64}$/.test(value) ||
+    /^(.{1,16})\1+$/i.test(value) ||
+    new Set(value.toLowerCase()).size < 8
+  ) {
+    throw new BadRequestException(
+      `${name} must be 64 hexadecimal characters without obvious repeated patterns`,
+    );
   }
 
+  return value.toLowerCase();
+}
+
+function positiveLimit(name: string, fallback: number): number {
+  const raw = process.env[name] ?? String(fallback);
+  const value = Number(raw);
+  if (
+    !/^[1-9]\d*$/.test(raw) ||
+    !Number.isSafeInteger(value) ||
+    value > 1_000_000
+  ) {
+    throw new BadRequestException(
+      `${name} must be a positive integer at most 1000000`,
+    );
+  }
   return value;
 }
 
 export function getAuthConfig(): AuthConfig {
   const accessSecret = requiredSecret('JWT_ACCESS_SECRET');
   const refreshSecret = requiredSecret('JWT_REFRESH_SECRET');
+  const gatewaySecret = requiredSecret('COMS_AUTH_GATEWAY_SECRET');
 
-  if (accessSecret === refreshSecret) {
+  if (new Set([accessSecret, refreshSecret, gatewaySecret]).size !== 3) {
     throw new BadRequestException(
-      'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
+      'Access, refresh, and gateway secrets must be different',
     );
   }
 
   const accessExpiresIn = process.env.JWT_ACCESS_EXPIRES_IN?.trim() ?? '';
+  const webOrigin = process.env.WEB_ORIGIN ?? '';
+  try {
+    const url = new URL(webOrigin);
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== webOrigin)
+      throw new Error();
+  } catch {
+    throw new BadRequestException(
+      'WEB_ORIGIN must be an exact http(s) origin without a path',
+    );
+  }
   const refreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN?.trim() ?? '';
   const accessTtlSeconds = parseDuration(
     accessExpiresIn,
@@ -76,6 +114,11 @@ export function getAuthConfig(): AuthConfig {
   return {
     accessSecret,
     refreshSecret,
+    gatewaySecret,
+    webOrigin,
+    loginLimit: positiveLimit('AUTH_LOGIN_LIMIT_PER_MINUTE', 10),
+    refreshLimit: positiveLimit('AUTH_REFRESH_LIMIT_PER_MINUTE', 20),
+    capacityLimit: positiveLimit('AUTH_CAPACITY_LIMIT_PER_MINUTE', 600),
     accessExpiresIn,
     refreshExpiresIn,
     accessTtlSeconds,

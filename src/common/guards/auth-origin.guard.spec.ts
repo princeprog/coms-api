@@ -1,25 +1,45 @@
-import { ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { AuthOriginGuard } from './auth-origin.guard';
-
-function context(origin?: string) {
+import { AuthGatewayGuard } from './auth-gateway.guard';
+function context(headers: Record<string, unknown>) {
   return {
-    switchToHttp: () => ({
-      getRequest: () => ({ headers: { origin } }),
-    }),
-  } as unknown as ExecutionContext;
+    switchToHttp: () => ({ getRequest: () => ({ headers }) }),
+  } as ExecutionContext;
 }
-
-describe('AuthOriginGuard', () => {
-  it('allows requests without an origin', () => {
-    expect(new AuthOriginGuard().canActivate(context())).toBe(true);
+describe('auth gateway and origin guards', () => {
+  it.each([undefined, 'https://attacker.example', 'http://localhost:3000/'])(
+    'rejects missing/mismatched origin %s',
+    (origin) => {
+      expect(() =>
+        new AuthOriginGuard().canActivate(context({ origin })),
+      ).toThrow('Origin is not allowed');
+    },
+  );
+  it('accepts exact origin', () => {
+    expect(
+      new AuthOriginGuard().canActivate(
+        context({ origin: process.env.WEB_ORIGIN }),
+      ),
+    ).toBe(true);
   });
-
-  it('rejects an origin outside the configured web origin', () => {
-    process.env.WEB_ORIGIN = 'http://localhost:3000';
-
-    expect(() =>
-      new AuthOriginGuard().canActivate(context('https://attacker.example')),
-    ).toThrow('Origin is not allowed');
+  it.each([undefined, 'wrong', ['bad'], 'a'.repeat(64)])(
+    'rejects invalid gateway credential',
+    (value) => {
+      expect(() =>
+        new AuthGatewayGuard().canActivate(
+          context({ 'x-coms-auth-gateway': value }),
+        ),
+      ).toThrow('Authentication gateway required');
+    },
+  );
+  it('accepts the server credential', () => {
+    expect(
+      new AuthGatewayGuard().canActivate(
+        context({
+          'x-coms-auth-gateway': process.env.COMS_AUTH_GATEWAY_SECRET,
+        }),
+      ),
+    ).toBe(true);
   });
 });

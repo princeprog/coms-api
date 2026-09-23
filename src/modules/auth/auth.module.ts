@@ -8,6 +8,10 @@ import { DatabaseModule } from '../../database/database.module';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
+import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
+import { AuthRateLimitRepository } from './auth-rate-limit.repository';
+import { AuthRepository } from './auth.repository';
 
 @Module({
   imports: [
@@ -27,7 +31,16 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard, AuthOriginGuard, AuthRateLimitService],
+  providers: [
+    AuthService,
+    AuthRepository,
+    AuthGuard,
+    AuthOriginGuard,
+    AuthGatewayGuard,
+    AuthCapacityGuard,
+    AuthRateLimitRepository,
+    AuthRateLimitService,
+  ],
   exports: [AuthService, AuthGuard],
 })
 export class AuthModule {}

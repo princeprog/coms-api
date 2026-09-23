@@ -1,24 +1,20 @@
-import {
-  ConflictException,
-  Inject,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'node:crypto';
-import type { Kysely, Selectable, Transaction } from 'kysely';
+import type { Selectable, Transaction } from 'kysely';
 import * as argon2 from 'argon2';
-
-import type { AuthTokenFamilies, AuthUsers, DB } from '../../database/db';
-import { DATABASE } from '../../database/database.module';
+import type { AuthTokenFamilies, DB } from '../../database/db';
 import {
   ACCESS_TOKEN_TYPE,
   getAuthConfig,
   REFRESH_TOKEN_TYPE,
 } from '../../config/auth.config';
+import { recordAuthEvent } from '../../common/utils/auth-events';
 import type { LoginDto } from './dto/login.dto';
-import type { RegisterDto } from './dto/register.dto';
-import { hashPassword, PASSWORD_HASH_OPTIONS } from './password-hashing';
+import { PASSWORD_HASH_OPTIONS } from './password-hashing';
+import { AuthRepository } from './auth.repository';
+import { AuthRateLimitRepository } from './auth-rate-limit.repository';
+import { AuthRateLimitException } from './auth-rate-limit.service';
 
 export type PublicUser = {
   id: string;
@@ -26,39 +22,32 @@ export type PublicUser = {
   full_name: string;
   contact_number: string;
 };
-
-type UserIdentity = Pick<
-  Selectable<AuthUsers>,
-  'id' | 'email' | 'full_name' | 'contact_number'
->;
-
 export type TokenClaims = {
   sub: string;
-  type: typeof ACCESS_TOKEN_TYPE | typeof REFRESH_TOKEN_TYPE;
+  type: 'access' | 'refresh';
   familyId: string;
   jti: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string | string[];
+  iat: number;
+  exp: number;
+  iss: string;
+  aud: string;
 };
-
 export type TokenPair = {
   accessToken: string;
   refreshToken: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date;
 };
-
-export type AuthResult = {
-  user: PublicUser;
-  tokens: TokenPair;
-};
-
-type Family = Selectable<AuthTokenFamilies>;
-
+export type AuthResult = { user: PublicUser; tokens: TokenPair };
 type RefreshResult =
   | { kind: 'success'; result: AuthResult }
-  | { kind: 'replay' }
-  | { kind: 'invalid' };
+  | { kind: 'replay' | 'invalid' }
+  | { kind: 'limited'; retryAfterSeconds: number };
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function validUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value);
+}
 
 @Injectable()
 export class AuthService {
@@ -66,88 +55,30 @@ export class AuthService {
     'coms-dummy-password-value',
     PASSWORD_HASH_OPTIONS,
   );
-
   constructor(
-    @Inject(DATABASE)
-    private readonly db: Kysely<DB>,
+    private readonly repository: AuthRepository,
     private readonly jwtService: JwtService,
+    private readonly rateLimits: AuthRateLimitRepository,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResult> {
-    const email = dto.email.trim().toLowerCase();
-    const fullName = dto.fullName.trim();
-    const contactNumber = dto.contactNumber.trim();
-    const passwordHash = await hashPassword(dto.password);
-
-    try {
-      return await this.db.transaction().execute(async (trx) => {
-        const existingUser = await trx
-          .selectFrom('auth.users')
-          .select('id')
-          .where((expressionBuilder) =>
-            expressionBuilder.or([
-              expressionBuilder('email', '=', email),
-              expressionBuilder('contact_number', '=', contactNumber),
-            ]),
-          )
-          .executeTakeFirst();
-
-        if (existingUser) {
-          throw new ConflictException(
-            'Email or contact number is already registered',
-          );
-        }
-
-        const user = await trx
-          .insertInto('auth.users')
-          .values({
-            email,
-            full_name: fullName,
-            contact_number: contactNumber,
-            hashed_password: passwordHash,
-          })
-          .returning(['id', 'email', 'full_name', 'contact_number'])
-          .executeTakeFirstOrThrow();
-
-        const family = await this.createFamily(trx, user.id);
-        return {
-          user: this.toPublicUser(user),
-          tokens: await this.issueTokenPair(trx, user.id, family),
-        };
-      });
-    } catch (error) {
-      if (error instanceof ConflictException) {
-        throw error;
-      }
-      if (this.isUniqueViolation(error)) {
-        throw new ConflictException(
-          'Email or contact number is already registered',
-        );
-      }
-      throw error;
-    }
-  }
-
   async login(dto: LoginDto): Promise<AuthResult> {
-    const email = dto.email.trim().toLowerCase();
-    const user = await this.db
-      .selectFrom('auth.users')
-      .selectAll()
-      .where('email', '=', email)
-      .executeTakeFirst();
-
-    const passwordHash =
-      user?.hashed_password ?? (await this.dummyPasswordHashPromise);
-    const passwordMatches = await argon2.verify(passwordHash, dto.password);
-
-    if (!user || !passwordMatches) {
+    const user = await this.repository.findByEmail(
+      dto.email.trim().toLowerCase(),
+    );
+    const matches = await argon2.verify(
+      user?.hashed_password ?? (await this.dummyPasswordHashPromise),
+      dto.password,
+    );
+    if (!user || !matches)
       throw new UnauthorizedException('Invalid email or password');
-    }
-
-    return this.db.transaction().execute(async (trx) => {
-      const family = await this.createFamily(trx, user.id);
+    return this.repository.transaction(async (trx) => {
+      const family = await this.repository.createFamily(
+        trx,
+        user.id,
+        getAuthConfig().refreshTtlSeconds,
+      );
       return {
-        user: this.toPublicUser(user),
+        user: this.publicUser(user),
         tokens: await this.issueTokenPair(trx, user.id, family),
       };
     });
@@ -155,94 +86,68 @@ export class AuthService {
 
   async refresh(refreshToken: string | undefined): Promise<AuthResult> {
     const claims = await this.verifyToken(refreshToken, REFRESH_TOKEN_TYPE);
-    if (!claims) {
-      throw new UnauthorizedException('Authentication required');
-    }
-
-    const result = await this.db
-      .transaction()
-      .execute(async (trx): Promise<RefreshResult> => {
-        const token = await trx
-          .selectFrom('auth.refresh_tokens as token')
-          .innerJoin(
-            'auth.token_families as family',
-            'family.id',
-            'token.family_id',
-          )
-          .select([
-            'token.id',
-            'token.family_id',
-            'token.expires_at',
-            'token.consumed_at',
-            'token.revoked_at',
-            'family.user_id',
-            'family.expires_at as family_expires_at',
-            'family.revoked_at as family_revoked_at',
-          ])
-          .where('token.token_hash', '=', this.hashToken(claims.jti))
-          .forUpdate()
-          .executeTakeFirst();
-
-        if (
-          !token ||
-          token.family_id !== claims.familyId ||
-          token.user_id !== claims.sub
-        ) {
-          return { kind: 'invalid' };
-        }
-
-        const now = new Date();
-        if (
-          token.consumed_at ||
-          token.revoked_at ||
-          token.family_revoked_at ||
-          new Date(token.expires_at) <= now ||
-          new Date(token.family_expires_at) <= now
-        ) {
-          if (token.consumed_at) {
-            await this.revokeFamily(trx, token.family_id);
-            return { kind: 'replay' };
-          }
-          return { kind: 'invalid' };
-        }
-
-        const family = await trx
-          .selectFrom('auth.token_families')
-          .selectAll()
-          .where('id', '=', token.family_id)
-          .executeTakeFirstOrThrow();
-        const user = await this.findUser(trx, token.user_id);
-        if (!user) {
-          return { kind: 'invalid' };
-        }
-
-        const successor = await this.issueTokenPair(trx, user.id, family);
-        const successorClaims = await this.verifyToken(
-          successor.refreshToken,
-          REFRESH_TOKEN_TYPE,
+    if (!claims) throw new UnauthorizedException('Authentication required');
+    const result = await this.repository.transaction(
+      async (trx): Promise<RefreshResult> => {
+        // Every rotation locks the family first, including rotations of different descendants.
+        const family = await this.repository.findFamily(
+          claims.familyId,
+          trx,
+          true,
         );
-        if (!successorClaims) {
-          throw new UnauthorizedException('Unable to create refresh token');
+        const token = await this.repository.findRefresh(
+          trx,
+          this.hashToken(claims.jti),
+        );
+        if (
+          !family ||
+          !token ||
+          family.user_id !== claims.sub ||
+          token.family_id !== family.id
+        )
+          return { kind: 'invalid' };
+        // Replay must commit revocation even if the family has reached its refresh limit.
+        if (token.consumed_at) {
+          await this.repository.revokeFamily(family.id, trx);
+          return { kind: 'replay' };
         }
-
-        await trx
-          .updateTable('auth.refresh_tokens')
-          .set({ consumed_at: now, replaced_by_id: successorClaims.jti })
-          .where('id', '=', token.id)
-          .execute();
-
-        return {
-          kind: 'success',
-          result: { user: this.toPublicUser(user), tokens: successor },
-        };
-      });
-
+        if (
+          token.revoked_at ||
+          family.revoked_at ||
+          new Date(token.expires_at) <= new Date() ||
+          new Date(family.expires_at) <= new Date()
+        )
+          return { kind: 'invalid' };
+        const user = await this.repository.findUser(claims.sub, trx);
+        if (!user) return { kind: 'invalid' };
+        const decision = await this.rateLimits.consume(
+          'refresh',
+          family.id,
+          getAuthConfig().refreshLimit,
+          trx,
+          true,
+        );
+        if (!decision.allowed)
+          return {
+            kind: 'limited',
+            retryAfterSeconds: decision.retryAfterSeconds,
+          };
+        const tokens = await this.issueTokenPair(trx, user.id, family);
+        const successor = this.jwtService.decode<TokenClaims>(
+          tokens.refreshToken,
+        );
+        await this.repository.consumeRefresh(trx, token.id, successor.jti);
+        return { kind: 'success', result: { user, tokens } };
+      },
+    );
+    if (result.kind === 'limited')
+      throw new AuthRateLimitException(result.retryAfterSeconds);
     if (result.kind === 'replay') {
+      recordAuthEvent('refresh_replay', 401);
       throw new UnauthorizedException('Refresh token reuse detected');
     }
-    if (result.kind !== 'success') {
+    if (result.kind !== 'success')
       throw new UnauthorizedException('Authentication required');
-    }
     return result.result;
   }
 
@@ -250,123 +155,90 @@ export class AuthService {
     accessToken: string | undefined,
     refreshToken: string | undefined,
   ): Promise<void> {
-    const refreshClaims = await this.verifyToken(
-      refreshToken,
-      REFRESH_TOKEN_TYPE,
-    );
-    const accessClaims = refreshClaims
-      ? null
-      : await this.verifyToken(accessToken, ACCESS_TOKEN_TYPE);
-    const familyId = refreshClaims?.familyId ?? accessClaims?.familyId;
-    if (familyId) {
-      await this.revokeFamily(this.db, familyId);
-    }
+    const claims =
+      (await this.verifyToken(refreshToken, REFRESH_TOKEN_TYPE)) ??
+      (await this.verifyToken(accessToken, ACCESS_TOKEN_TYPE));
+    if (claims) await this.repository.revokeFamily(claims.familyId);
   }
 
   async authenticateAccess(
     accessToken: string | undefined,
   ): Promise<PublicUser | null> {
     const claims = await this.verifyToken(accessToken, ACCESS_TOKEN_TYPE);
-    if (!claims) {
-      return null;
-    }
-
-    const family = await this.db
-      .selectFrom('auth.token_families')
-      .select(['user_id', 'expires_at', 'revoked_at'])
-      .where('id', '=', claims.familyId)
-      .executeTakeFirst();
+    if (!claims) return null;
+    const family = await this.repository.findFamily(claims.familyId);
     if (
       !family ||
       family.user_id !== claims.sub ||
       family.revoked_at ||
       new Date(family.expires_at) <= new Date()
-    ) {
+    )
       return null;
-    }
-
-    const user = await this.findUser(this.db, claims.sub);
-    return user ? this.toPublicUser(user) : null;
-  }
-
-  private async createFamily(
-    db: Kysely<DB> | Transaction<DB>,
-    userId: string,
-  ): Promise<Family> {
-    const config = getAuthConfig();
-    return db
-      .insertInto('auth.token_families')
-      .values({
-        user_id: userId,
-        expires_at: new Date(Date.now() + config.refreshTtlSeconds * 1000),
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    return (await this.repository.findUser(claims.sub)) ?? null;
   }
 
   private async issueTokenPair(
-    db: Kysely<DB> | Transaction<DB>,
+    trx: Transaction<DB>,
     userId: string,
-    family: Family,
+    family: Selectable<AuthTokenFamilies>,
   ): Promise<TokenPair> {
     const config = getAuthConfig();
     const now = Math.floor(Date.now() / 1000);
     const familyExpires = Math.floor(
       new Date(family.expires_at).getTime() / 1000,
     );
-    const refreshTtl = Math.max(1, familyExpires - now);
-    const accessToken = await this.jwtService.signAsync(
-      {
-        sub: userId,
-        type: ACCESS_TOKEN_TYPE,
-        familyId: family.id,
-        jti: randomUUID(),
-      },
-      {
-        secret: config.accessSecret,
-        algorithm: 'HS256',
-        issuer: config.issuer,
-        audience: config.audience,
-        expiresIn: config.accessTtlSeconds,
-      },
-    );
+    if (familyExpires <= now)
+      throw new UnauthorizedException('Session expired');
+    const accessExpires = now + config.accessTtlSeconds;
     const refreshJti = randomUUID();
-    const refreshToken = await this.jwtService.signAsync(
-      {
-        sub: userId,
-        type: REFRESH_TOKEN_TYPE,
-        familyId: family.id,
-        jti: refreshJti,
-      },
-      {
-        secret: config.refreshSecret,
-        algorithm: 'HS256',
-        issuer: config.issuer,
-        audience: config.audience,
-        expiresIn: refreshTtl,
-      },
+    const sign = (
+      type: TokenClaims['type'],
+      jti: string,
+      exp: number,
+      secret: string,
+    ) =>
+      this.jwtService.signAsync(
+        { sub: userId, type, familyId: family.id, jti, iat: now, exp },
+        {
+          secret,
+          algorithm: 'HS256',
+          issuer: config.issuer,
+          audience: config.audience,
+        },
+      );
+    const accessToken = await sign(
+      ACCESS_TOKEN_TYPE,
+      randomUUID(),
+      accessExpires,
+      config.accessSecret,
     );
-
-    await db
-      .insertInto('auth.refresh_tokens')
-      .values({
-        id: refreshJti,
-        family_id: family.id,
-        token_hash: this.hashToken(refreshJti),
-        expires_at: new Date(Math.min(familyExpires, now + refreshTtl) * 1000),
-      })
-      .execute();
-
-    return { accessToken, refreshToken };
+    const refreshToken = await sign(
+      REFRESH_TOKEN_TYPE,
+      refreshJti,
+      familyExpires,
+      config.refreshSecret,
+    );
+    const refreshExpiresAt = new Date(familyExpires * 1000);
+    await this.repository.insertRefresh(
+      trx,
+      refreshJti,
+      family.id,
+      this.hashToken(refreshJti),
+      refreshExpiresAt,
+    );
+    return {
+      accessToken,
+      refreshToken,
+      accessExpiresAt: new Date(accessExpires * 1000),
+      refreshExpiresAt,
+    };
   }
 
   private async verifyToken(
     token: string | undefined,
     expectedType: TokenClaims['type'],
   ): Promise<TokenClaims | null> {
-    if (!token) {
-      return null;
-    }
+    if (!token) return null;
     const config = getAuthConfig();
     try {
       const claims = await this.jwtService.verifyAsync<TokenClaims>(token, {
@@ -379,62 +251,33 @@ export class AuthService {
         audience: config.audience,
       });
       if (
-        !claims.type ||
         claims.type !== expectedType ||
-        !claims.sub ||
-        !claims.familyId ||
-        !claims.jti
-      ) {
+        !validUuid(claims.sub) ||
+        !validUuid(claims.familyId) ||
+        !validUuid(claims.jti) ||
+        !Number.isSafeInteger(claims.exp) ||
+        !Number.isSafeInteger(claims.iat) ||
+        claims.exp <= claims.iat ||
+        claims.iat > Math.floor(Date.now() / 1000) ||
+        claims.iss !== config.issuer ||
+        claims.aud !== config.audience
+      )
         return null;
-      }
       return claims;
     } catch {
       return null;
     }
   }
 
-  private async findUser(
-    db: Kysely<DB> | Transaction<DB>,
-    userId: string,
-  ): Promise<UserIdentity | undefined> {
-    return db
-      .selectFrom('auth.users')
-      .select(['id', 'email', 'full_name', 'contact_number'])
-      .where('id', '=', userId)
-      .executeTakeFirst();
-  }
-
-  private async revokeFamily(
-    db: Kysely<DB> | Transaction<DB>,
-    familyId: string,
-  ): Promise<void> {
-    await db
-      .updateTable('auth.token_families')
-      .set({ revoked_at: new Date() })
-      .where('id', '=', familyId)
-      .where('revoked_at', 'is', null)
-      .execute();
-  }
-
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
-
-  private toPublicUser(user: UserIdentity): PublicUser {
+  private publicUser(user: PublicUser): PublicUser {
     return {
       id: user.id,
       email: user.email,
       full_name: user.full_name,
       contact_number: user.contact_number,
     };
-  }
-
-  private isUniqueViolation(error: unknown): boolean {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === '23505'
-    );
   }
 }

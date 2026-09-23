@@ -1,26 +1,43 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
+import { getAuthConfig } from '../../config/auth.config';
+import { recordAuthEvent } from '../../common/utils/auth-events';
+import {
+  AuthRateLimitRepository,
+  type RateDecision,
+} from './auth-rate-limit.repository';
 
-type Bucket = { count: number; resetAt: number };
-
+export class AuthRateLimitException extends HttpException {
+  constructor(public readonly retryAfterSeconds: number) {
+    super(
+      { message: 'Too many authentication attempts', retryAfterSeconds },
+      429,
+    );
+    recordAuthEvent('rate_limited', 429);
+  }
+}
 @Injectable()
 export class AuthRateLimitService {
-  private readonly buckets = new Map<string, Bucket>();
-
-  assertAllowed(scope: 'login' | 'refresh', key: string): void {
-    const limit = scope === 'login' ? 10 : 20;
-    const now = Date.now();
-    const bucketKey = `${scope}:${key}`;
-    const current = this.buckets.get(bucketKey);
-    if (!current || current.resetAt <= now) {
-      this.buckets.set(bucketKey, { count: 1, resetAt: now + 60_000 });
-      return;
-    }
-    current.count += 1;
-    if (current.count > limit) {
-      throw new HttpException(
-        'Too many authentication attempts',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+  constructor(private readonly repository: AuthRateLimitRepository) {}
+  async capacity(): Promise<void> {
+    const decision = await this.repository.consume(
+      'capacity',
+      'coms-auth',
+      getAuthConfig().capacityLimit,
+    );
+    this.assert(decision);
+    await this.repository.cleanup();
+  }
+  async login(email: string): Promise<void> {
+    this.assert(
+      await this.repository.consume(
+        'login',
+        email.trim().toLowerCase(),
+        getAuthConfig().loginLimit,
+      ),
+    );
+  }
+  private assert(decision: RateDecision): void {
+    if (!decision.allowed)
+      throw new AuthRateLimitException(decision.retryAfterSeconds);
   }
 }

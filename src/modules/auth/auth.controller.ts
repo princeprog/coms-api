@@ -7,10 +7,10 @@ import {
   Post,
   Req,
   Res,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -19,40 +19,31 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { AuthOriginGuard } from '../../common/guards/auth-origin.guard';
-import { getAuthConfig } from '../../config/auth.config';
+import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
+import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
+import { AuthExceptionFilter } from '../../common/filters/auth-exception.filter';
 import { AuthRateLimitService } from './auth-rate-limit.service';
-import { AuthService, type PublicUser } from './auth.service';
+import { AuthService, type PublicUser, type TokenPair } from './auth.service';
+
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 
 @Controller('auth')
+@UseGuards(AuthGatewayGuard)
+@UseFilters(AuthExceptionFilter)
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly rateLimiter: AuthRateLimitService,
   ) {}
 
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  @UseGuards(AuthOriginGuard)
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const result = await this.authService.register(dto);
-    this.setAuthCookies(response, result.tokens);
-    return { user: result.user };
-  }
-
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthOriginGuard)
+  @UseGuards(AuthOriginGuard, AuthCapacityGuard)
   async login(
     @Body() dto: LoginDto,
-    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    this.rateLimiter.assertAllowed('login', this.clientKey(request));
+    await this.rateLimiter.login(dto.email);
     const result = await this.authService.login(dto);
     this.setAuthCookies(response, result.tokens);
     return { user: result.user };
@@ -60,12 +51,11 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthOriginGuard)
+  @UseGuards(AuthOriginGuard, AuthCapacityGuard)
   async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    this.rateLimiter.assertAllowed('refresh', this.clientKey(request));
     const result = await this.authService.refresh(
       request.cookies?.[REFRESH_COOKIE],
     );
@@ -84,8 +74,13 @@ export class AuthController {
       request.cookies?.[ACCESS_COOKIE],
       request.cookies?.[REFRESH_COOKIE],
     );
-    response.clearCookie(ACCESS_COOKIE, { path: '/' });
-    response.clearCookie(REFRESH_COOKIE, { path: '/' });
+    for (const name of [ACCESS_COOKIE, REFRESH_COOKIE]) {
+      response.cookie(name, '', {
+        ...TOKEN_COOKIE_OPTIONS,
+        maxAge: 0,
+        expires: new Date(0),
+      });
+    }
     response.header('Cache-Control', 'no-store');
   }
 
@@ -99,23 +94,15 @@ export class AuthController {
     return { user };
   }
 
-  private setAuthCookies(
-    response: Response,
-    tokens: { accessToken: string; refreshToken: string },
-  ): void {
-    const config = getAuthConfig();
+  private setAuthCookies(response: Response, tokens: TokenPair): void {
     response.header('Cache-Control', 'no-store');
     response.cookie(ACCESS_COOKIE, tokens.accessToken, {
       ...TOKEN_COOKIE_OPTIONS,
-      maxAge: config.accessTtlSeconds * 1000,
+      expires: tokens.accessExpiresAt,
     });
     response.cookie(REFRESH_COOKIE, tokens.refreshToken, {
       ...TOKEN_COOKIE_OPTIONS,
-      maxAge: config.refreshTtlSeconds * 1000,
+      expires: tokens.refreshExpiresAt,
     });
-  }
-
-  private clientKey(request: Request): string {
-    return request.ip ?? request.socket.remoteAddress ?? 'unknown';
   }
 }

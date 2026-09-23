@@ -59,6 +59,10 @@ $ pnpm run test:cov
 
 ## Create an account
 
+See [Authentication operations](docs/authentication.md) for gateway configuration,
+token rotation, rate limits, isolated tests and rollout. Public registration is
+disabled; `POST /auth/register` returns 404.
+
 Use the account script after applying the database migrations. It prompts for
 the account details, validates them using the auth contract, and stores the
 password as an Argon2id hash. The password is never accepted as a command-line
