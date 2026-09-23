@@ -5,26 +5,19 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
-type MigrationModule = {
-  up(db: Kysely<any>): Promise<void>;
-  down(db: Kysely<any>): Promise<void>;
-};
-
-const migrationLoaders = import.meta.glob<MigrationModule>(
-  '../src/database/migrations/*.ts',
-);
+import * as initial from '../src/database/migrations/20260920174538_auth';
+import * as rotation from '../src/database/migrations/20260921120000_auth_token_rotation';
+import * as limits from '../src/database/migrations/20260922164052_auth_rate_limits';
+import * as accessControl from '../src/database/migrations/20260923214210_access_control';
+import * as catalogs from '../src/database/migrations/20260924004212_operational_catalogs';
+import * as inventory from '../src/database/migrations/20260924012454_inventory_ledger';
+import * as supplierReceipts from '../src/database/migrations/20260924014633_supplier_receipts';
+import * as stockRequests from '../src/database/migrations/20260924033004_stock_requests';
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
   'stock requests migration',
   () => {
     const databaseName = `coms_stock_requests_test_${randomUUID().replaceAll('-', '')}`;
-    const migrationNames = Object.keys(migrationLoaders).map((file) =>
-      file.split('/').at(-1)!.replace(/\.ts$/, ''),
-    );
-    const hasStockRequestsMigration = migrationNames.some((name) =>
-      name.endsWith('_stock_requests'),
-    );
     let admin: Pool | undefined;
     let testDb: Kysely<any> | undefined;
     let migrator: Migrator | undefined;
@@ -46,14 +39,16 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         }),
       });
 
-      const migrations = Object.fromEntries(
-        await Promise.all(
-          Object.entries(migrationLoaders).map(async ([file, load]) => [
-            file.split('/').at(-1)!.replace(/\.ts$/, ''),
-            await load(),
-          ]),
-        ),
-      );
+      const migrations = {
+        '20260920174538_auth': initial,
+        '20260921120000_auth_token_rotation': rotation,
+        '20260922164052_auth_rate_limits': limits,
+        '20260923214210_access_control': accessControl,
+        '20260924004212_operational_catalogs': catalogs,
+        '20260924012454_inventory_ledger': inventory,
+        '20260924014633_supplier_receipts': supplierReceipts,
+        '20260924033004_stock_requests': stockRequests,
+      };
       migrator = new Migrator({
         db: testDb,
         provider: { getMigrations: async () => migrations },
@@ -221,24 +216,21 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       ).rejects.toHaveProperty('code', '23514');
     });
 
-    it.skipIf(!hasStockRequestsMigration)(
-      'rolls back its request schema without removing existing operations data',
-      async () => {
-        expect((await migrator!.migrateDown()).error).toBeUndefined();
-        const remainingSchema = await sql
-          .raw(
-            "SELECT to_regclass('public.stock_requests')::text AS stock_requests, to_regclass('public.stock_request_items')::text AS stock_request_items, to_regclass('public.stock_request_events')::text AS stock_request_events, to_regclass('public.inventory_movements')::text AS inventory_movements, to_regclass('public.supplier_receipts')::text AS supplier_receipts, to_regclass('public.branches')::text AS branches",
-          )
-          .execute(testDb!);
-        expect(remainingSchema.rows[0]).toEqual({
-          stock_requests: null,
-          stock_request_items: null,
-          stock_request_events: null,
-          inventory_movements: 'inventory_movements',
-          supplier_receipts: 'supplier_receipts',
-          branches: 'branches',
-        });
-      },
-    );
+    it('rolls back its request schema without removing existing operations data', async () => {
+      expect((await migrator!.migrateDown()).error).toBeUndefined();
+      const remainingSchema = await sql
+        .raw(
+          "SELECT to_regclass('public.stock_requests')::text AS stock_requests, to_regclass('public.stock_request_items')::text AS stock_request_items, to_regclass('public.stock_request_events')::text AS stock_request_events, to_regclass('public.inventory_movements')::text AS inventory_movements, to_regclass('public.supplier_receipts')::text AS supplier_receipts, to_regclass('public.branches')::text AS branches",
+        )
+        .execute(testDb!);
+      expect(remainingSchema.rows[0]).toEqual({
+        stock_requests: null,
+        stock_request_items: null,
+        stock_request_events: null,
+        inventory_movements: 'inventory_movements',
+        supplier_receipts: 'supplier_receipts',
+        branches: 'branches',
+      });
+    });
   },
 );
