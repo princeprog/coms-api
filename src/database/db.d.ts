@@ -11,6 +11,8 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
+export type Numeric = ColumnType<string, number | string, number | string>;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface AuthBranchUsers {
@@ -102,6 +104,32 @@ export interface Branches {
   updated_at: Generated<Timestamp>;
 }
 
+export interface BranchInventory {
+  branch_id: string;
+  quantity_on_hand: Generated<Numeric>;
+  stock_item_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface CommissaryInventory {
+  quantity_on_hand: Generated<Numeric>;
+  stock_item_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface InventoryMovements {
+  actor_user_id: string;
+  branch_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key: string | null;
+  inventory_scope: string;
+  movement_type: string;
+  quantity_delta: Numeric;
+  reason: string | null;
+  stock_item_id: string;
+}
+
 export interface Products {
   created_at: Generated<Timestamp>;
   description: string | null;
@@ -143,7 +171,10 @@ export interface DB {
   "auth.sessions": AuthSessions;
   "auth.token_families": AuthTokenFamilies;
   "auth.users": AuthUsers;
+  branch_inventory: BranchInventory;
   branches: Branches;
+  commissary_inventory: CommissaryInventory;
+  inventory_movements: InventoryMovements;
   products: Products;
   stock_items: StockItems;
   suppliers: Suppliers;
