@@ -128,6 +128,7 @@ export interface InventoryMovements {
   quantity_delta: Numeric;
   reason: string | null;
   stock_item_id: string;
+  supplier_receipt_item_id: string | null;
 }
 
 export interface Products {
@@ -146,6 +147,28 @@ export interface StockItems {
   is_active: Generated<boolean>;
   stock_item_name: string;
   unit: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface SupplierReceiptItems {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  quantity_received: Numeric;
+  stock_item_id: string;
+  supplier_receipt_id: string;
+  unit_cost: Numeric;
+}
+
+export interface SupplierReceipts {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  posted_at: Timestamp | null;
+  posted_by_user_id: string | null;
+  received_at: Timestamp;
+  status: Generated<string>;
+  supplier_id: string;
   updated_at: Generated<Timestamp>;
 }
 
@@ -177,5 +200,7 @@ export interface DB {
   inventory_movements: InventoryMovements;
   products: Products;
   stock_items: StockItems;
+  supplier_receipt_items: SupplierReceiptItems;
+  supplier_receipts: SupplierReceipts;
   suppliers: Suppliers;
 }
