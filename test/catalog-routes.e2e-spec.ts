@@ -15,7 +15,9 @@ import { AppModule } from '../src/app.module';
 
 describe('catalog routes (e2e)', () => {
   const supplierName = `TDD supplier ${randomUUID()}`;
+  const stockItemName = `TDD stock item ${randomUUID()}`;
   let supplierId: string | undefined;
+  let stockItemId: string | undefined;
   let guardedApp: INestApplication<App>;
   let validationApp: INestApplication<App>;
 
@@ -55,6 +57,13 @@ describe('catalog routes (e2e)', () => {
         .where('id', '=', supplierId)
         .execute();
     }
+    if (stockItemId) {
+      await validationApp
+        .get<Kysely<DB>>(DATABASE)
+        .deleteFrom('stock_items')
+        .where('id', '=', stockItemId)
+        .execute();
+    }
     await Promise.all([guardedApp.close(), validationApp.close()]);
   });
 
@@ -74,6 +83,23 @@ describe('catalog routes (e2e)', () => {
     {
       method: 'POST',
       path: '/suppliers/00000000-0000-4000-8000-000000000001/deactivate',
+      requestMethod: 'post',
+    },
+    { method: 'GET', path: '/stock-items', requestMethod: 'get' },
+    {
+      method: 'GET',
+      path: '/stock-items/00000000-0000-4000-8000-000000000001',
+      requestMethod: 'get',
+    },
+    { method: 'POST', path: '/stock-items', requestMethod: 'post' },
+    {
+      method: 'PATCH',
+      path: '/stock-items/00000000-0000-4000-8000-000000000001',
+      requestMethod: 'patch',
+    },
+    {
+      method: 'POST',
+      path: '/stock-items/00000000-0000-4000-8000-000000000001/deactivate',
       requestMethod: 'post',
     },
   ])('$method $path requires the authentication gateway', async (route) => {
@@ -124,6 +150,51 @@ describe('catalog routes (e2e)', () => {
   it('rejects invalid supplier pagination', async () => {
     const response = await request(validationApp.getHttpServer()).get(
       '/suppliers?page=0',
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects blank stock-item fields', async () => {
+    const response = await request(validationApp.getHttpServer())
+      .post('/stock-items')
+      .send({ stock_item_name: '   ', category: ' ', unit: ' ' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects unknown stock-item fields', async () => {
+    const response = await request(validationApp.getHttpServer())
+      .post('/stock-items')
+      .send({
+        stock_item_name: 'Chicken breast',
+        category: 'Poultry',
+        unit: 'kg',
+        unexpected: true,
+      });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects an empty stock-item update', async () => {
+    const response = await request(validationApp.getHttpServer())
+      .patch('/stock-items/00000000-0000-4000-8000-000000000001')
+      .send({});
+
+    expect(response.status).toBe(400);
+  });
+
+  it('validates stock-item identifiers before loading a record', async () => {
+    const response = await request(validationApp.getHttpServer()).get(
+      '/stock-items/not-a-uuid',
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid stock-item pagination', async () => {
+    const response = await request(validationApp.getHttpServer()).get(
+      '/stock-items?page=0',
     );
 
     expect(response.status).toBe(400);
@@ -193,6 +264,67 @@ describe('catalog routes (e2e)', () => {
     );
     expect(inactive.body.items).toContainEqual(
       expect.objectContaining({ id: supplierId, is_active: false }),
+    );
+  });
+
+  it('creates, searches, updates, and deactivates a stock item', async () => {
+    const created = await request(validationApp.getHttpServer())
+      .post('/stock-items')
+      .send({
+        stock_item_name: ` ${stockItemName} `,
+        category: ' Poultry ',
+        unit: ' kg ',
+      });
+
+    expect(created.status).toBe(201);
+    stockItemId = created.body.id;
+    expect(created.body).toMatchObject({
+      stock_item_name: stockItemName,
+      category: 'Poultry',
+      unit: 'kg',
+      is_active: true,
+    });
+
+    const listed = await request(validationApp.getHttpServer()).get(
+      `/stock-items?search=${encodeURIComponent(stockItemName)}&is_active=true&page=1&page_size=10`,
+    );
+    expect(listed.status).toBe(200);
+    expect(listed.body.total).toBe(1);
+    expect(listed.body.items[0].id).toBe(stockItemId);
+
+    const detail = await request(validationApp.getHttpServer()).get(
+      `/stock-items/${stockItemId}`,
+    );
+    expect(detail.status).toBe(200);
+    expect(detail.body.id).toBe(stockItemId);
+
+    const updated = await request(validationApp.getHttpServer())
+      .patch(`/stock-items/${stockItemId}`)
+      .send({ unit: 'g' });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({
+      stock_item_name: stockItemName,
+      category: 'Poultry',
+      unit: 'g',
+    });
+
+    const deactivated = await request(validationApp.getHttpServer()).post(
+      `/stock-items/${stockItemId}/deactivate`,
+    );
+    expect(deactivated.status).toBe(201);
+    expect(deactivated.body.is_active).toBe(false);
+
+    const active = await request(validationApp.getHttpServer()).get(
+      '/stock-items?is_active=true',
+    );
+    expect(active.body.items).not.toContainEqual(
+      expect.objectContaining({ id: stockItemId }),
+    );
+    const inactive = await request(validationApp.getHttpServer()).get(
+      `/stock-items?is_active=false&search=${encodeURIComponent(stockItemName)}`,
+    );
+    expect(inactive.body.items).toContainEqual(
+      expect.objectContaining({ id: stockItemId, is_active: false }),
     );
   });
 });
