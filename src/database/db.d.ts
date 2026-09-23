@@ -111,6 +111,15 @@ export interface BranchInventory {
   updated_at: Generated<Timestamp>;
 }
 
+export interface BranchProducts {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  is_available: Generated<boolean>;
+  price: Numeric;
+  product_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface CommissaryInventory {
   quantity_on_hand: Generated<Numeric>;
   stock_item_id: string;
@@ -196,6 +205,14 @@ export interface InventoryMovements {
   reason: string | null;
   stock_item_id: string;
   supplier_receipt_item_id: string | null;
+}
+
+export interface ProductIngredients {
+  created_at: Generated<Timestamp>;
+  product_id: string;
+  quantity_required: Numeric;
+  stock_item_id: string;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface Products {
@@ -288,6 +305,7 @@ export interface DB {
   "auth.token_families": AuthTokenFamilies;
   "auth.users": AuthUsers;
   branch_inventory: BranchInventory;
+  branch_products: BranchProducts;
   branches: Branches;
   commissary_inventory: CommissaryInventory;
   dispatch_events: DispatchEvents;
@@ -298,6 +316,7 @@ export interface DB {
   dispatch_shortage_closures: DispatchShortageClosures;
   dispatches: Dispatches;
   inventory_movements: InventoryMovements;
+  product_ingredients: ProductIngredients;
   products: Products;
   stock_items: StockItems;
   stock_request_events: StockRequestEvents;
