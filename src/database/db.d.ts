@@ -117,10 +117,77 @@ export interface CommissaryInventory {
   updated_at: Generated<Timestamp>;
 }
 
+export interface Dispatches {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  dispatched_at: Timestamp | null;
+  dispatched_by_user_id: string | null;
+  id: Generated<string>;
+  idempotency_key: string;
+  status: Generated<string>;
+  stock_request_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface DispatchEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  dispatch_id: string;
+  dispatch_receipt_id: string | null;
+  event_type: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  shortage_closure_id: string | null;
+}
+
+export interface DispatchItems {
+  created_at: Generated<Timestamp>;
+  dispatch_id: string;
+  id: Generated<string>;
+  quantity_dispatched: Numeric;
+  stock_request_item_id: string;
+}
+
+export interface DispatchReceiptItems {
+  created_at: Generated<Timestamp>;
+  dispatch_item_id: string;
+  dispatch_receipt_id: string;
+  id: Generated<string>;
+  quantity_received: Numeric;
+}
+
+export interface DispatchReceipts {
+  created_at: Generated<Timestamp>;
+  dispatch_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  received_by_user_id: string;
+}
+
+export interface DispatchShortageClosureItems {
+  created_at: Generated<Timestamp>;
+  dispatch_item_id: string;
+  id: Generated<string>;
+  quantity_closed: Numeric;
+  shortage_closure_id: string;
+}
+
+export interface DispatchShortageClosures {
+  closed_by_user_id: string;
+  created_at: Generated<Timestamp>;
+  dispatch_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  reason: string;
+}
+
 export interface InventoryMovements {
   actor_user_id: string;
   branch_id: string | null;
   created_at: Generated<Timestamp>;
+  dispatch_item_id: string | null;
+  dispatch_receipt_item_id: string | null;
   id: Generated<string>;
   idempotency_key: string | null;
   inventory_scope: string;
@@ -223,6 +290,13 @@ export interface DB {
   branch_inventory: BranchInventory;
   branches: Branches;
   commissary_inventory: CommissaryInventory;
+  dispatch_events: DispatchEvents;
+  dispatch_items: DispatchItems;
+  dispatch_receipt_items: DispatchReceiptItems;
+  dispatch_receipts: DispatchReceipts;
+  dispatch_shortage_closure_items: DispatchShortageClosureItems;
+  dispatch_shortage_closures: DispatchShortageClosures;
+  dispatches: Dispatches;
   inventory_movements: InventoryMovements;
   products: Products;
   stock_items: StockItems;
