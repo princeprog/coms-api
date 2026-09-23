@@ -203,6 +203,8 @@ export interface InventoryMovements {
   movement_type: string;
   quantity_delta: Numeric;
   reason: string | null;
+  reversal_of_movement_id: string | null;
+  sale_item_consumption_id: string | null;
   stock_item_id: string;
   supplier_receipt_item_id: string | null;
 }
@@ -222,6 +224,46 @@ export interface Products {
   is_active: Generated<boolean>;
   product_name: string;
   updated_at: Generated<Timestamp>;
+}
+
+export interface SaleEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  event_type: string;
+  id: Generated<string>;
+  idempotency_key: string | null;
+  reason: string | null;
+  sale_id: string;
+}
+
+export interface SaleItemConsumptions {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  quantity_consumed: Numeric;
+  sale_item_id: string;
+  stock_item_id: string;
+}
+
+export interface SaleItems {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  line_total: Numeric;
+  product_id: string;
+  product_name_snapshot: string;
+  quantity: Numeric;
+  sale_id: string;
+  unit_price: Numeric;
+}
+
+export interface Sales {
+  branch_id: string;
+  cashier_user_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key: string;
+  status: string;
+  tender_method: string;
+  total_amount: Numeric;
 }
 
 export interface StockItems {
@@ -318,6 +360,10 @@ export interface DB {
   inventory_movements: InventoryMovements;
   product_ingredients: ProductIngredients;
   products: Products;
+  sale_events: SaleEvents;
+  sale_item_consumptions: SaleItemConsumptions;
+  sale_items: SaleItems;
+  sales: Sales;
   stock_items: StockItems;
   stock_request_events: StockRequestEvents;
   stock_request_items: StockRequestItems;
