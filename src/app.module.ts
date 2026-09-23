@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -24,6 +25,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     RolesModule,
     BranchesModule,
     StaffModule,
+    SuppliersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
