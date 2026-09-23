@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ExecutionContext,
   ForbiddenException,
   UnauthorizedException,
@@ -25,6 +26,9 @@ function executionContext(request: Record<string, unknown>): ExecutionContext {
 }
 
 describe('AccessControlGuard', () => {
+  const branchOne = '00000000-0000-4000-8000-000000000001';
+  const branchTwo = '00000000-0000-4000-8000-000000000002';
+
   it('adds the current role, grants, and branch assignments to the request', async () => {
     const context = {
       userId: 'user-1',
@@ -37,7 +41,7 @@ describe('AccessControlGuard', () => {
         isActive: true,
       },
       permissions: ['inventory.read'],
-      branchIds: ['branch-1'],
+      branchIds: [branchOne],
     };
     const service = { findAccessContext: vi.fn().mockResolvedValue(context) };
     const reflector = { getAllAndOverride: vi.fn().mockReturnValue(undefined) };
@@ -84,7 +88,7 @@ describe('AccessControlGuard', () => {
         accountActive: true,
         role: { code: 'MANAGER', isSystem: false, isActive: true },
         permissions: [],
-        branchIds: ['branch-1'],
+        branchIds: [branchOne],
       }),
     };
     const reflector = {
@@ -98,7 +102,7 @@ describe('AccessControlGuard', () => {
     };
     const request = {
       user: { id: 'user-1' },
-      params: { branchId: 'branch-2' },
+      params: { branchId: branchTwo },
     };
     const guard = new AccessControlGuard(service as never, reflector as never);
     await expect(
@@ -106,8 +110,8 @@ describe('AccessControlGuard', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
     const mismatchedRequest = {
       user: { id: 'user-1' },
-      params: { branchId: 'branch-1' },
-      body: { branch_id: 'branch-2' },
+      params: { branchId: branchOne },
+      body: { branch_id: branchTwo },
     };
     await expect(
       guard.canActivate(executionContext(mismatchedRequest)),
@@ -142,7 +146,7 @@ describe('AccessControlGuard', () => {
       accountActive: true,
       role: { code: 'MANAGER', isSystem: false, isActive: true },
       permissions: ['staff.branch_assign'],
-      branchIds: ['branch-1'],
+      branchIds: [branchOne],
     };
     const service = { findAccessContext: vi.fn().mockResolvedValue(context) };
     const reflector = {
@@ -161,7 +165,7 @@ describe('AccessControlGuard', () => {
         executionContext({
           user: { id: 'user-1' },
           params: { userId: 'staff-2' },
-          body: { branch_ids: ['branch-1'] },
+          body: { branch_ids: [branchOne] },
         }),
       ),
     ).resolves.toBe(true);
@@ -170,7 +174,7 @@ describe('AccessControlGuard', () => {
         executionContext({
           user: { id: 'user-1' },
           params: { userId: 'staff-2' },
-          body: { branch_ids: ['branch-1', 'branch-2'] },
+          body: { branch_ids: [branchOne, branchTwo] },
         }),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -196,7 +200,7 @@ describe('AccessControlGuard', () => {
       guard.canActivate(
         executionContext({
           user: { id: 'user-1' },
-          query: { branch_id: 'branch-1' },
+          query: { branch_id: branchOne },
         }),
       ),
     ).resolves.toBe(true);
@@ -204,10 +208,40 @@ describe('AccessControlGuard', () => {
       guard.canActivate(
         executionContext({
           user: { id: 'user-1' },
-          query: { branch_id: 'branch-2' },
+          query: { branch_id: branchTwo },
         }),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects malformed branch identifiers as bad requests', async () => {
+    const service = {
+      findAccessContext: vi.fn().mockResolvedValue({
+        userId: 'user-1',
+        accountActive: true,
+        role: { code: 'MANAGER', isSystem: false, isActive: true },
+        permissions: ['branch_products.read'],
+        branchIds: [branchOne],
+      }),
+    };
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) =>
+        key === ACCESS_PERMISSION_KEY
+          ? 'branch_products.read'
+          : key === BRANCH_SCOPE_KEY
+            ? true
+            : undefined,
+      ),
+    };
+    const guard = new AccessControlGuard(service as never, reflector as never);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          params: { branchId: 'not-a-uuid' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('declares branch scope on staff reads and mutations', () => {

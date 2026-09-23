@@ -1,12 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
+  BadRequestException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
+import { isUUID } from 'class-validator';
 import type { PermissionKey } from '../../modules/access-control/permission-catalog';
 import { AccessControlService } from '../../modules/access-control/access-control.service';
 import type { AccessContext } from '../../modules/access-control/access-control.types';
@@ -61,15 +63,16 @@ export class AccessControlGuard implements CanActivate {
     }
     if (branchScoped && !superAdmin) {
       const branchIds = this.requestBranchIds(request);
+      if (branchIds.some((branchId) => !isUUID(branchId)))
+        throw new BadRequestException('Branch identifiers must be UUIDs');
       const body = request.body as { branch_ids?: unknown } | undefined;
       const requestedBranchList = Array.isArray(body?.branch_ids)
         ? body.branch_ids
         : undefined;
       const branchListProvided = requestedBranchList !== undefined;
       const hasInvalidBranchList =
-        requestedBranchList?.some(
-          (branchId) => typeof branchId !== 'string',
-        ) ?? false;
+        requestedBranchList?.some((branchId) => typeof branchId !== 'string') ??
+        false;
       if (
         (!branchIds.length && !branchListProvided) ||
         hasInvalidBranchList ||
@@ -93,7 +96,8 @@ export class AccessControlGuard implements CanActivate {
       request.query?.branch_id,
     ];
     const body = request.body as
-      { branchId?: unknown; branch_id?: unknown; branch_ids?: unknown } | undefined;
+      | { branchId?: unknown; branch_id?: unknown; branch_ids?: unknown }
+      | undefined;
     candidates.push(body?.branchId, body?.branch_id);
     if (Array.isArray(body?.branch_ids)) candidates.push(...body.branch_ids);
     return candidates.filter(
