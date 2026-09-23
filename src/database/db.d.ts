@@ -102,6 +102,37 @@ export interface Branches {
   updated_at: Generated<Timestamp>;
 }
 
+export interface Products {
+  created_at: Generated<Timestamp>;
+  description: string | null;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  product_name: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface StockItems {
+  category: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  stock_item_name: string;
+  unit: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface Suppliers {
+  address: string | null;
+  contact_number: string | null;
+  contact_person: string | null;
+  created_at: Generated<Timestamp>;
+  email: string | null;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  supplier_name: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface DB {
   "auth.branch_users": AuthBranchUsers;
   "auth.permissions": AuthPermissions;
@@ -113,4 +144,7 @@ export interface DB {
   "auth.token_families": AuthTokenFamilies;
   "auth.users": AuthUsers;
   branches: Branches;
+  products: Products;
+  stock_items: StockItems;
+  suppliers: Suppliers;
 }
