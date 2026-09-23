@@ -37,6 +37,9 @@ import { AccessControlGuard } from '../src/common/guards/access-control.guard';
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
 import { hashPassword } from '../src/modules/auth/password-hashing';
 import { DATABASE } from '../src/database/database.module';
+import { RolesRepository } from '../src/modules/roles/roles.repository';
+import { RolesService } from '../src/modules/roles/roles.service';
+import { RolesController } from '../src/modules/roles/roles.controller';
 
 vi.mock('../src/database/database.module', () => ({
   DATABASE: Symbol('TEST_DATABASE'),
@@ -107,7 +110,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       `.execute(db);
       for (const connection of [db, db2]) {
         const module = await Test.createTestingModule({
-          controllers: [AuthController],
+          controllers: [AuthController, RolesController],
           providers: [
             { provide: DATABASE, useValue: connection },
             JwtService,
@@ -122,6 +125,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             AccessControlRepository,
             AccessControlService,
             AccessControlGuard,
+            RolesRepository,
+            RolesService,
           ],
         }).compile();
         const app = module.createNestApplication();
@@ -278,11 +283,22 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         ),
       ).toBe(true);
       const cookie = cookies.map((value) => value.split(';')[0]).join('; ');
-      await request(server)
+      const me = await request(server)
         .get('/auth/me')
         .set('X-COMS-Auth-Gateway', headers['X-COMS-Auth-Gateway'])
         .set('Cookie', cookie)
         .expect(200);
+      expect(me.body).toMatchObject({
+        user: { email: credentials.email },
+        role: { code: 'NO_ACCESS', isActive: true },
+        permissions: [],
+        branch_ids: [],
+      });
+      await request(server)
+        .get('/roles')
+        .set('X-COMS-Auth-Gateway', headers['X-COMS-Auth-Gateway'])
+        .set('Cookie', cookie)
+        .expect(403);
       const logout = await request(server)
         .post('/auth/logout')
         .set(headers)
@@ -348,6 +364,52 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         await services[1].authenticateAccess(lost.tokens.accessToken),
       ).toBeNull();
       expect(jwt.decode(lost.tokens.refreshToken)).toHaveProperty('exp');
+    });
+
+    it('creates roles with grants transactionally and protects assigned roles from deactivation', async () => {
+      const roles = new RolesService(new RolesRepository(db));
+      const created = await roles.create({
+        code: 'DB_TEST_CLERK',
+        role_name: 'Database Test Clerk',
+        permission_keys: ['inventory.read'],
+      });
+      expect(created).toMatchObject({
+        code: 'DB_TEST_CLERK',
+        permission_keys: ['inventory.read'],
+      });
+
+      await roles.replacePermissions(created.id, ['stock_items.read']);
+      await roles.update(created.id, 'Updated Database Test Clerk');
+      const listed = (await roles.list()).find(
+        (role) => role.id === created.id,
+      );
+      expect(listed).toMatchObject({
+        role_name: 'Updated Database Test Clerk',
+        permission_keys: ['stock_items.read'],
+        is_active: true,
+      });
+
+      await db
+        .updateTable('auth.users')
+        .set({ role_id: created.id })
+        .where('email', '=', credentials.email)
+        .execute();
+      await expect(roles.deactivate(created.id)).rejects.toMatchObject({
+        status: 409,
+      });
+      const noAccess = await db
+        .selectFrom('auth.roles')
+        .select('id')
+        .where('code', '=', 'NO_ACCESS')
+        .executeTakeFirstOrThrow();
+      await db
+        .updateTable('auth.users')
+        .set({ role_id: noAccess.id })
+        .where('email', '=', credentials.email)
+        .execute();
+      await expect(roles.deactivate(created.id)).resolves.toMatchObject({
+        is_active: false,
+      });
     });
     it('bounds cleanup and preserves live windows', async () => {
       await db

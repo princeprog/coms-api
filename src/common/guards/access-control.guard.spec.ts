@@ -5,6 +5,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  ACCESS_PERMISSION_KEY,
+  BRANCH_SCOPE_KEY,
+} from '../decorators/access-policy.decorator';
 import { AccessControlGuard } from './access-control.guard';
 
 vi.mock('../../database/database.module', () => ({
@@ -83,10 +87,13 @@ describe('AccessControlGuard', () => {
       }),
     };
     const reflector = {
-      getAllAndOverride: vi.fn().mockReturnValue({
-        permission: 'inventory.read',
-        branchScoped: true,
-      }),
+      getAllAndOverride: vi.fn((key: string) =>
+        key === ACCESS_PERMISSION_KEY
+          ? 'inventory.read'
+          : key === BRANCH_SCOPE_KEY
+            ? true
+            : undefined,
+      ),
     };
     const request = {
       user: { id: 'user-1' },

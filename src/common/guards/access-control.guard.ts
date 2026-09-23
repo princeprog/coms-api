@@ -7,12 +7,13 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
+import type { PermissionKey } from '../../modules/access-control/permission-catalog';
 import { AccessControlService } from '../../modules/access-control/access-control.service';
-import type {
-  AccessContext,
-  AccessPolicy,
-} from '../../modules/access-control/access-control.types';
-import { ACCESS_POLICY_KEY } from '../decorators/access-policy.decorator';
+import type { AccessContext } from '../../modules/access-control/access-control.types';
+import {
+  ACCESS_PERMISSION_KEY,
+  BRANCH_SCOPE_KEY,
+} from '../decorators/access-policy.decorator';
 
 type AccessRequest = Request & {
   user?: { id: string };
@@ -40,21 +41,25 @@ export class AccessControlGuard implements CanActivate {
       throw new ForbiddenException('The assigned role is inactive');
 
     request.accessContext = accessContext;
-    const policy = this.reflector.getAllAndOverride<AccessPolicy>(
-      ACCESS_POLICY_KEY,
-      [execution.getHandler(), execution.getClass()],
+    const targets = [execution.getHandler(), execution.getClass()];
+    const permission = this.reflector.getAllAndOverride<PermissionKey>(
+      ACCESS_PERMISSION_KEY,
+      targets,
     );
-    if (!policy) return true;
+    const branchScoped =
+      this.reflector.getAllAndOverride<boolean>(BRANCH_SCOPE_KEY, targets) ===
+      true;
+    if (!permission && !branchScoped) return true;
 
     const superAdmin =
       accessContext.role.isSystem && accessContext.role.code === 'SUPER_ADMIN';
     const noAccess =
       accessContext.role.isSystem && accessContext.role.code === 'NO_ACCESS';
-    if (policy.permission && !superAdmin) {
-      if (noAccess || !accessContext.permissions.includes(policy.permission))
+    if (permission && !superAdmin) {
+      if (noAccess || !accessContext.permissions.includes(permission))
         throw new ForbiddenException('Permission required');
     }
-    if (policy.branchScoped && !superAdmin) {
+    if (branchScoped && !superAdmin) {
       const branchId = this.requestBranchId(request);
       if (!branchId || !accessContext.branchIds.includes(branchId))
         throw new ForbiddenException('Branch access required');

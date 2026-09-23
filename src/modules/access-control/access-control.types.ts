@@ -13,8 +13,3 @@ export type AccessContext = {
   permissions: PermissionKey[];
   branchIds: string[];
 };
-
-export type AccessPolicy = {
-  permission?: PermissionKey;
-  branchScoped?: boolean;
-};
