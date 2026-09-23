@@ -15,6 +15,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { SupplierReceiptsModule } from './modules/supplier-receipts/supplier-receipts.module';
 import { StockRequestsModule } from './modules/stock-requests/stock-requests.module';
 import { DispatchesModule } from './modules/dispatches/dispatches.module';
+import { RecipesModule } from './modules/recipes/recipes.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -38,6 +39,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     SupplierReceiptsModule,
     StockRequestsModule,
     DispatchesModule,
+    RecipesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
