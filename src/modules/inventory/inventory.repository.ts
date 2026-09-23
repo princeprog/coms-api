@@ -195,16 +195,6 @@ export class InventoryRepository {
           .executeTakeFirst();
         if (existing) return this.returnForRetry(existing, input);
 
-        const stockItem = await transaction
-          .selectFrom('stock_items')
-          .select('id')
-          .where('id', '=', input.stockItemId)
-          .where('is_active', '=', true)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!stockItem)
-          throw new NotFoundException('Active stock item not found');
-
         if (input.branchId) {
           const branch = await transaction
             .selectFrom('branches')
@@ -215,6 +205,16 @@ export class InventoryRepository {
             .executeTakeFirst();
           if (!branch) throw new NotFoundException('Active branch not found');
         }
+
+        const stockItem = await transaction
+          .selectFrom('stock_items')
+          .select('id')
+          .where('id', '=', input.stockItemId)
+          .where('is_active', '=', true)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!stockItem)
+          throw new NotFoundException('Active stock item not found');
 
         const balance = await this.updateBalance(transaction, input);
         if (!balance)

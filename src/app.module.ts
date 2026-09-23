@@ -17,6 +17,7 @@ import { StockRequestsModule } from './modules/stock-requests/stock-requests.mod
 import { DispatchesModule } from './modules/dispatches/dispatches.module';
 import { RecipesModule } from './modules/recipes/recipes.module';
 import { BranchProductsModule } from './modules/branch-products/branch-products.module';
+import { SalesModule } from './modules/sales/sales.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -42,6 +43,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     DispatchesModule,
     RecipesModule,
     BranchProductsModule,
+    SalesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
