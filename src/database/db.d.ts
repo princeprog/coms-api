@@ -150,6 +150,32 @@ export interface StockItems {
   updated_at: Generated<Timestamp>;
 }
 
+export interface StockRequestEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  event_type: string;
+  id: Generated<string>;
+  stock_request_id: string;
+}
+
+export interface StockRequestItems {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  quantity_requested: Numeric;
+  stock_item_id: string;
+  stock_request_id: string;
+}
+
+export interface StockRequests {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key: string;
+  requested_by_user_id: string;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface SupplierReceiptItems {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
@@ -200,6 +226,9 @@ export interface DB {
   inventory_movements: InventoryMovements;
   products: Products;
   stock_items: StockItems;
+  stock_request_events: StockRequestEvents;
+  stock_request_items: StockRequestItems;
+  stock_requests: StockRequests;
   supplier_receipt_items: SupplierReceiptItems;
   supplier_receipts: SupplierReceipts;
   suppliers: Suppliers;
