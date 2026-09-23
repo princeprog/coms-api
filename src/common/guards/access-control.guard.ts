@@ -60,21 +60,29 @@ export class AccessControlGuard implements CanActivate {
         throw new ForbiddenException('Permission required');
     }
     if (branchScoped && !superAdmin) {
-      const branchId = this.requestBranchId(request);
-      if (!branchId || !accessContext.branchIds.includes(branchId))
+      const branchIds = this.requestBranchIds(request);
+      if (
+        !branchIds.length ||
+        branchIds.some(
+          (branchId) => !accessContext.branchIds.includes(branchId),
+        )
+      )
         throw new ForbiddenException('Branch access required');
     }
     return true;
   }
 
-  private requestBranchId(request: AccessRequest): string | undefined {
+  private requestBranchIds(request: AccessRequest): string[] {
     const candidates: unknown[] = [
       request.params?.branchId,
+      request.params?.branch_id,
       request.query?.branchId,
+      request.query?.branch_id,
     ];
-    const body = request.body as { branchId?: unknown } | undefined;
-    candidates.push(body?.branchId);
-    return candidates.find(
+    const body = request.body as
+      { branchId?: unknown; branch_id?: unknown } | undefined;
+    candidates.push(body?.branchId, body?.branch_id);
+    return candidates.filter(
       (value): value is string => typeof value === 'string',
     );
   }

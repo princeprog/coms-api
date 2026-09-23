@@ -103,6 +103,14 @@ describe('AccessControlGuard', () => {
     await expect(
       guard.canActivate(executionContext(request)),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    const mismatchedRequest = {
+      user: { id: 'user-1' },
+      params: { branchId: 'branch-1' },
+      body: { branch_id: 'branch-2' },
+    };
+    await expect(
+      guard.canActivate(executionContext(mismatchedRequest)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
     service.findAccessContext.mockResolvedValue({
       userId: 'user-1',

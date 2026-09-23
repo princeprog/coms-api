@@ -40,6 +40,8 @@ import { DATABASE } from '../src/database/database.module';
 import { RolesRepository } from '../src/modules/roles/roles.repository';
 import { RolesService } from '../src/modules/roles/roles.service';
 import { RolesController } from '../src/modules/roles/roles.controller';
+import { BranchesRepository } from '../src/modules/branches/branches.repository';
+import { BranchesService } from '../src/modules/branches/branches.service';
 
 vi.mock('../src/database/database.module', () => ({
   DATABASE: Symbol('TEST_DATABASE'),
@@ -409,6 +411,43 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .execute();
       await expect(roles.deactivate(created.id)).resolves.toMatchObject({
         is_active: false,
+      });
+    });
+    it('scopes branch listings and applies branch create, update, and deactivate transitions', async () => {
+      const branches = new BranchesService(new BranchesRepository(db));
+      const created = await branches.create({
+        code: 'DB_BRANCH_TEST',
+        branch_name: 'Database Branch Test',
+        has_dine_in: true,
+      });
+      const superAdminAccess = {
+        role: { code: 'SUPER_ADMIN', isSystem: true },
+        branchIds: [],
+      } as never;
+      const scopedAccess = {
+        role: { code: 'BRANCH_MANAGER', isSystem: false },
+        branchIds: [created.id],
+      } as never;
+      await expect(
+        branches.list(superAdminAccess, { page: 1, page_size: 25 }),
+      ).resolves.toMatchObject({
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: created.id }),
+        ]),
+      });
+      await expect(
+        branches.list(scopedAccess, { page: 1, page_size: 25 }),
+      ).resolves.toMatchObject({
+        items: [expect.objectContaining({ id: created.id })],
+        total: 1,
+      });
+      await branches.update(created.id, { branch_name: 'Updated DB Branch' });
+      await expect(branches.get(created.id)).resolves.toMatchObject({
+        branch_name: 'Updated DB Branch',
+      });
+      await branches.deactivate(created.id);
+      await expect(branches.get(created.id)).resolves.toMatchObject({
+        status: 'inactive',
       });
     });
     it('bounds cleanup and preserves live windows', async () => {
