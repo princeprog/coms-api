@@ -10,6 +10,7 @@ import { BranchesModule } from './modules/branches/branches.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { StockItemsModule } from './modules/stock-items/stock-items.module';
+import { ProductsModule } from './modules/products/products.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -28,6 +29,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     StaffModule,
     SuppliersModule,
     StockItemsModule,
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
