@@ -69,17 +69,24 @@ export class AuthService {
       user?.hashed_password ?? (await this.dummyPasswordHashPromise),
       dto.password,
     );
-    if (!user || !matches)
+    if (!user || !matches || user.is_active === false)
       throw new UnauthorizedException('Invalid email or password');
     return this.repository.transaction(async (trx) => {
+      const currentUser = await this.repository.findUserForSession(
+        user.id,
+        trx,
+        true,
+      );
+      if (!currentUser?.is_active)
+        throw new UnauthorizedException('Invalid email or password');
       const family = await this.repository.createFamily(
         trx,
-        user.id,
+        currentUser.id,
         getAuthConfig().refreshTtlSeconds,
       );
       return {
-        user: this.publicUser(user),
-        tokens: await this.issueTokenPair(trx, user.id, family),
+        user: this.publicUser(currentUser),
+        tokens: await this.issueTokenPair(trx, currentUser.id, family),
       };
     });
   }
@@ -118,8 +125,8 @@ export class AuthService {
           new Date(family.expires_at) <= new Date()
         )
           return { kind: 'invalid' };
-        const user = await this.repository.findUser(claims.sub, trx);
-        if (!user) return { kind: 'invalid' };
+        const user = await this.repository.findUserForSession(claims.sub, trx);
+        if (!user?.is_active) return { kind: 'invalid' };
         const decision = await this.rateLimits.consume(
           'refresh',
           family.id,
@@ -137,7 +144,10 @@ export class AuthService {
           tokens.refreshToken,
         );
         await this.repository.consumeRefresh(trx, token.id, successor.jti);
-        return { kind: 'success', result: { user, tokens } };
+        return {
+          kind: 'success',
+          result: { user: this.publicUser(user), tokens },
+        };
       },
     );
     if (result.kind === 'limited')

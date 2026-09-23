@@ -42,6 +42,9 @@ import { RolesService } from '../src/modules/roles/roles.service';
 import { RolesController } from '../src/modules/roles/roles.controller';
 import { BranchesRepository } from '../src/modules/branches/branches.repository';
 import { BranchesService } from '../src/modules/branches/branches.service';
+import { StaffRepository } from '../src/modules/staff/staff.repository';
+import { StaffService } from '../src/modules/staff/staff.service';
+import { StaffController } from '../src/modules/staff/staff.controller';
 
 vi.mock('../src/database/database.module', () => ({
   DATABASE: Symbol('TEST_DATABASE'),
@@ -112,7 +115,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       `.execute(db);
       for (const connection of [db, db2]) {
         const module = await Test.createTestingModule({
-          controllers: [AuthController, RolesController],
+          controllers: [AuthController, RolesController, StaffController],
           providers: [
             { provide: DATABASE, useValue: connection },
             JwtService,
@@ -129,6 +132,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             AccessControlGuard,
             RolesRepository,
             RolesService,
+            StaffRepository,
+            StaffService,
           ],
         }).compile();
         const app = module.createNestApplication();
@@ -301,6 +306,11 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .set('X-COMS-Auth-Gateway', headers['X-COMS-Auth-Gateway'])
         .set('Cookie', cookie)
         .expect(403);
+      await request(server)
+        .get('/staff')
+        .set('X-COMS-Auth-Gateway', headers['X-COMS-Auth-Gateway'])
+        .set('Cookie', cookie)
+        .expect(403);
       const logout = await request(server)
         .post('/auth/logout')
         .set(headers)
@@ -449,6 +459,94 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       await expect(branches.get(created.id)).resolves.toMatchObject({
         status: 'inactive',
       });
+    });
+    it('creates staff with role and branches and revokes sessions on deactivation', async () => {
+      const roles = new RolesService(new RolesRepository(db));
+      const staffRole = await roles.create({
+        code: 'DB_STAFF_CLERK',
+        role_name: 'Database Staff Clerk',
+        permission_keys: ['inventory.read'],
+      });
+      const branches = new BranchesService(new BranchesRepository(db));
+      const branch = await branches.create({
+        code: 'DB_STAFF_BRANCH',
+        branch_name: 'Staff Test Branch',
+      });
+      const staff = new StaffService(new StaffRepository(db));
+      const password = 'Database staff password 2026';
+      const member = await staff.create({
+        email: 'staff.integration@example.com',
+        full_name: 'Staff Integration Test',
+        contact_number: '09179990000',
+        password,
+        role_id: staffRole.id,
+        branch_ids: [branch.id],
+      });
+      expect(member).toMatchObject({
+        email: 'staff.integration@example.com',
+        role_code: 'DB_STAFF_CLERK',
+        branch_ids: [branch.id],
+        is_active: true,
+      });
+      expect(member).not.toHaveProperty('hashed_password');
+
+      const session = await services[0].login({
+        email: 'staff.integration@example.com',
+        password,
+      });
+      const superAdmin = await db
+        .selectFrom('auth.roles')
+        .select('id')
+        .where('code', '=', 'SUPER_ADMIN')
+        .executeTakeFirstOrThrow();
+      const noAccess = await db
+        .selectFrom('auth.roles')
+        .select('id')
+        .where('code', '=', 'NO_ACCESS')
+        .executeTakeFirstOrThrow();
+      await expect(
+        new StaffRepository(db).assignRole(member.id, superAdmin.id, false),
+      ).rejects.toMatchObject({ status: 403 });
+      const existingAdmin = await db
+        .selectFrom('auth.users')
+        .select('id')
+        .where('email', '=', credentials.email)
+        .executeTakeFirstOrThrow();
+      await db
+        .updateTable('auth.users')
+        .set({ role_id: superAdmin.id })
+        .where('id', '=', existingAdmin.id)
+        .execute();
+      const staffRepository = new StaffRepository(db);
+      await expect(
+        staffRepository.assignRole(existingAdmin.id, noAccess.id, false),
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        staffRepository.deactivate(existingAdmin.id, false),
+      ).rejects.toMatchObject({ status: 403 });
+      await db
+        .updateTable('auth.users')
+        .set({ role_id: noAccess.id })
+        .where('id', '=', existingAdmin.id)
+        .execute();
+
+      await staff.deactivate(
+        member.id,
+        'c174b793-8871-4d46-9337-182a521eac01',
+        false,
+      );
+      await expect(
+        services[1].authenticateAccess(session.tokens.accessToken),
+      ).resolves.toBeNull();
+      await expect(
+        services[0].refresh(session.tokens.refreshToken),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        services[0].login({
+          email: 'staff.integration@example.com',
+          password,
+        }),
+      ).rejects.toMatchObject({ status: 401 });
     });
     it('bounds cleanup and preserves live windows', async () => {
       await db

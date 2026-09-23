@@ -26,6 +26,13 @@ export class AuthRepository {
       .where('id', '=', id)
       .executeTakeFirst();
   }
+  findUserForSession(id: string, db: Connection = this.db, lock = false) {
+    const query = db
+      .selectFrom('auth.users')
+      .select(['id', 'email', 'full_name', 'contact_number', 'is_active'])
+      .where('id', '=', id);
+    return (lock ? query.forUpdate() : query).executeTakeFirst();
+  }
   createFamily(trx: Transaction<DB>, userId: string, ttl: number) {
     return trx
       .insertInto('auth.token_families')

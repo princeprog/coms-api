@@ -90,7 +90,7 @@ export class RolesService {
   }
 
   private validateId(id: string): void {
-    if (!ROLE_ID_PATTERN.test(id))
+    if (!ROLE_ID_PATTERN.test(id) || BigInt(id) > 9_223_372_036_854_775_807n)
       throw new BadRequestException('Role ID must be a positive integer');
   }
 
