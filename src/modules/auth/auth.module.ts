@@ -12,6 +12,9 @@ import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
 import { AuthRateLimitRepository } from './auth-rate-limit.repository';
 import { AuthRepository } from './auth.repository';
+import { AccessControlRepository } from '../access-control/access-control.repository';
+import { AccessControlService } from '../access-control/access-control.service';
+import { AccessControlGuard } from '../../common/guards/access-control.guard';
 
 @Module({
   imports: [
@@ -40,7 +43,10 @@ import { AuthRepository } from './auth.repository';
     AuthCapacityGuard,
     AuthRateLimitRepository,
     AuthRateLimitService,
+    AccessControlRepository,
+    AccessControlService,
+    AccessControlGuard,
   ],
-  exports: [AuthService, AuthGuard],
+  exports: [AuthService, AuthGuard, AccessControlGuard, AccessControlService],
 })
 export class AuthModule {}

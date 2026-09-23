@@ -21,11 +21,14 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { AuthOriginGuard } from '../../common/guards/auth-origin.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
+import { AccessControlGuard } from '../../common/guards/access-control.guard';
+import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
 import { AuthExceptionFilter } from '../../common/filters/auth-exception.filter';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthService, type PublicUser, type TokenPair } from './auth.service';
 
 import { LoginDto } from './dto/login.dto';
+import type { AccessContext } from '../access-control/access-control.types';
 
 @Controller('auth')
 @UseGuards(AuthGatewayGuard)
@@ -85,13 +88,19 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, AccessControlGuard)
   me(
     @CurrentUser() user: PublicUser,
+    @CurrentAccessContext() access: AccessContext,
     @Res({ passthrough: true }) response: Response,
   ) {
     response.header('Cache-Control', 'no-store');
-    return { user };
+    return {
+      user,
+      role: access.role,
+      permissions: access.permissions,
+      branch_ids: access.branchIds,
+    };
   }
 
   private setAuthCookies(response: Response, tokens: TokenPair): void {

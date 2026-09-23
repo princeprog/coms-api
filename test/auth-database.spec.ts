@@ -31,6 +31,10 @@ import { AuthGatewayGuard } from '../src/common/guards/auth-gateway.guard';
 import { AuthOriginGuard } from '../src/common/guards/auth-origin.guard';
 import { AuthCapacityGuard } from '../src/common/guards/auth-capacity.guard';
 import { AuthGuard } from '../src/common/guards/auth.guard';
+import { AccessControlRepository } from '../src/modules/access-control/access-control.repository';
+import { AccessControlService } from '../src/modules/access-control/access-control.service';
+import { AccessControlGuard } from '../src/common/guards/access-control.guard';
+import * as accessControl from '../src/database/migrations/20260923214210_access_control';
 import { hashPassword } from '../src/modules/auth/password-hashing';
 import { DATABASE } from '../src/database/database.module';
 
@@ -79,20 +83,27 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const migrator = new Migrator({
         db,
         provider: {
-          getMigrations: async () => ({ initial, rotation, zz_limits: limits }),
+          getMigrations: async () => ({
+            initial,
+            rotation,
+            zz_limits: limits,
+            zzz_access_control: accessControl,
+          }),
         },
       });
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
       expect((await migrator.migrateDown()).error).toBeUndefined();
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
       await sql`
-        INSERT INTO auth.users (email, full_name, contact_number, hashed_password)
-        VALUES (
+        INSERT INTO auth.users (email, full_name, contact_number, hashed_password, role_id)
+        SELECT
           ${credentials.email},
           'Auth Test',
           'test-account',
-          ${await hashPassword(credentials.password)}
-        )
+          ${await hashPassword(credentials.password)},
+          id
+        FROM auth.roles
+        WHERE code = 'NO_ACCESS'
       `.execute(db);
       for (const connection of [db, db2]) {
         const module = await Test.createTestingModule({
@@ -108,6 +119,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             AuthOriginGuard,
             AuthCapacityGuard,
             AuthGuard,
+            AccessControlRepository,
+            AccessControlService,
+            AccessControlGuard,
           ],
         }).compile();
         const app = module.createNestApplication();
