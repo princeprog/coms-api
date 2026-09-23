@@ -25,3 +25,7 @@ When a conversation is compacted, resumed from a summary, or prior context is un
 - Put guards, decorators, filters, interceptors, middleware, and pipes in their corresponding `src/common/` folders; do not create those technical folders inside a feature module.
 - Add focused tests for critical business rules, authentication, authorization, state transitions, and error cases.
 - Keep changes scoped to the requested feature and avoid unrelated refactoring.
+
+## COMS Obsidian project knowledge
+
+For COMS work, read `C:\Users\Al Prince\Documents\Obsidian Vault\Projects\COMS\Home.md` first. Then read the linked architecture or workflow notes relevant to the change, plus `Delivery/Progress.md` and `Decisions/Architecture Decisions.md` when planning or changing implementation. Update the Obsidian progress notes as implementation milestones are completed. Never put credentials, tokens, or database backups in the vault.
