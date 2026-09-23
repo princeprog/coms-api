@@ -19,6 +19,7 @@ import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CreateStaffDto } from './dto/create-staff.dto';
+import { StaffBranchQueryDto } from './dto/staff-branch-query.dto';
 import { AssignStaffBranchesDto } from './dto/assign-staff-branches.dto';
 import { AssignStaffRoleDto } from './dto/assign-staff-role.dto';
 import { StaffQueryDto } from './dto/staff-query.dto';
@@ -35,14 +36,32 @@ export class StaffController {
 
   @Get()
   @RequirePermission('staff.read')
-  list(@Query() query: StaffQueryDto) {
-    return this.service.list(query);
+  @RequireBranchScope()
+  list(
+    @CurrentAccessContext() access: AccessContext,
+    @Query() query: StaffQueryDto,
+  ) {
+    return this.service.list(
+      query,
+      access.branchIds,
+      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+    );
   }
 
   @Get(':userId')
   @RequirePermission('staff.read')
-  get(@Param('userId') userId: string) {
-    return this.service.get(userId);
+  @RequireBranchScope()
+  get(
+    @Param('userId') userId: string,
+    @Query() scope: StaffBranchQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.service.get(
+      userId,
+      scope.branch_id,
+      access.branchIds,
+      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+    );
   }
 
   @Post()
@@ -61,15 +80,29 @@ export class StaffController {
 
   @Patch(':userId')
   @RequirePermission('staff.update')
-  update(@Param('userId') userId: string, @Body() dto: UpdateStaffDto) {
-    return this.service.update(userId, dto);
+  @RequireBranchScope()
+  update(
+    @Param('userId') userId: string,
+    @Query() scope: StaffBranchQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+    @Body() dto: UpdateStaffDto,
+  ) {
+    return this.service.update(
+      userId,
+      dto,
+      scope.branch_id,
+      access.branchIds,
+      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+    );
   }
 
   @Put(':userId/role')
   @RequirePermission('staff.role_assign')
+  @RequireBranchScope()
   assignRole(
     @Param('userId') userId: string,
     @CurrentUser() actor: RequestUser,
+    @Query() scope: StaffBranchQueryDto,
     @CurrentAccessContext() access: AccessContext,
     @Body() dto: AssignStaffRoleDto,
   ) {
@@ -77,6 +110,8 @@ export class StaffController {
       userId,
       actor.id,
       dto.role_id,
+      scope.branch_id,
+      access.branchIds,
       access.role.isSystem && access.role.code === 'SUPER_ADMIN',
     );
   }
@@ -87,6 +122,7 @@ export class StaffController {
   assignBranches(
     @Param('userId') userId: string,
     @CurrentUser() actor: RequestUser,
+    @Query() scope: StaffBranchQueryDto,
     @CurrentAccessContext() access: AccessContext,
     @Body() dto: AssignStaffBranchesDto,
   ) {
@@ -96,19 +132,24 @@ export class StaffController {
       dto.branch_ids,
       access.branchIds,
       access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      scope.branch_id,
     );
   }
 
   @Post(':userId/deactivate')
   @RequirePermission('staff.deactivate')
+  @RequireBranchScope()
   deactivate(
     @Param('userId') userId: string,
     @CurrentUser() actor: RequestUser,
+    @Query() scope: StaffBranchQueryDto,
     @CurrentAccessContext() access: AccessContext,
   ) {
     return this.service.deactivate(
       userId,
       actor.id,
+      scope.branch_id,
+      access.branchIds,
       access.role.isSystem && access.role.code === 'SUPER_ADMIN',
     );
   }

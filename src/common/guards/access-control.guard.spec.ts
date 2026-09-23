@@ -192,11 +192,35 @@ describe('AccessControlGuard', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          query: { branch_id: 'branch-1' },
+        }),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(
+        executionContext({
+          user: { id: 'user-1' },
+          query: { branch_id: 'branch-2' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('declares branch scope on staff creation and branch-assignment endpoints', () => {
+  it('declares branch scope on staff reads and mutations', () => {
     const reflector = new Reflector();
-    for (const handlerName of ['create', 'assignBranches'] as const) {
+    for (const handlerName of [
+      'list',
+      'get',
+      'create',
+      'update',
+      'assignRole',
+      'assignBranches',
+      'deactivate',
+    ] as const) {
       const handler = Reflect.get(StaffController.prototype, handlerName);
       expect(
         reflector.getAllAndOverride<boolean>(BRANCH_SCOPE_KEY, [

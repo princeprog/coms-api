@@ -15,15 +15,49 @@ const ROLE_ID_PATTERN = /^[1-9]\d{0,18}$/;
 export class StaffService {
   constructor(private readonly repository: StaffRepository) {}
 
-  list(query: { page: number; page_size: number; search?: string }) {
-    return this.repository.list(query.page, query.page_size, query.search);
+  list(
+    query: {
+      page: number;
+      page_size: number;
+      search?: string;
+      branch_id?: string;
+    },
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
+    const branchId = this.requireBranchAccess(
+      query.branch_id,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    return this.repository.list(
+      query.page,
+      query.page_size,
+      query.search,
+      branchId,
+      actorIsSuperAdmin ? undefined : actorBranchIds,
+    );
   }
 
-  async get(id: string) {
+  async get(
+    id: string,
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
     this.validateUserId(id);
-    const member = await this.repository.findById(id);
+    const branchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    const member = await this.repository.findByIdInBranch(id, branchId);
     if (!member) throw new NotFoundException('Staff account not found');
-    return member;
+    return this.filterBranchVisibility(
+      member,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
   }
 
   async create(
@@ -75,6 +109,9 @@ export class StaffService {
   async update(
     id: string,
     input: { email?: string; full_name?: string; contact_number?: string },
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
   ) {
     this.validateUserId(id);
     if (Object.keys(input).length === 0)
@@ -100,13 +137,25 @@ export class StaffService {
         );
       patch.contact_number = contactNumber;
     }
-    return this.repository.update(id, patch);
+    const branchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    const member = await this.repository.update(id, patch, branchId);
+    return this.filterBranchVisibility(
+      member,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
   }
 
   async assignRole(
     id: string,
     actorId: string,
     roleId: string,
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
     actorIsSuperAdmin: boolean,
   ) {
     this.validateUserId(id);
@@ -114,7 +163,22 @@ export class StaffService {
     this.validateRoleId(roleId);
     if (id === actorId)
       throw new ForbiddenException('You cannot change your own role');
-    return this.repository.assignRole(id, roleId, actorIsSuperAdmin);
+    const branchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    const member = await this.repository.assignRole(
+      id,
+      roleId,
+      actorIsSuperAdmin,
+      branchId,
+    );
+    return this.filterBranchVisibility(
+      member,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
   }
 
   async assignBranches(
@@ -123,12 +187,18 @@ export class StaffService {
     branchIds: string[],
     actorBranchIds: string[],
     actorIsSuperAdmin: boolean,
+    requestedBranchId?: string,
   ) {
     this.validateUserId(id);
     this.validateUserId(actorId);
     this.validateBranches(branchIds);
     if (id === actorId)
       throw new ForbiddenException('You cannot change your own branch access');
+    const scopeBranchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
     if (!actorIsSuperAdmin && actorBranchIds.length === 0)
       throw new ForbiddenException('Branch access required');
     if (
@@ -138,19 +208,45 @@ export class StaffService {
       throw new ForbiddenException(
         'You cannot assign staff outside your branch access',
       );
-    return this.repository.assignBranches(
+    const member = await this.repository.assignBranches(
       id,
       branchIds,
       actorIsSuperAdmin ? undefined : actorBranchIds,
+      scopeBranchId,
+    );
+    return this.filterBranchVisibility(
+      member,
+      actorBranchIds,
+      actorIsSuperAdmin,
     );
   }
 
-  async deactivate(id: string, actorId: string, actorIsSuperAdmin: boolean) {
+  async deactivate(
+    id: string,
+    actorId: string,
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
     this.validateUserId(id);
     this.validateUserId(actorId);
     if (id === actorId)
       throw new ForbiddenException('You cannot deactivate your own account');
-    return this.repository.deactivate(id, actorIsSuperAdmin);
+    const branchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    const member = await this.repository.deactivate(
+      id,
+      actorIsSuperAdmin,
+      branchId,
+    );
+    return this.filterBranchVisibility(
+      member,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
   }
 
   private validateUserId(id: string): void {
@@ -171,5 +267,29 @@ export class StaffService {
       branchIds.some((id) => !USER_ID_PATTERN.test(id))
     )
       throw new BadRequestException('Branch IDs must be unique UUIDs');
+  }
+
+  private requireBranchAccess(
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ): string | undefined {
+    if (actorIsSuperAdmin) return requestedBranchId;
+    if (!requestedBranchId || !actorBranchIds.includes(requestedBranchId))
+      throw new ForbiddenException('Branch access required');
+    return requestedBranchId;
+  }
+
+  private filterBranchVisibility<T extends { branch_ids: string[] }>(
+    member: T | null,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ): T {
+    if (!member) throw new NotFoundException('Staff account not found');
+    if (actorIsSuperAdmin) return member;
+    return {
+      ...member,
+      branch_ids: member.branch_ids.filter((id) => actorBranchIds.includes(id)),
+    };
   }
 }

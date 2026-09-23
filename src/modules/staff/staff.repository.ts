@@ -17,7 +17,13 @@ type Connection = Kysely<DB> | Transaction<DB>;
 export class StaffRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
-  async list(page: number, pageSize: number, search?: string) {
+  async list(
+    page: number,
+    pageSize: number,
+    search?: string,
+    branchId?: string,
+    visibleBranchIds?: string[],
+  ) {
     const pattern = search?.trim() ? `%${search.trim()}%` : undefined;
     let records = this.db
       .selectFrom('auth.users as u')
@@ -38,6 +44,16 @@ export class StaffRepository {
     let count = this.db
       .selectFrom('auth.users as u')
       .select((eb) => eb.fn.countAll<number>().as('total'));
+    if (branchId) {
+      const branchUserIds = this.db
+        .selectFrom('auth.branch_users as bu')
+        .innerJoin('branches as b', 'b.id', 'bu.branch_id')
+        .select('bu.user_id')
+        .where('bu.branch_id', '=', branchId)
+        .where('b.status', '=', 'active');
+      records = records.where('u.id', 'in', branchUserIds);
+      count = count.where('u.id', 'in', branchUserIds);
+    }
     if (pattern) {
       records = records.where((eb) =>
         eb.or([
@@ -64,7 +80,9 @@ export class StaffRepository {
     return {
       items: staff.map((member) => ({
         ...member,
-        branch_ids: branchesByUser.get(member.id) ?? [],
+        branch_ids: (branchesByUser.get(member.id) ?? []).filter(
+          (id) => !visibleBranchIds || visibleBranchIds.includes(id),
+        ),
       })),
       total: Number(total.total),
       page,
@@ -72,8 +90,12 @@ export class StaffRepository {
     };
   }
 
-  async findById(id: string, connection: Connection = this.db) {
-    const member = await connection
+  async findById(
+    id: string,
+    connection: Connection = this.db,
+    requiredBranchId?: string,
+  ) {
+    let memberQuery = connection
       .selectFrom('auth.users as u')
       .innerJoin('auth.roles as r', 'r.id', 'u.role_id')
       .select([
@@ -86,11 +108,24 @@ export class StaffRepository {
         'r.code as role_code',
         'r.role_name as role_name',
       ])
-      .where('u.id', '=', id)
-      .executeTakeFirst();
+      .where('u.id', '=', id);
+    if (requiredBranchId) {
+      const usersInBranch = connection
+        .selectFrom('auth.branch_users as bu')
+        .innerJoin('branches as b', 'b.id', 'bu.branch_id')
+        .select('bu.user_id')
+        .where('bu.branch_id', '=', requiredBranchId)
+        .where('b.status', '=', 'active');
+      memberQuery = memberQuery.where('u.id', 'in', usersInBranch);
+    }
+    const member = await memberQuery.executeTakeFirst();
     if (!member) return null;
     const branchesByUser = await this.activeBranchesForUsers([id], connection);
     return { ...member, branch_ids: branchesByUser.get(id) ?? [] };
+  }
+
+  findByIdInBranch(id: string, branchId?: string) {
+    return this.findById(id, this.db, branchId);
   }
 
   async create(input: {
@@ -152,16 +187,19 @@ export class StaffRepository {
   async update(
     id: string,
     patch: { email?: string; full_name?: string; contact_number?: string },
+    branchId?: string,
   ) {
     try {
-      const member = await this.db
-        .updateTable('auth.users')
-        .set({ ...patch, updated_at: sql<Date>`now()` })
-        .where('id', '=', id)
-        .returning(['id'])
-        .executeTakeFirst();
-      if (!member) throw new NotFoundException('Staff account not found');
-      return this.findById(id);
+      return await this.db.transaction().execute(async (trx) => {
+        await this.lockUser(trx, id);
+        if (branchId) await this.assertUserInBranch(trx, id, branchId);
+        await trx
+          .updateTable('auth.users')
+          .set({ ...patch, updated_at: sql<Date>`now()` })
+          .where('id', '=', id)
+          .execute();
+        return this.findById(id, trx);
+      });
     } catch (error) {
       if (this.isUniqueViolation(error))
         throw new ConflictException(
@@ -171,9 +209,15 @@ export class StaffRepository {
     }
   }
 
-  async assignRole(id: string, roleId: string, actorIsSuperAdmin: boolean) {
+  async assignRole(
+    id: string,
+    roleId: string,
+    actorIsSuperAdmin: boolean,
+    branchId?: string,
+  ) {
     return this.db.transaction().execute(async (trx) => {
       await this.lockUser(trx, id);
+      if (branchId) await this.assertUserInBranch(trx, id, branchId);
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
       await this.assertAssignableRole(trx, roleId);
       const changed = await trx
@@ -191,9 +235,20 @@ export class StaffRepository {
     id: string,
     branchIds: string[],
     actorBranchIds?: string[],
+    scopeBranchId?: string,
   ) {
     return this.db.transaction().execute(async (trx) => {
       await this.lockUser(trx, id);
+      if (scopeBranchId) {
+        await this.assertActiveBranches(trx, [scopeBranchId]);
+        const existingBranchIds =
+          (await this.activeBranchesForUsers([id], trx)).get(id) ?? [];
+        if (
+          existingBranchIds.length > 0 &&
+          !existingBranchIds.includes(scopeBranchId)
+        )
+          throw new NotFoundException('Staff account not found');
+      }
       await this.assertActiveBranches(trx, branchIds);
       let assignedBranchIds = branchIds;
       if (actorBranchIds) {
@@ -222,9 +277,10 @@ export class StaffRepository {
     });
   }
 
-  async deactivate(id: string, actorIsSuperAdmin: boolean) {
+  async deactivate(id: string, actorIsSuperAdmin: boolean, branchId?: string) {
     return this.db.transaction().execute(async (trx) => {
       await this.lockUser(trx, id);
+      if (branchId) await this.assertUserInBranch(trx, id, branchId);
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
       const member = await trx
         .updateTable('auth.users')
@@ -307,6 +363,22 @@ export class StaffRepository {
       .forUpdate()
       .executeTakeFirst();
     if (!user) throw new NotFoundException('Staff account not found');
+  }
+
+  private async assertUserInBranch(
+    trx: Transaction<DB>,
+    userId: string,
+    branchId: string,
+  ): Promise<void> {
+    const branch = await trx
+      .selectFrom('auth.branch_users as bu')
+      .innerJoin('branches as b', 'b.id', 'bu.branch_id')
+      .select('bu.user_id')
+      .where('bu.user_id', '=', userId)
+      .where('bu.branch_id', '=', branchId)
+      .where('b.status', '=', 'active')
+      .executeTakeFirst();
+    if (!branch) throw new NotFoundException('Staff account not found');
   }
 
   private async activeBranchesForUsers(

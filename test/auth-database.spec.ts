@@ -476,16 +476,21 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         code: 'DB_STAFF_BRANCH_B',
         branch_name: 'Staff Other Branch',
       });
-      const staff = new StaffService(new StaffRepository(db));
+      const staffRepository = new StaffRepository(db);
+      const staff = new StaffService(staffRepository);
       const password = 'Database staff password 2026';
-      const member = await staff.create({
-        email: 'staff.integration@example.com',
-        full_name: 'Staff Integration Test',
-        contact_number: '09179990000',
-        password,
-        role_id: staffRole.id,
-        branch_ids: [branch.id, externalBranch.id],
-      }, [], true);
+      const member = await staff.create(
+        {
+          email: 'staff.integration@example.com',
+          full_name: 'Staff Integration Test',
+          contact_number: '09179990000',
+          password,
+          role_id: staffRole.id,
+          branch_ids: [branch.id, externalBranch.id],
+        },
+        [],
+        true,
+      );
       expect(member).toMatchObject({
         email: 'staff.integration@example.com',
         role_code: 'DB_STAFF_CLERK',
@@ -493,6 +498,69 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         is_active: true,
       });
       expect(member).not.toHaveProperty('hashed_password');
+
+      await expect(
+        staff.list(
+          { page: 1, page_size: 25, branch_id: branch.id },
+          [branch.id],
+          false,
+        ),
+      ).resolves.toMatchObject({
+        items: [
+          expect.objectContaining({ id: member.id, branch_ids: [branch.id] }),
+        ],
+        total: 1,
+      });
+      await expect(
+        staff.get(member.id, branch.id, [branch.id], false),
+      ).resolves.toMatchObject({ branch_ids: [branch.id] });
+      await expect(
+        staff.get(member.id, externalBranch.id, [branch.id], false),
+      ).rejects.toMatchObject({ status: 403 });
+
+      const externalStaff = await staff.create(
+        {
+          email: 'staff.external@example.com',
+          full_name: 'External Branch Staff',
+          contact_number: '09179990001',
+          password,
+          role_id: staffRole.id,
+          branch_ids: [externalBranch.id],
+        },
+        [],
+        true,
+      );
+      await expect(
+        staff.get(externalStaff.id, branch.id, [branch.id], false),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        staff.update(
+          externalStaff.id,
+          { full_name: 'Should Not Update' },
+          branch.id,
+          [branch.id],
+          false,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        staff.assignRole(
+          externalStaff.id,
+          'c174b793-8871-4d46-9337-182a521eac01',
+          staffRole.id,
+          branch.id,
+          [branch.id],
+          false,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        staff.deactivate(
+          externalStaff.id,
+          'c174b793-8871-4d46-9337-182a521eac01',
+          branch.id,
+          [branch.id],
+          false,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
 
       const session = await services[0].login({
         email: 'staff.integration@example.com',
@@ -521,7 +589,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .set({ role_id: superAdmin.id })
         .where('id', '=', existingAdmin.id)
         .execute();
-      const staffRepository = new StaffRepository(db);
       await expect(
         staffRepository.assignRole(existingAdmin.id, noAccess.id, false),
       ).rejects.toMatchObject({ status: 403 });
@@ -539,11 +606,15 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         staff.assignBranches(
           member.id,
           branchManagerId,
-          [],
+          [branch.id],
           [branch.id],
           false,
+          branch.id,
         ),
-      ).resolves.toMatchObject({ branch_ids: [externalBranch.id] });
+      ).resolves.toMatchObject({ branch_ids: [branch.id] });
+      await expect(staffRepository.findById(member.id)).resolves.toMatchObject({
+        branch_ids: expect.arrayContaining([branch.id, externalBranch.id]),
+      });
       await expect(
         staff.assignBranches(
           member.id,
@@ -551,12 +622,15 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           [externalBranch.id],
           [branch.id],
           false,
+          branch.id,
         ),
       ).rejects.toMatchObject({ status: 403 });
 
       await staff.deactivate(
         member.id,
         branchManagerId,
+        branch.id,
+        [branch.id],
         false,
       );
       await expect(

@@ -45,11 +45,11 @@ describe('StaffService', () => {
       assignRole: vi.fn(),
     };
     const service = new StaffService(repository as never);
-    await expect(service.update(staffId, {})).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
     await expect(
-      service.assignRole(staffId, staffId, '2', false),
+      service.update(staffId, {}, undefined, [], false),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.assignRole(staffId, staffId, '2', undefined, [], false),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(repository.update).not.toHaveBeenCalled();
     expect(repository.assignRole).not.toHaveBeenCalled();
@@ -68,6 +68,7 @@ describe('StaffService', () => {
         ['28af8c76-1e33-4745-a03c-7f7fa2db640a'],
         ['3fa85f64-5717-4562-b3fc-2c963f66afa6'],
         false,
+        '3fa85f64-5717-4562-b3fc-2c963f66afa6',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(repository.assignBranches).not.toHaveBeenCalled();
@@ -78,20 +79,41 @@ describe('StaffService', () => {
     const actorId = 'ad1c7f4c-7181-4877-8c47-2d3b72326a41';
     const branchId = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
     const otherBranchId = '28af8c76-1e33-4745-a03c-7f7fa2db640a';
-    const repository = { assignBranches: vi.fn().mockResolvedValue({ id: staffId }) };
+    const repository = {
+      assignBranches: vi.fn().mockResolvedValue({
+        id: staffId,
+        branch_ids: [branchId, otherBranchId],
+      }),
+    };
     const service = new StaffService(repository as never);
 
-    await service.assignBranches(staffId, actorId, [branchId], [branchId], false);
+    await service.assignBranches(
+      staffId,
+      actorId,
+      [branchId],
+      [branchId],
+      false,
+      branchId,
+    );
     expect(repository.assignBranches).toHaveBeenLastCalledWith(
       staffId,
       [branchId],
       [branchId],
+      branchId,
     );
 
-    await service.assignBranches(staffId, actorId, [otherBranchId], [], true);
+    await service.assignBranches(
+      staffId,
+      actorId,
+      [otherBranchId],
+      [],
+      true,
+      undefined,
+    );
     expect(repository.assignBranches).toHaveBeenLastCalledWith(
       staffId,
       [otherBranchId],
+      undefined,
       undefined,
     );
   });
@@ -114,5 +136,31 @@ describe('StaffService', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects staff reads requested for a branch outside the acting user scope', async () => {
+    const staffId = '4b450453-7640-4719-990c-29e97b77e3e9';
+    const actorBranchId = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+    const otherBranchId = '28af8c76-1e33-4745-a03c-7f7fa2db640a';
+    const repository = {
+      list: vi.fn().mockResolvedValue({ items: [] }),
+      findById: vi
+        .fn()
+        .mockResolvedValue({ id: staffId, branch_ids: [otherBranchId] }),
+    };
+    const service = new StaffService(repository as never);
+
+    expect(() =>
+      service.list(
+        { page: 1, page_size: 25, branch_id: otherBranchId },
+        [actorBranchId],
+        false,
+      ),
+    ).toThrow(ForbiddenException);
+    await expect(
+      service.get(staffId, otherBranchId, [actorBranchId], false),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.list).not.toHaveBeenCalled();
+    expect(repository.findById).not.toHaveBeenCalled();
   });
 });

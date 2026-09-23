@@ -3,12 +3,17 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
 export class StaffQueryDto {
+  @IsOptional()
+  @IsUUID('4')
+  branch_id?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
