@@ -126,6 +126,52 @@ export interface CommissaryInventory {
   updated_at: Generated<Timestamp>;
 }
 
+export interface DailyBranchReportEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  daily_branch_report_id: string;
+  event_type: string;
+  id: Generated<string>;
+  note: string | null;
+}
+
+export interface DailyBranchReportItems {
+  adjustment_quantity: Generated<Numeric>;
+  adjustment_reason: string | null;
+  created_at: Generated<Timestamp>;
+  daily_branch_report_id: string;
+  expected_closing_quantity: Numeric;
+  id: Generated<string>;
+  ledger_adjustment_quantity: Numeric;
+  ledger_closing_quantity: Numeric;
+  opening_quantity: Numeric;
+  physical_closing_quantity: Numeric | null;
+  receipt_quantity: Numeric;
+  sale_consumption_quantity: Numeric;
+  sale_void_reversal_quantity: Numeric;
+  stock_item_id: string;
+  updated_at: Generated<Timestamp>;
+  variance_quantity: Numeric | null;
+  waste_quantity: Generated<Numeric>;
+  waste_reason: string | null;
+}
+
+export interface DailyBranchReports {
+  branch_id: string;
+  business_date: Timestamp;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  return_reason: string | null;
+  reviewed_at: Timestamp | null;
+  reviewed_by_user_id: string | null;
+  status: Generated<string>;
+  submitted_at: Timestamp | null;
+  submitted_by_user_id: string | null;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface Dispatches {
   branch_id: string;
   created_at: Generated<Timestamp>;
@@ -195,6 +241,7 @@ export interface InventoryMovements {
   actor_user_id: string;
   branch_id: string | null;
   created_at: Generated<Timestamp>;
+  daily_branch_report_item_id: string | null;
   dispatch_item_id: string | null;
   dispatch_receipt_item_id: string | null;
   id: Generated<string>;
@@ -350,6 +397,9 @@ export interface DB {
   branch_products: BranchProducts;
   branches: Branches;
   commissary_inventory: CommissaryInventory;
+  daily_branch_report_events: DailyBranchReportEvents;
+  daily_branch_report_items: DailyBranchReportItems;
+  daily_branch_reports: DailyBranchReports;
   dispatch_events: DispatchEvents;
   dispatch_items: DispatchItems;
   dispatch_receipt_items: DispatchReceiptItems;
