@@ -643,6 +643,23 @@ describe('sales routes (e2e)', () => {
         .selectFrom('inventory_movements')
         .select('id')
         .where('movement_type', '=', 'SALE_VOID')
+        .where('reversal_of_movement_id', 'in', (query) =>
+          query
+            .selectFrom('inventory_movements as original')
+            .innerJoin(
+              'sale_item_consumptions as consumption',
+              'consumption.id',
+              'original.sale_item_consumption_id',
+            )
+            .innerJoin(
+              'sale_items as sale_item',
+              'sale_item.id',
+              'consumption.sale_item_id',
+            )
+            .select('original.id')
+            .where('sale_item.sale_id', '=', sale.body.id as string)
+            .where('original.movement_type', '=', 'SALE'),
+        )
         .execute(),
     ).resolves.toHaveLength(0);
     await expect(
