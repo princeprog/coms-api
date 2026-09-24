@@ -119,6 +119,11 @@ async function start() {
   const email = 'browser-test@example.com';
   const password = crypto.randomBytes(24).toString('hex');
   const { hashPassword } = require('../dist/modules/auth/password-hashing');
+  const noAccessRole = await db
+    .selectFrom('auth.roles')
+    .select('id')
+    .where('code', '=', 'NO_ACCESS')
+    .executeTakeFirstOrThrow();
   await db
     .insertInto('auth.users')
     .values({
@@ -126,6 +131,7 @@ async function start() {
       full_name: 'Browser Test',
       contact_number: 'isolated-browser',
       hashed_password: await hashPassword(password),
+      role_id: noAccessRole.id,
     })
     .execute();
   const { NestFactory } = require('@nestjs/core');
