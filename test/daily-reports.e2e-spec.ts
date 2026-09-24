@@ -24,6 +24,26 @@ function normalizeDecimal(value: string): string {
   return normalizedFraction ? `${whole}.${normalizedFraction}` : whole;
 }
 
+function manilaDate(offsetDays = 0): string {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(
+    parts.map(({ type, value }) => [type, value]),
+  );
+  const date = new Date(
+    Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day) + offsetDays,
+    ),
+  );
+  return date.toISOString().slice(0, 10);
+}
+
 describe('daily report routes (e2e)', () => {
   const suffix = randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase();
   const roleIds: string[] = [];
@@ -39,8 +59,14 @@ describe('daily report routes (e2e)', () => {
   let deniedUserId: string;
   let unassignedUserId: string;
   let branchId: string;
+  let flowBranchId: string;
   let stockItemId: string;
   let untrackedStockItemId: string;
+  let flowStockItemId: string;
+  let flowSupplierId: string;
+  let flowReceiptId: string;
+  let flowRequestId: string;
+  let flowDispatchId: string;
   let app: INestApplication<App>;
   let db: Kysely<DB>;
 
@@ -140,23 +166,42 @@ describe('daily report routes (e2e)', () => {
 
     const reportRoleId = await createRole('REPORTER');
     const deniedRoleId = await createRole('DENIED');
+    const workflowPermissionKeys = new Set([
+      'daily_reports.read',
+      'daily_reports.create',
+      'daily_reports.update',
+      'daily_reports.submit',
+      'daily_reports.return',
+      'daily_reports.approve',
+      'supplier_receipts.read',
+      'supplier_receipts.create',
+      'supplier_receipts.post',
+      'stock_requests.read',
+      'stock_requests.create',
+      'stock_requests.approve',
+      'dispatches.read',
+      'dispatches.create',
+      'dispatches.dispatch',
+      'dispatches.receive',
+    ]);
     const permissions = await db
       .selectFrom('auth.permissions')
-      .select('id')
-      .where('module_key', '=', 'daily_reports')
-      .where('action_key', 'in', [
-        'read',
-        'create',
-        'update',
-        'submit',
-        'return',
-        'approve',
+      .select(['id', 'module_key', 'action_key'])
+      .where('module_key', 'in', [
+        'daily_reports',
+        'supplier_receipts',
+        'stock_requests',
+        'dispatches',
       ])
       .execute();
+    const workflowPermissions = permissions.filter(
+      ({ module_key, action_key }) =>
+        workflowPermissionKeys.has(`${module_key}.${action_key}`),
+    );
     await db
       .insertInto('auth.role_permissions')
       .values(
-        permissions.map(({ id }) => ({
+        workflowPermissions.map(({ id }) => ({
           role_id: reportRoleId,
           permission_id: id,
         })),
@@ -186,6 +231,41 @@ describe('daily report routes (e2e)', () => {
         { user_id: deniedUserId, branch_id: branchId },
       ])
       .execute();
+
+    const flowBranch = await db
+      .insertInto('branches')
+      .values({
+        code: `DF-${suffix}`,
+        branch_name: `Daily Flow Branch ${suffix}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    flowBranchId = flowBranch.id;
+    await db
+      .insertInto('auth.branch_users')
+      .values([
+        { user_id: reporterId, branch_id: flowBranchId },
+        { user_id: reviewerId, branch_id: flowBranchId },
+      ])
+      .execute();
+
+    const flowStockItem = await db
+      .insertInto('stock_items')
+      .values({
+        stock_item_name: `Daily Flow Test Flour ${suffix}`,
+        category: 'Daily Report Test',
+        unit: 'kg',
+        created_at: new Date('2000-01-01T00:00:00.000Z'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    flowStockItemId = flowStockItem.id;
+    const flowSupplier = await db
+      .insertInto('suppliers')
+      .values({ supplier_name: `Daily Flow Test Supplier ${suffix}` })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    flowSupplierId = flowSupplier.id;
 
     const stockItem = await db
       .insertInto('stock_items')
@@ -383,6 +463,12 @@ describe('daily report routes (e2e)', () => {
 
   afterAll(async () => {
     if (db) {
+      if (flowStockItemId) {
+        await db
+          .deleteFrom('inventory_movements')
+          .where('stock_item_id', '=', flowStockItemId)
+          .execute();
+      }
       if (createdReports.length) {
         await db
           .deleteFrom('inventory_movements')
@@ -404,6 +490,56 @@ describe('daily report routes (e2e)', () => {
         await db
           .deleteFrom('daily_branch_reports')
           .where('id', 'in', createdReports)
+          .execute();
+      }
+      if (flowDispatchId) {
+        await db
+          .deleteFrom('dispatch_events')
+          .where('dispatch_id', '=', flowDispatchId)
+          .execute();
+        const receiptIds = db
+          .selectFrom('dispatch_receipts')
+          .select('id')
+          .where('dispatch_id', '=', flowDispatchId);
+        await db
+          .deleteFrom('dispatch_receipt_items')
+          .where('dispatch_receipt_id', 'in', receiptIds)
+          .execute();
+        await db
+          .deleteFrom('dispatch_receipts')
+          .where('dispatch_id', '=', flowDispatchId)
+          .execute();
+        await db
+          .deleteFrom('dispatch_items')
+          .where('dispatch_id', '=', flowDispatchId)
+          .execute();
+        await db
+          .deleteFrom('dispatches')
+          .where('id', '=', flowDispatchId)
+          .execute();
+      }
+      if (flowRequestId) {
+        await db
+          .deleteFrom('stock_request_events')
+          .where('stock_request_id', '=', flowRequestId)
+          .execute();
+        await db
+          .deleteFrom('stock_request_items')
+          .where('stock_request_id', '=', flowRequestId)
+          .execute();
+        await db
+          .deleteFrom('stock_requests')
+          .where('id', '=', flowRequestId)
+          .execute();
+      }
+      if (flowReceiptId) {
+        await db
+          .deleteFrom('supplier_receipt_items')
+          .where('supplier_receipt_id', '=', flowReceiptId)
+          .execute();
+        await db
+          .deleteFrom('supplier_receipts')
+          .where('id', '=', flowReceiptId)
           .execute();
       }
       if (movementIds.length)
@@ -437,6 +573,20 @@ describe('daily report routes (e2e)', () => {
           .execute();
         await db.deleteFrom('branches').where('id', '=', branchId).execute();
       }
+      if (flowBranchId) {
+        await db
+          .deleteFrom('branch_inventory')
+          .where('branch_id', '=', flowBranchId)
+          .execute();
+        await db
+          .deleteFrom('auth.branch_users')
+          .where('branch_id', '=', flowBranchId)
+          .execute();
+        await db
+          .deleteFrom('branches')
+          .where('id', '=', flowBranchId)
+          .execute();
+      }
       if (stockItemId)
         await db
           .deleteFrom('stock_items')
@@ -446,6 +596,21 @@ describe('daily report routes (e2e)', () => {
         await db
           .deleteFrom('stock_items')
           .where('id', '=', untrackedStockItemId)
+          .execute();
+      if (flowStockItemId) {
+        await db
+          .deleteFrom('commissary_inventory')
+          .where('stock_item_id', '=', flowStockItemId)
+          .execute();
+        await db
+          .deleteFrom('stock_items')
+          .where('id', '=', flowStockItemId)
+          .execute();
+      }
+      if (flowSupplierId)
+        await db
+          .deleteFrom('suppliers')
+          .where('id', '=', flowSupplierId)
           .execute();
       if (productId)
         await db.deleteFrom('products').where('id', '=', productId).execute();
@@ -746,5 +911,184 @@ describe('daily report routes (e2e)', () => {
     await request(app.getHttpServer())
       .post(`${reportUrl(report.id)}/submit`)
       .expect(409);
+  });
+
+  it('takes a supplier receipt through branch replenishment and daily report approval', async () => {
+    const businessDate = manilaDate(-1);
+    const supplierReceipt = await request(app.getHttpServer())
+      .post('/supplier-receipts')
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        supplier_id: flowSupplierId,
+        received_at: businessDate,
+        items: [
+          {
+            stock_item_id: flowStockItemId,
+            quantity_received: '12',
+            unit_cost: '10.25',
+          },
+        ],
+      })
+      .expect(201);
+    flowReceiptId = supplierReceipt.body.id as string;
+    expect(supplierReceipt.body.status).toBe('DRAFT');
+
+    const postedSupplierReceipt = await request(app.getHttpServer())
+      .post(`/supplier-receipts/${flowReceiptId}/post`)
+      .expect(201);
+    expect(postedSupplierReceipt.body.status).toBe('POSTED');
+
+    const requestResponse = await request(app.getHttpServer())
+      .post('/stock-requests')
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        branch_id: flowBranchId,
+        items: [{ stock_item_id: flowStockItemId, quantity_requested: '8' }],
+      })
+      .expect(201);
+    flowRequestId = requestResponse.body.id as string;
+    expect(requestResponse.body.status).toBe('PENDING');
+
+    activeActorId = reviewerId;
+    const approvedRequest = await request(app.getHttpServer())
+      .post(`/stock-requests/${flowRequestId}/approve`)
+      .expect(201);
+    expect(approvedRequest.body.status).toBe('APPROVED');
+
+    activeActorId = reporterId;
+    const dispatchDraft = await request(app.getHttpServer())
+      .post('/dispatches')
+      .set('Idempotency-Key', randomUUID())
+      .send({ stock_request_id: flowRequestId })
+      .expect(201);
+    flowDispatchId = dispatchDraft.body.id as string;
+    const dispatchItemId = dispatchDraft.body.items[0].id as string;
+    const listedDispatches = await request(app.getHttpServer())
+      .get('/dispatches')
+      .expect(200);
+    expect(
+      listedDispatches.body.items.some(
+        (item: { id: string }) => item.id === flowDispatchId,
+      ),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .get(`/dispatches/${flowDispatchId}`)
+      .expect(200)
+      .expect(({ body }) => expect(body.id).toBe(flowDispatchId));
+    activeActorId = unassignedUserId;
+    const unassignedDispatches = await request(app.getHttpServer())
+      .get('/dispatches')
+      .expect(200);
+    expect(unassignedDispatches.body.items).toEqual([]);
+    await request(app.getHttpServer())
+      .get(`/dispatches/${flowDispatchId}`)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post('/dispatches')
+      .set('Idempotency-Key', randomUUID())
+      .send({ stock_request_id: flowRequestId })
+      .expect(403);
+    activeActorId = reporterId;
+
+    const postedDispatch = await request(app.getHttpServer())
+      .post(`/dispatches/${flowDispatchId}/dispatch`)
+      .set('Idempotency-Key', randomUUID())
+      .send({})
+      .expect(201);
+    expect(postedDispatch.body.status).toBe('IN_TRANSIT');
+
+    const receivedDispatch = await request(app.getHttpServer())
+      .post(`/dispatches/${flowDispatchId}/receive`)
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        items: [{ dispatch_item_id: dispatchItemId, quantity_received: '8' }],
+      })
+      .expect(201);
+    expect(receivedDispatch.body.status).toBe('RECEIVED');
+
+    const transferIn = await db
+      .selectFrom('inventory_movements')
+      .innerJoin(
+        'dispatch_receipt_items',
+        'dispatch_receipt_items.id',
+        'inventory_movements.dispatch_receipt_item_id',
+      )
+      .innerJoin(
+        'dispatch_receipts',
+        'dispatch_receipts.id',
+        'dispatch_receipt_items.dispatch_receipt_id',
+      )
+      .select('inventory_movements.id')
+      .where('dispatch_receipts.dispatch_id', '=', flowDispatchId)
+      .executeTakeFirstOrThrow();
+    await db
+      .updateTable('inventory_movements')
+      .set({ created_at: new Date(`${businessDate}T02:00:00.000Z`) })
+      .where('id', '=', transferIn.id)
+      .execute();
+
+    const createdReport = await request(app.getHttpServer())
+      .post(`/branches/${flowBranchId}/daily-reports`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ business_date: businessDate });
+    expect(
+      createdReport.status,
+      `business_date=${businessDate}; response=${JSON.stringify(createdReport.body)}`,
+    ).toBe(201);
+    createdReports.push(createdReport.body.id as string);
+    const reportItem = createdReport.body.items.find(
+      (item: { stock_item_id: string }) =>
+        item.stock_item_id === flowStockItemId,
+    );
+    expect({
+      opening: normalizeDecimal(reportItem.opening_quantity),
+      receipts: normalizeDecimal(reportItem.receipt_quantity),
+      ledgerClosing: normalizeDecimal(reportItem.ledger_closing_quantity),
+    }).toEqual({ opening: '0', receipts: '8', ledgerClosing: '8' });
+
+    const reportUrlForFlow = `/branches/${flowBranchId}/daily-reports/${createdReport.body.id}`;
+    await request(app.getHttpServer())
+      .put(reportUrlForFlow)
+      .send({
+        items: [
+          {
+            stock_item_id: flowStockItemId,
+            physical_closing_quantity: '7.5',
+            waste_quantity: '0.5',
+            waste_reason: 'Spoiled during service',
+            adjustment_quantity: '0',
+          },
+        ],
+      })
+      .expect(200);
+    const submittedReport = await request(app.getHttpServer())
+      .post(`${reportUrlForFlow}/submit`)
+      .expect(200);
+    expect(submittedReport.body.status).toBe('SUBMITTED');
+
+    activeActorId = reviewerId;
+    const approvedReport = await request(app.getHttpServer())
+      .post(`${reportUrlForFlow}/approve`)
+      .expect(200);
+    expect(approvedReport.body.status).toBe('APPROVED');
+    expect(
+      normalizeDecimal(approvedReport.body.items[0].expected_closing_quantity),
+    ).toBe('7.5');
+
+    const balances = await Promise.all([
+      db
+        .selectFrom('commissary_inventory')
+        .select('quantity_on_hand')
+        .where('stock_item_id', '=', flowStockItemId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('branch_inventory')
+        .select('quantity_on_hand')
+        .where('branch_id', '=', flowBranchId)
+        .where('stock_item_id', '=', flowStockItemId)
+        .executeTakeFirstOrThrow(),
+    ]);
+    expect(normalizeDecimal(balances[0].quantity_on_hand)).toBe('4');
+    expect(normalizeDecimal(balances[1].quantity_on_hand)).toBe('7.5');
   });
 });

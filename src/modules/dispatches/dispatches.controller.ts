@@ -10,10 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
-import {
-  RequireBranchScope,
-  RequirePermission,
-} from '../../common/decorators/access-policy.decorator';
+import { RequirePermission } from '../../common/decorators/access-policy.decorator';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -26,7 +23,6 @@ import { DispatchesService } from './dispatches.service';
 
 @Controller('dispatches')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
-@RequireBranchScope()
 export class DispatchesController {
   constructor(private readonly service: DispatchesService) {}
 
