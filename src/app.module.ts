@@ -18,6 +18,7 @@ import { DispatchesModule } from './modules/dispatches/dispatches.module';
 import { RecipesModule } from './modules/recipes/recipes.module';
 import { BranchProductsModule } from './modules/branch-products/branch-products.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { DailyReportsModule } from './modules/daily-reports/daily-reports.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -44,6 +45,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     RecipesModule,
     BranchProductsModule,
     SalesModule,
+    DailyReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
