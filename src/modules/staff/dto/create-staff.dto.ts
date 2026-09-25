@@ -3,6 +3,7 @@ import {
   ArrayUnique,
   IsArray,
   IsEmail,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
@@ -29,9 +30,10 @@ export class CreateStaffDto {
   @MaxLength(128)
   password!: string;
 
+  @IsOptional()
   @IsString()
   @Matches(/^[1-9]\d{0,18}$/)
-  role_id!: string;
+  role_id?: string | null;
 
   @IsArray()
   @ArrayUnique()

@@ -136,6 +136,6 @@ export class StockRequestsService {
   }
 
   private isSuperAdmin(access: AccessContext): boolean {
-    return access.role.isSystem && access.role.code === 'SUPER_ADMIN';
+    return access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN';
   }
 }

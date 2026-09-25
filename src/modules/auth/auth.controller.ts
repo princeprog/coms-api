@@ -23,6 +23,7 @@ import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
+import { AllowUnassignedRole } from '../../common/decorators/access-policy.decorator';
 import { AuthExceptionFilter } from '../../common/filters/auth-exception.filter';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthService, type PublicUser, type TokenPair } from './auth.service';
@@ -89,6 +90,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(AuthGuard, AccessControlGuard)
+  @AllowUnassignedRole()
   me(
     @CurrentUser() user: PublicUser,
     @CurrentAccessContext() access: AccessContext,

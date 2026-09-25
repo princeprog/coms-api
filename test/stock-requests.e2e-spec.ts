@@ -101,11 +101,6 @@ describe('stock request routes (e2e)', () => {
     actorUserId = actor.id;
     currentUserId = actorUserId;
 
-    const noAccessRole = await db
-      .selectFrom('auth.roles')
-      .select('id')
-      .where('code', '=', 'NO_ACCESS')
-      .executeTakeFirstOrThrow();
     const otherUser = await db
       .insertInto('auth.users')
       .values({
@@ -113,7 +108,6 @@ describe('stock request routes (e2e)', () => {
         full_name: 'Stock Request E2E Test User',
         contact_number: `SR-${suffix.slice(0, 20)}`,
         hashed_password: 'test-only-hash',
-        role_id: noAccessRole.id,
       })
       .returning('id')
       .executeTakeFirstOrThrow();

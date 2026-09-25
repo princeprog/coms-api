@@ -66,7 +66,7 @@ export class StaffService {
       full_name: string;
       contact_number: string;
       password: string;
-      role_id: string;
+      role_id?: string | null;
       branch_ids: string[];
     },
     actorBranchIds: string[],
@@ -75,7 +75,8 @@ export class StaffService {
     const email = input.email.trim().toLowerCase();
     const fullName = input.full_name.trim();
     const contactNumber = input.contact_number.trim();
-    this.validateRoleId(input.role_id);
+    const roleId = input.role_id ?? null;
+    if (roleId !== null) this.validateRoleId(roleId);
     this.validateBranches(input.branch_ids);
     if (!actorIsSuperAdmin && actorBranchIds.length === 0)
       throw new ForbiddenException('Branch access required');
@@ -101,7 +102,7 @@ export class StaffService {
       full_name: fullName,
       contact_number: contactNumber,
       hashed_password: await hashPassword(input.password),
-      role_id: input.role_id,
+      role_id: roleId,
       branch_ids: input.branch_ids,
     });
   }
@@ -153,14 +154,14 @@ export class StaffService {
   async assignRole(
     id: string,
     actorId: string,
-    roleId: string,
+    roleId: string | null,
     requestedBranchId: string | undefined,
     actorBranchIds: string[],
     actorIsSuperAdmin: boolean,
   ) {
     this.validateUserId(id);
     this.validateUserId(actorId);
-    this.validateRoleId(roleId);
+    if (roleId !== null) this.validateRoleId(roleId);
     if (id === actorId)
       throw new ForbiddenException('You cannot change your own role');
     const branchId = this.requireBranchAccess(

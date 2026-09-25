@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ALLOW_UNASSIGNED_ROLE_KEY,
   ACCESS_PERMISSION_KEY,
   BRANCH_SCOPE_KEY,
 } from '../decorators/access-policy.decorator';
@@ -79,6 +80,62 @@ describe('AccessControlGuard', () => {
     await expect(
       inactiveRoleGuard.canActivate(executionContext(request)),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('denies an unassigned account except when loading its own access context', async () => {
+    const context = {
+      userId: 'user-1',
+      accountActive: true,
+      role: null,
+      permissions: [],
+      branchIds: [],
+    };
+    const service = { findAccessContext: vi.fn().mockResolvedValue(context) };
+    const protectedReflector = {
+      getAllAndOverride: vi.fn((key: string) =>
+        key === ACCESS_PERMISSION_KEY ? 'inventory.read' : undefined,
+      ),
+    };
+    const protectedRequest = { user: { id: 'user-1' } };
+    const protectedGuard = new AccessControlGuard(
+      service as never,
+      protectedReflector as never,
+    );
+    await expect(
+      protectedGuard.canActivate(executionContext(protectedRequest)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const mixedPolicyReflector = {
+      getAllAndOverride: vi.fn((key: string) => {
+        if (key === ALLOW_UNASSIGNED_ROLE_KEY) return true;
+        if (key === ACCESS_PERMISSION_KEY) return 'inventory.read';
+        return undefined;
+      }),
+    };
+    const mixedPolicyGuard = new AccessControlGuard(
+      service as never,
+      mixedPolicyReflector as never,
+    );
+    await expect(
+      mixedPolicyGuard.canActivate(
+        executionContext({ user: { id: 'user-1' } }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const accessContextReflector = {
+      getAllAndOverride: vi.fn((key: string) =>
+        key === ALLOW_UNASSIGNED_ROLE_KEY ? true : undefined,
+      ),
+    };
+    const accessContextRequest = { user: { id: 'user-1' } };
+    const accessContextGuard = new AccessControlGuard(
+      service as never,
+      accessContextReflector as never,
+    );
+    await expect(
+      accessContextGuard.canActivate(executionContext(accessContextRequest)),
+    ).resolves.toBe(true);
+    expect(accessContextRequest).toHaveProperty('accessContext', context);
   });
 
   it('requires a grant and assigned branch unless protected Super Admin', async () => {

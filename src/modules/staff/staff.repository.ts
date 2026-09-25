@@ -27,14 +27,14 @@ export class StaffRepository {
     const pattern = search?.trim() ? `%${search.trim()}%` : undefined;
     let records = this.db
       .selectFrom('auth.users as u')
-      .innerJoin('auth.roles as r', 'r.id', 'u.role_id')
+      .leftJoin('auth.roles as r', 'r.id', 'u.role_id')
       .select([
         'u.id',
         'u.email',
         'u.full_name',
         'u.contact_number',
         'u.is_active',
-        'r.id as role_id',
+        'u.role_id as role_id',
         'r.code as role_code',
         'r.role_name as role_name',
       ])
@@ -97,14 +97,14 @@ export class StaffRepository {
   ) {
     let memberQuery = connection
       .selectFrom('auth.users as u')
-      .innerJoin('auth.roles as r', 'r.id', 'u.role_id')
+      .leftJoin('auth.roles as r', 'r.id', 'u.role_id')
       .select([
         'u.id',
         'u.email',
         'u.full_name',
         'u.contact_number',
         'u.is_active',
-        'r.id as role_id',
+        'u.role_id as role_id',
         'r.code as role_code',
         'r.role_name as role_name',
       ])
@@ -133,12 +133,13 @@ export class StaffRepository {
     full_name: string;
     contact_number: string;
     hashed_password: string;
-    role_id: string;
+    role_id: string | null;
     branch_ids: string[];
   }) {
     try {
       return await this.db.transaction().execute(async (trx) => {
-        await this.assertAssignableRole(trx, input.role_id);
+        if (input.role_id !== null)
+          await this.assertAssignableRole(trx, input.role_id);
         await this.assertActiveBranches(trx, input.branch_ids);
         const user = await trx
           .insertInto('auth.users')
@@ -211,7 +212,7 @@ export class StaffRepository {
 
   async assignRole(
     id: string,
-    roleId: string,
+    roleId: string | null,
     actorIsSuperAdmin: boolean,
     branchId?: string,
   ) {
@@ -219,7 +220,7 @@ export class StaffRepository {
       await this.lockUser(trx, id);
       if (branchId) await this.assertUserInBranch(trx, id, branchId);
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
-      await this.assertAssignableRole(trx, roleId);
+      if (roleId !== null) await this.assertAssignableRole(trx, roleId);
       const changed = await trx
         .updateTable('auth.users')
         .set({ role_id: roleId, updated_at: sql<Date>`now()` })

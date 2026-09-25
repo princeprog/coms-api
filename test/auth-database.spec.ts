@@ -35,6 +35,8 @@ import { AccessControlRepository } from '../src/modules/access-control/access-co
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
 import { AccessControlGuard } from '../src/common/guards/access-control.guard';
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
+import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
+import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
 import { hashPassword } from '../src/modules/auth/password-hashing';
 import { DATABASE } from '../src/database/database.module';
 import { RolesRepository } from '../src/modules/roles/roles.repository';
@@ -96,6 +98,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             rotation,
             zz_limits: limits,
             zzz_access_control: accessControl,
+            zzzz_predefined_roles: predefinedRoles,
+            zzzzz_no_access_role_removal: noAccessRoleRemoval,
           }),
         },
       });
@@ -103,15 +107,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await migrator.migrateDown()).error).toBeUndefined();
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
       await sql`
-        INSERT INTO auth.users (email, full_name, contact_number, hashed_password, role_id)
-        SELECT
+        INSERT INTO auth.users (email, full_name, contact_number, hashed_password)
+        VALUES (
           ${credentials.email},
           'Auth Test',
           'test-account',
-          ${await hashPassword(credentials.password)},
-          id
-        FROM auth.roles
-        WHERE code = 'NO_ACCESS'
+          ${await hashPassword(credentials.password)}
+        )
       `.execute(db);
       for (const connection of [db, db2]) {
         const module = await Test.createTestingModule({
@@ -297,7 +299,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .expect(200);
       expect(me.body).toMatchObject({
         user: { email: credentials.email },
-        role: { code: 'NO_ACCESS', isActive: true },
+        role: null,
         permissions: [],
         branch_ids: [],
       });
@@ -409,14 +411,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       await expect(roles.deactivate(created.id)).rejects.toMatchObject({
         status: 409,
       });
-      const noAccess = await db
-        .selectFrom('auth.roles')
-        .select('id')
-        .where('code', '=', 'NO_ACCESS')
-        .executeTakeFirstOrThrow();
       await db
         .updateTable('auth.users')
-        .set({ role_id: noAccess.id })
+        .set({ role_id: null })
         .where('email', '=', credentials.email)
         .execute();
       await expect(roles.deactivate(created.id)).resolves.toMatchObject({
@@ -499,6 +496,26 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       });
       expect(member).not.toHaveProperty('hashed_password');
 
+      const unassigned = await staff.create(
+        {
+          email: 'staff.unassigned@example.com',
+          full_name: 'Staff Without Role',
+          contact_number: '09179990002',
+          password,
+          branch_ids: [],
+        },
+        [],
+        true,
+      );
+      expect(unassigned).toMatchObject({
+        role_id: null,
+        role_code: null,
+        role_name: null,
+      });
+      await expect(
+        new AccessControlRepository(db).findAccessContext(unassigned.id),
+      ).resolves.toMatchObject({ role: null, permissions: [] });
+
       await expect(
         staff.list(
           { page: 1, page_size: 25, branch_id: branch.id },
@@ -571,11 +588,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .select('id')
         .where('code', '=', 'SUPER_ADMIN')
         .executeTakeFirstOrThrow();
-      const noAccess = await db
-        .selectFrom('auth.roles')
-        .select('id')
-        .where('code', '=', 'NO_ACCESS')
-        .executeTakeFirstOrThrow();
       await expect(
         new StaffRepository(db).assignRole(member.id, superAdmin.id, false),
       ).rejects.toMatchObject({ status: 403 });
@@ -590,14 +602,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .where('id', '=', existingAdmin.id)
         .execute();
       await expect(
-        staffRepository.assignRole(existingAdmin.id, noAccess.id, false),
+        staffRepository.assignRole(existingAdmin.id, null, false),
       ).rejects.toMatchObject({ status: 403 });
       await expect(
         staffRepository.deactivate(existingAdmin.id, false),
       ).rejects.toMatchObject({ status: 403 });
       await db
         .updateTable('auth.users')
-        .set({ role_id: noAccess.id })
+        .set({ role_id: null })
         .where('id', '=', existingAdmin.id)
         .execute();
 

@@ -14,6 +14,7 @@ import { AccessControlService } from '../../modules/access-control/access-contro
 import type { AccessContext } from '../../modules/access-control/access-control.types';
 import {
   ACCESS_PERMISSION_KEY,
+  ALLOW_UNASSIGNED_ROLE_KEY,
   BRANCH_SCOPE_KEY,
 } from '../decorators/access-policy.decorator';
 
@@ -39,11 +40,13 @@ export class AccessControlGuard implements CanActivate {
     );
     if (!accessContext || !accessContext.accountActive)
       throw new UnauthorizedException('Authentication required');
-    if (!accessContext.role.isActive)
-      throw new ForbiddenException('The assigned role is inactive');
-
     request.accessContext = accessContext;
     const targets = [execution.getHandler(), execution.getClass()];
+    const allowUnassignedRole =
+      this.reflector.getAllAndOverride<boolean>(
+        ALLOW_UNASSIGNED_ROLE_KEY,
+        targets,
+      ) === true;
     const permission = this.reflector.getAllAndOverride<PermissionKey>(
       ACCESS_PERMISSION_KEY,
       targets,
@@ -51,14 +54,20 @@ export class AccessControlGuard implements CanActivate {
     const branchScoped =
       this.reflector.getAllAndOverride<boolean>(BRANCH_SCOPE_KEY, targets) ===
       true;
+    if (!accessContext.role) {
+      if (!allowUnassignedRole || permission || branchScoped)
+        throw new ForbiddenException('An active role is required');
+      return true;
+    }
+    if (!accessContext.role.isActive)
+      throw new ForbiddenException('The assigned role is inactive');
+
     if (!permission && !branchScoped) return true;
 
     const superAdmin =
       accessContext.role.isSystem && accessContext.role.code === 'SUPER_ADMIN';
-    const noAccess =
-      accessContext.role.isSystem && accessContext.role.code === 'NO_ACCESS';
     if (permission && !superAdmin) {
-      if (noAccess || !accessContext.permissions.includes(permission))
+      if (!accessContext.permissions.includes(permission))
         throw new ForbiddenException('Permission required');
     }
     if (branchScoped && !superAdmin) {

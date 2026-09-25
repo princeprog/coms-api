@@ -13,7 +13,7 @@ export class BranchesService {
 
   list(access: AccessContext, query: BranchQueryDto) {
     const isSuperAdmin =
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN';
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN';
     return this.repository.list(
       query.page,
       query.page_size,

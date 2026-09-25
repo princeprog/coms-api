@@ -81,7 +81,7 @@ describe('RolesService', () => {
     const repository = {
       findById: vi.fn().mockResolvedValue({
         id: '1',
-        code: 'NO_ACCESS',
+        code: 'SUPER_ADMIN',
         is_system: true,
       }),
       updateName: vi.fn(),

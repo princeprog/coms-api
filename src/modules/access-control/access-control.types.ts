@@ -9,7 +9,7 @@ export type AccessContext = {
     name: string;
     isSystem: boolean;
     isActive: boolean;
-  };
+  } | null;
   permissions: PermissionKey[];
   branchIds: string[];
 };

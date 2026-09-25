@@ -9,7 +9,7 @@ describe('AccessControlRepository', () => {
   it('loads active role grants and only active assigned branches', async () => {
     const userQuery = {
       select: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       executeTakeFirst: vi.fn().mockResolvedValue({
         user_id: 'user-1',
@@ -63,5 +63,44 @@ describe('AccessControlRepository', () => {
       'bu.branch_id',
     );
     expect(branchQuery.where).toHaveBeenCalledWith('b.status', '=', 'active');
+  });
+
+  it('returns an empty access context for a user without an assigned role', async () => {
+    const userQuery = {
+      select: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      executeTakeFirst: vi.fn().mockResolvedValue({
+        user_id: 'user-2',
+        account_active: true,
+        role_id: null,
+        role_code: null,
+        role_name: null,
+        role_is_system: null,
+        role_is_active: null,
+      }),
+    };
+    const branchQuery = {
+      select: vi.fn().mockReturnThis(),
+      innerJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      execute: vi.fn().mockResolvedValue([{ branch_id: 'branch-2' }]),
+    };
+    const db = {
+      selectFrom: vi
+        .fn()
+        .mockReturnValueOnce(userQuery)
+        .mockReturnValueOnce(branchQuery),
+    };
+    const repository = new AccessControlRepository(db as never);
+
+    await expect(repository.findAccessContext('user-2')).resolves.toEqual({
+      userId: 'user-2',
+      accountActive: true,
+      role: null,
+      permissions: [],
+      branchIds: ['branch-2'],
+    });
+    expect(db.selectFrom).toHaveBeenCalledTimes(2);
   });
 });

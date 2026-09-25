@@ -44,7 +44,7 @@ export class StaffController {
     return this.service.list(
       query,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 
@@ -60,7 +60,7 @@ export class StaffController {
       userId,
       scope.branch_id,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 
@@ -74,7 +74,7 @@ export class StaffController {
     return this.service.create(
       dto,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 
@@ -92,7 +92,7 @@ export class StaffController {
       dto,
       scope.branch_id,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 
@@ -112,7 +112,7 @@ export class StaffController {
       dto.role_id,
       scope.branch_id,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 
@@ -131,7 +131,7 @@ export class StaffController {
       actor.id,
       dto.branch_ids,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
       scope.branch_id,
     );
   }
@@ -150,7 +150,7 @@ export class StaffController {
       actor.id,
       scope.branch_id,
       access.branchIds,
-      access.role.isSystem && access.role.code === 'SUPER_ADMIN',
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
 }
