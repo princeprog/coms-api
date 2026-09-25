@@ -44,6 +44,39 @@ describe('RolesService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it('allows predefined operational roles to be renamed and have grants replaced', async () => {
+    const repository = {
+      findById: vi.fn().mockResolvedValue({
+        id: '14',
+        code: 'CASHIER',
+        is_system: false,
+        is_predefined: true,
+      }),
+      updateName: vi.fn().mockResolvedValue({
+        id: '14',
+        code: 'CASHIER',
+        role_name: 'Front Counter',
+        is_predefined: true,
+      }),
+      replacePermissions: vi.fn().mockResolvedValue({
+        id: '14',
+        permission_keys: [],
+      }),
+    };
+    const service = new RolesService(repository as never);
+
+    await expect(service.update('14', 'Front Counter')).resolves.toMatchObject({
+      role_name: 'Front Counter',
+      is_predefined: true,
+    });
+    await expect(service.replacePermissions('14', [])).resolves.toEqual({
+      id: '14',
+      permission_keys: [],
+    });
+    expect(repository.updateName).toHaveBeenCalledWith('14', 'Front Counter');
+    expect(repository.replacePermissions).toHaveBeenCalledWith('14', []);
+  });
+
   it('rejects invalid role IDs and protects every system role', async () => {
     const repository = {
       findById: vi.fn().mockResolvedValue({

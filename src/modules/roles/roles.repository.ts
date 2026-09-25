@@ -25,7 +25,14 @@ export class RolesRepository {
     const [roles, grants] = await Promise.all([
       this.db
         .selectFrom('auth.roles')
-        .select(['id', 'code', 'role_name', 'is_system', 'is_active'])
+        .select([
+          'id',
+          'code',
+          'role_name',
+          'is_system',
+          'is_predefined',
+          'is_active',
+        ])
         .orderBy('role_name')
         .execute(),
       this.db
@@ -69,7 +76,14 @@ export class RolesRepository {
             is_system: false,
             is_active: true,
           })
-          .returning(['id', 'code', 'role_name', 'is_system', 'is_active'])
+          .returning([
+            'id',
+            'code',
+            'role_name',
+            'is_system',
+            'is_predefined',
+            'is_active',
+          ])
           .executeTakeFirstOrThrow();
         await this.writeGrants(trx, role.id, input.permission_keys);
         return { ...role, permission_keys: input.permission_keys };
@@ -91,7 +105,14 @@ export class RolesRepository {
           .updateTable('auth.roles')
           .set({ role_name: roleName.trim(), updated_at: sql<Date>`now()` })
           .where('id', '=', id)
-          .returning(['id', 'code', 'role_name', 'is_system', 'is_active'])
+          .returning([
+            'id',
+            'code',
+            'role_name',
+            'is_system',
+            'is_predefined',
+            'is_active',
+          ])
           .executeTakeFirst();
       });
     } catch (error) {
@@ -129,7 +150,14 @@ export class RolesRepository {
         .updateTable('auth.roles')
         .set({ is_active: false, updated_at: sql<Date>`now()` })
         .where('id', '=', id)
-        .returning(['id', 'code', 'role_name', 'is_system', 'is_active'])
+        .returning([
+          'id',
+          'code',
+          'role_name',
+          'is_system',
+          'is_predefined',
+          'is_active',
+        ])
         .executeTakeFirst();
     });
   }

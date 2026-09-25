@@ -4,13 +4,18 @@ import { parse } from 'dotenv';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as initial from '../src/database/migrations/20260920174538_auth';
 import * as rotation from '../src/database/migrations/20260921120000_auth_token_rotation';
 import * as limits from '../src/database/migrations/20260922164052_auth_rate_limits';
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
 import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
 import { PERMISSION_CATALOG } from '../src/modules/access-control/permission-catalog';
+import { RolesRepository } from '../src/modules/roles/roles.repository';
+
+vi.mock('../src/database/database.module', () => ({
+  DATABASE: Symbol('DATABASE'),
+}));
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
   'access control migration',
@@ -124,6 +129,26 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           is_active: true,
         },
       ]);
+      const roleRepository = new RolesRepository(testDb! as never);
+      const apiRoles = await roleRepository.list();
+      expect(
+        apiRoles.every((role) => typeof role.is_predefined === 'boolean'),
+      ).toBe(true);
+      const cashier = apiRoles.find((role) => role.code === 'CASHIER')!;
+      expect(cashier.is_predefined).toBe(true);
+      expect(
+        await roleRepository.updateName(cashier.id, 'Front Counter'),
+      ).toMatchObject({ is_predefined: true });
+      await roleRepository.updateName(cashier.id, 'Cashier');
+      const customRole = await roleRepository.create({
+        code: 'CUSTOM_ROLE',
+        role_name: 'Custom Role',
+        permission_keys: [],
+      });
+      expect(customRole.is_predefined).toBe(false);
+      await sql`DELETE FROM auth.roles WHERE id = ${customRole.id}`.execute(
+        testDb!,
+      );
       const permissions = await sql<{
         module_key: string;
         action_key: string;
