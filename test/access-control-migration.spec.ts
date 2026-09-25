@@ -9,6 +9,7 @@ import * as initial from '../src/database/migrations/20260920174538_auth';
 import * as rotation from '../src/database/migrations/20260921120000_auth_token_rotation';
 import * as limits from '../src/database/migrations/20260922164052_auth_rate_limits';
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
+import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
 import { PERMISSION_CATALOG } from '../src/modules/access-control/permission-catalog';
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
@@ -58,6 +59,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             '20260921120000_auth_token_rotation': rotation,
             '20260922164052_auth_rate_limits': limits,
             '20260923214210_access_control': accessControl,
+            '20260926011909_predefined_roles': predefinedRoles,
           }),
         },
       });
@@ -74,15 +76,54 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       }
     });
 
-    it('creates fixed access catalogs and gives legacy accounts no grants', async () => {
-      const roles = await sql<{ code: string; is_system: boolean }>`
-        SELECT code, is_system FROM auth.roles ORDER BY code
+    it('creates fixed catalogs and seeds editable operational roles', async () => {
+      const roles = await sql<{
+        code: string;
+        role_name: string;
+        is_system: boolean;
+        is_predefined: boolean;
+        is_active: boolean;
+      }>`
+        SELECT code, role_name, is_system, is_predefined, is_active
+        FROM auth.roles ORDER BY code
       `.execute(testDb!);
       expect(roles.rows).toEqual([
-        { code: 'NO_ACCESS', is_system: true },
-        { code: 'SUPER_ADMIN', is_system: true },
+        {
+          code: 'BRANCH_MANAGER',
+          role_name: 'Branch Manager',
+          is_system: false,
+          is_predefined: true,
+          is_active: true,
+        },
+        {
+          code: 'CASHIER',
+          role_name: 'Cashier',
+          is_system: false,
+          is_predefined: true,
+          is_active: true,
+        },
+        {
+          code: 'COMMISSARY_MANAGER',
+          role_name: 'Commissary Manager',
+          is_system: false,
+          is_predefined: true,
+          is_active: true,
+        },
+        {
+          code: 'NO_ACCESS',
+          role_name: 'No Access',
+          is_system: true,
+          is_predefined: false,
+          is_active: true,
+        },
+        {
+          code: 'SUPER_ADMIN',
+          role_name: 'Super Admin',
+          is_system: true,
+          is_predefined: false,
+          is_active: true,
+        },
       ]);
-
       const permissions = await sql<{
         module_key: string;
         action_key: string;
@@ -156,9 +197,203 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       ]);
 
       const roleGrants = await sql<{ count: number }>`
-        SELECT count(*)::int AS count FROM auth.role_permissions
+        SELECT count(*)::int AS count FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id WHERE r.is_system
       `.execute(testDb!);
       expect(roleGrants.rows[0].count).toBe(0);
+
+      const seededGrants = await sql<{ code: string; key: string }>`
+        SELECT r.code, p.module_key || '.' || p.action_key AS key
+        FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE r.is_predefined
+      `.execute(testDb!);
+      const grantsByRole = seededGrants.rows.reduce<Record<string, string[]>>(
+        (all, { code, key }) => {
+          (all[code] ??= []).push(key);
+          return all;
+        },
+        {},
+      );
+      for (const grants of Object.values(grantsByRole)) grants.sort();
+      const expectedGrants = {
+        BRANCH_MANAGER: [
+          'branch_products.availability_update',
+          'branch_products.read',
+          'branches.read',
+          'daily_reports.create',
+          'daily_reports.read',
+          'daily_reports.submit',
+          'daily_reports.update',
+          'dispatches.read',
+          'dispatches.receive',
+          'inventory.read',
+          'products.read',
+          'sales.create',
+          'sales.read',
+          'sales.void',
+          'stock_items.read',
+          'stock_requests.cancel',
+          'stock_requests.create',
+          'stock_requests.read',
+        ],
+        CASHIER: [
+          'branch_products.read',
+          'branches.read',
+          'sales.create',
+          'sales.read',
+        ],
+        COMMISSARY_MANAGER: [
+          'branches.read',
+          'branch_products.availability_update',
+          'branch_products.create',
+          'branch_products.read',
+          'branch_products.update',
+          'daily_reports.approve',
+          'daily_reports.read',
+          'daily_reports.return',
+          'dispatches.create',
+          'dispatches.dispatch',
+          'dispatches.read',
+          'dispatches.shortage_close',
+          'inventory.adjust',
+          'inventory.read',
+          'products.create',
+          'products.read',
+          'products.update',
+          'recipes.create',
+          'recipes.read',
+          'recipes.update',
+          'sales.read',
+          'stock_items.create',
+          'stock_items.read',
+          'stock_items.update',
+          'stock_requests.approve',
+          'stock_requests.read',
+          'stock_requests.reject',
+          'supplier_receipts.create',
+          'supplier_receipts.post',
+          'supplier_receipts.read',
+          'suppliers.create',
+          'suppliers.read',
+          'suppliers.update',
+        ],
+      };
+      for (const grants of Object.values(expectedGrants)) grants.sort();
+      expect(grantsByRole).toEqual(expectedGrants);
+    });
+
+    it('keeps edited predefined grants and refuses to roll them back', async () => {
+      const role = await sql<{ id: string }>`
+        SELECT id FROM auth.roles WHERE code = 'CASHIER'
+      `.execute(testDb!);
+      const originalGrants = await sql<{
+        module_key: string;
+        action_key: string;
+      }>`
+        SELECT p.module_key, p.action_key
+        FROM auth.role_permissions AS rp
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE rp.role_id = ${role.rows[0].id}
+        ORDER BY p.module_key, p.action_key
+      `.execute(testDb!);
+      await sql`DELETE FROM auth.role_permissions WHERE role_id = ${role.rows[0].id}`.execute(
+        testDb!,
+      );
+
+      const migrator = new Migrator({
+        db: testDb!,
+        provider: {
+          getMigrations: async () => ({
+            '20260920174538_auth': initial,
+            '20260921120000_auth_token_rotation': rotation,
+            '20260922164052_auth_rate_limits': limits,
+            '20260923214210_access_control': accessControl,
+            '20260926011909_predefined_roles': predefinedRoles,
+          }),
+        },
+      });
+      const rerun = await migrator.migrateToLatest();
+      expect(rerun.error).toBeUndefined();
+      const grants = await sql<{ count: number }>`
+        SELECT count(*)::int AS count FROM auth.role_permissions
+        WHERE role_id = ${role.rows[0].id}
+      `.execute(testDb!);
+      expect(grants.rows[0].count).toBe(0);
+
+      await expect(predefinedRoles.down(testDb!)).rejects.toThrow(
+        /CASHIER.*changed/i,
+      );
+      const roleAfterRollbackAttempt = await sql<{ is_predefined: boolean }>`
+        SELECT is_predefined FROM auth.roles WHERE id = ${role.rows[0].id}
+      `.execute(testDb!);
+      expect(roleAfterRollbackAttempt.rows[0].is_predefined).toBe(true);
+
+      for (const grant of originalGrants.rows) {
+        await sql`
+          INSERT INTO auth.role_permissions (role_id, permission_id)
+          SELECT ${role.rows[0].id}, id FROM auth.permissions
+          WHERE module_key = ${grant.module_key} AND action_key = ${grant.action_key}
+        `.execute(testDb!);
+      }
+
+      await sql`UPDATE auth.users SET role_id = ${role.rows[0].id}
+        WHERE email = ${existingUser.email}`.execute(testDb!);
+      await expect(predefinedRoles.down(testDb!)).rejects.toThrow(
+        /CASHIER.*assigned/i,
+      );
+      const noAccess = await sql<{ id: string }>`
+        SELECT id FROM auth.roles WHERE code = 'NO_ACCESS'
+      `.execute(testDb!);
+      await sql`UPDATE auth.users SET role_id = ${noAccess.rows[0].id}
+        WHERE email = ${existingUser.email}`.execute(testDb!);
+      await predefinedRoles.down(testDb!);
+
+      await sql`
+        INSERT INTO auth.roles (code, role_name)
+        VALUES ('LOCAL_MANAGER', 'Commissary Manager')
+      `.execute(testDb!);
+      await expect(
+        testDb!.transaction().execute((trx) => predefinedRoles.up(trx)),
+      ).rejects.toThrow(/LOCAL_MANAGER.*Commissary Manager/i);
+      const columnAfterNameConflict = await sql<{ count: number }>`
+        SELECT count(*)::int AS count FROM information_schema.columns
+        WHERE table_schema = 'auth' AND table_name = 'roles'
+        AND column_name = 'is_predefined'
+      `.execute(testDb!);
+      expect(columnAfterNameConflict.rows[0].count).toBe(0);
+      await sql`DELETE FROM auth.roles WHERE code = 'LOCAL_MANAGER'`.execute(
+        testDb!,
+      );
+
+      await sql`
+        INSERT INTO auth.roles (code, role_name)
+        VALUES ('BRANCH_MANAGER', 'Local Branch Manager')
+      `.execute(testDb!);
+      await expect(
+        testDb!.transaction().execute((trx) => predefinedRoles.up(trx)),
+      ).rejects.toThrow(/BRANCH_MANAGER.*Local Branch Manager/i);
+      await sql`DELETE FROM auth.roles WHERE code = 'BRANCH_MANAGER'`.execute(
+        testDb!,
+      );
+
+      await sql`DELETE FROM auth.permissions
+        WHERE module_key = 'inventory' AND action_key = 'adjust'`.execute(
+        testDb!,
+      );
+      await expect(
+        testDb!.transaction().execute((trx) => predefinedRoles.up(trx)),
+      ).rejects.toThrow(/missing.*inventory.adjust/i);
+      const rolesAfterMissingPermission = await sql<{ count: number }>`
+        SELECT count(*)::int AS count FROM auth.roles WHERE code IN
+        ('COMMISSARY_MANAGER', 'BRANCH_MANAGER', 'CASHIER')
+      `.execute(testDb!);
+      expect(rolesAfterMissingPermission.rows[0].count).toBe(0);
+      await sql`
+        INSERT INTO auth.permissions (module_key, action_key, description)
+        VALUES ('inventory', 'adjust', 'Adjust inventory with a reason')
+      `.execute(testDb!);
     });
 
     it('rolls back only the added access schema and keeps auth users', async () => {

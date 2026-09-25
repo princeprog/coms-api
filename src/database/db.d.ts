@@ -58,6 +58,7 @@ export interface AuthRoles {
   created_at: Generated<Timestamp>;
   id: Generated<Int8>;
   is_active: Generated<boolean>;
+  is_predefined: Generated<boolean>;
   is_system: Generated<boolean>;
   role_name: string;
   updated_at: Generated<Timestamp>;
