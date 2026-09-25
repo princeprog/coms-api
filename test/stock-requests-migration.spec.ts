@@ -13,6 +13,7 @@ import * as catalogs from '../src/database/migrations/20260924004212_operational
 import * as inventory from '../src/database/migrations/20260924012454_inventory_ledger';
 import * as supplierReceipts from '../src/database/migrations/20260924014633_supplier_receipts';
 import * as stockRequests from '../src/database/migrations/20260924033004_stock_requests';
+import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
   'stock requests migration',
@@ -48,6 +49,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         '20260924012454_inventory_ledger': inventory,
         '20260924014633_supplier_receipts': supplierReceipts,
         '20260924033004_stock_requests': stockRequests,
+        '20260926032413_remove_no_access_role': noAccessRoleRemoval,
       };
       migrator = new Migrator({
         db: testDb,
@@ -56,11 +58,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const migrated = await migrator.migrateToLatest();
       expect(migrated.error).toBeUndefined();
 
-      const noAccessRole = await testDb
-        .selectFrom('auth.roles')
-        .select('id')
-        .where('code', '=', 'NO_ACCESS')
-        .executeTakeFirstOrThrow();
       const actor = await testDb
         .insertInto('auth.users')
         .values({
@@ -68,7 +65,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           full_name: 'Stock Request Migration Test User',
           contact_number: 'stock-request-migration-test',
           hashed_password: 'existing-password-hash',
-          role_id: noAccessRole.id,
         })
         .returning('id')
         .executeTakeFirstOrThrow();
@@ -217,6 +213,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     });
 
     it('rolls back its request schema without removing existing operations data', async () => {
+      expect((await migrator!.migrateDown()).error).toBeUndefined();
       expect((await migrator!.migrateDown()).error).toBeUndefined();
       const remainingSchema = await sql
         .raw(

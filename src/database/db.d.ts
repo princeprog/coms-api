@@ -89,7 +89,7 @@ export interface AuthUsers {
   hashed_password: string;
   id: Generated<string>;
   is_active: Generated<boolean>;
-  role_id: Int8;
+  role_id: Int8 | null;
   updated_at: Generated<Timestamp>;
 }
 

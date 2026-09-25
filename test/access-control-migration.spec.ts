@@ -10,6 +10,7 @@ import * as rotation from '../src/database/migrations/20260921120000_auth_token_
 import * as limits from '../src/database/migrations/20260922164052_auth_rate_limits';
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
 import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
+import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
 import { PERMISSION_CATALOG } from '../src/modules/access-control/permission-catalog';
 import { RolesRepository } from '../src/modules/roles/roles.repository';
 
@@ -65,6 +66,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             '20260922164052_auth_rate_limits': limits,
             '20260923214210_access_control': accessControl,
             '20260926011909_predefined_roles': predefinedRoles,
+            '20260926032413_remove_no_access_role': noAccessRoleRemoval,
           }),
         },
       });
@@ -112,13 +114,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           role_name: 'Commissary Manager',
           is_system: false,
           is_predefined: true,
-          is_active: true,
-        },
-        {
-          code: 'NO_ACCESS',
-          role_name: 'No Access',
-          is_system: true,
-          is_predefined: false,
           is_active: true,
         },
         {
@@ -202,12 +197,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         contact_number: string;
         hashed_password: string;
         is_active: boolean;
-        role_code: string;
+        role_id: string | null;
+        role_code: string | null;
       }>`
         SELECT u.email, u.full_name, u.contact_number, u.hashed_password,
-               u.is_active, r.code AS role_code
+               u.is_active, u.role_id, r.code AS role_code
         FROM auth.users AS u
-        JOIN auth.roles AS r ON r.id = u.role_id
+        LEFT JOIN auth.roles AS r ON r.id = u.role_id
         WHERE u.email = ${existingUser.email}
       `.execute(testDb!);
       expect(user.rows).toEqual([
@@ -217,7 +213,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           contact_number: existingUser.contactNumber,
           hashed_password: existingUser.passwordHash,
           is_active: true,
-          role_code: 'NO_ACCESS',
+          role_id: null,
+          role_code: null,
         },
       ]);
 
@@ -336,6 +333,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             '20260922164052_auth_rate_limits': limits,
             '20260923214210_access_control': accessControl,
             '20260926011909_predefined_roles': predefinedRoles,
+            '20260926032413_remove_no_access_role': noAccessRoleRemoval,
           }),
         },
       });
@@ -368,10 +366,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       await expect(predefinedRoles.down(testDb!)).rejects.toThrow(
         /CASHIER.*assigned/i,
       );
-      const noAccess = await sql<{ id: string }>`
-        SELECT id FROM auth.roles WHERE code = 'NO_ACCESS'
-      `.execute(testDb!);
-      await sql`UPDATE auth.users SET role_id = ${noAccess.rows[0].id}
+      await sql`UPDATE auth.users SET role_id = NULL
         WHERE email = ${existingUser.email}`.execute(testDb!);
       await predefinedRoles.down(testDb!);
 
@@ -419,6 +414,48 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         INSERT INTO auth.permissions (module_key, action_key, description)
         VALUES ('inventory', 'adjust', 'Adjust inventory with a reason')
       `.execute(testDb!);
+    });
+
+    it('removes NO_ACCESS assignments and restores deny-by-default on rollback', async () => {
+      const initialState = await sql<{
+        role_id: string | null;
+        no_access_count: number;
+      }>`
+        SELECT u.role_id,
+               (SELECT count(*)::int FROM auth.roles WHERE code = 'NO_ACCESS') AS no_access_count
+        FROM auth.users AS u WHERE u.email = ${existingUser.email}
+      `.execute(testDb!);
+      expect(initialState.rows[0]).toEqual({
+        role_id: null,
+        no_access_count: 0,
+      });
+
+      await testDb!
+        .transaction()
+        .execute((trx) => noAccessRoleRemoval.down(trx));
+      const restored = await sql<{
+        role_code: string;
+        is_nullable: string;
+      }>`
+        SELECT r.code AS role_code, c.is_nullable
+        FROM auth.users AS u
+        JOIN auth.roles AS r ON r.id = u.role_id
+        JOIN information_schema.columns AS c
+          ON c.table_schema = 'auth' AND c.table_name = 'users' AND c.column_name = 'role_id'
+        WHERE u.email = ${existingUser.email}
+      `.execute(testDb!);
+      expect(restored.rows[0]).toEqual({
+        role_code: 'NO_ACCESS',
+        is_nullable: 'NO',
+      });
+
+      await testDb!.transaction().execute((trx) => noAccessRoleRemoval.up(trx));
+      const removedAgain = await sql<{ role_id: string | null; count: number }>`
+        SELECT u.role_id,
+               (SELECT count(*)::int FROM auth.roles WHERE code = 'NO_ACCESS') AS count
+        FROM auth.users AS u WHERE u.email = ${existingUser.email}
+      `.execute(testDb!);
+      expect(removedAgain.rows[0]).toEqual({ role_id: null, count: 0 });
     });
 
     it('rolls back only the added access schema and keeps auth users', async () => {

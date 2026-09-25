@@ -17,6 +17,7 @@ import * as dispatchesAndTransit from '../src/database/migrations/20260924042448
 import * as productRecipesAndBranchProducts from '../src/database/migrations/20260924053530_product_recipes_and_branch_products';
 import * as posSales from '../src/database/migrations/20260924064827_pos_sales';
 import * as dailyBranchReports from '../src/database/migrations/20260924093005_daily_branch_reports';
+import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
   'daily branch reports migration',
@@ -60,16 +61,12 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
               productRecipesAndBranchProducts,
             '20260924064827_pos_sales': posSales,
             '20260924093005_daily_branch_reports': dailyBranchReports,
+            '20260926032413_remove_no_access_role': noAccessRoleRemoval,
           }),
         },
       });
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
 
-      const noAccess = await testDb
-        .selectFrom('auth.roles')
-        .select('id')
-        .where('code', '=', 'NO_ACCESS')
-        .executeTakeFirstOrThrow();
       actorId = (
         await testDb
           .insertInto('auth.users')
@@ -78,7 +75,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             full_name: 'Daily Report Migration Test User',
             contact_number: `DR-${randomUUID().slice(0, 12)}`,
             hashed_password: 'test-only-hash',
-            role_id: noAccess.id,
           })
           .returning('id')
           .executeTakeFirstOrThrow()
@@ -224,6 +220,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           .execute(),
       ).rejects.toHaveProperty('code', '23505');
 
+      expect((await migrator!.migrateDown()).error).toBeUndefined();
       expect((await migrator!.migrateDown()).error).toBeUndefined();
       const remainingSchema = await sql
         .raw(
