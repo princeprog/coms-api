@@ -29,11 +29,11 @@ Starter roles are active, `is_predefined=true`, and `is_system=false`. Grants ar
 
 ## Implementation tasks
 
-- [ ] API migration: add `auth.roles.is_predefined` default false, insert the three roles and exact permission links atomically, fail on code/name conflicts or missing catalog entries, and guard rollback against assigned/edited roles.
-- [ ] API contract: expose server-owned `is_predefined` in role list data without changing auth context, endpoints, mutation payloads, or authorization behavior.
-- [ ] App: validate and show System/Predefined/Custom; allow authorized edits to active predefined roles through the existing editor; explain that permission changes affect all assigned staff.
-- [ ] Verification: migration integration, role API tests, frontend component/fixture tests, relevant browser checks, lint and builds.
-- [ ] Documentation: update COMS permissions, access workflow, architecture decisions, runbook, and progress with grants, migration behavior, evidence, and commit IDs.
+- [x] API migration: add `auth.roles.is_predefined` default false, insert the three roles and exact permission links atomically, fail on code/name conflicts or missing catalog entries, and guard rollback against assigned/edited roles.
+- [x] API contract: expose server-owned `is_predefined` in role list data without changing auth context, endpoints, mutation payloads, or authorization behavior.
+- [x] App: validate and show System/Predefined/Custom; allow authorized edits to active predefined roles through the existing editor; explain that permission changes affect all assigned staff.
+- [x] Verification: migration integration, role API tests, frontend component/fixture tests, relevant browser checks, lint and builds.
+- [x] Documentation: update COMS permissions, access workflow, architecture decisions, runbook, and progress with grants, migration behavior, evidence, and commit IDs.
 
 ## Data and security rules
 
@@ -43,9 +43,19 @@ Rollback removes seed roles only when no users are assigned and name, active/sys
 
 ## Commits
 
-1. API migration, generated Kysely types, and migration tests.
-2. API response metadata and role regression tests.
-3. App schema, badges/editor guidance, fixture updates, and component tests.
-4. Verification and documentation updates in the relevant repositories.
+1. API migration, generated Kysely types, and migration tests — `a68a86c`.
+2. API response metadata and role regression tests — `be36224`.
+3. App schema, badges/editor guidance, fixture updates, and component tests — `71617cb`.
+4. App responsive role-create correction after browser verification — `ee29756`.
+5. App async-transition test stabilization — `1f5b6ce`.
+6. Verification record and this completed plan — documented after final checks; the plan is this file.
 
 Before every commit, verify the repository is on `dev`, stage explicit paths, inspect the staged diff, and run focused checks. Exclude the existing API authentication work from every role commit.
+
+## Verification results — 2026-09-26
+
+- API: `pnpm test` passed 80 tests; 25 tests were skipped in the ordinary suite. `pnpm lint`, `pnpm build`, and `pnpm exec tsc --noEmit` passed. The focused disposable PostgreSQL migration suite passed 3 tests with `COMS_RUN_DB_TESTS=1`, covering initial grants, persistence and guarded rollback. The local development migration was applied after its target and restorable backup were verified; the local account and existing role assignments were not changed.
+- App: `pnpm test` passed 450 tests across 109 files; `pnpm lint`, `pnpm build`, `pnpm typecheck`, and changed-file Prettier passed.
+- Production browser fixture: all 24 operational route states passed at 195, 390, 768, 1440, and 1920 CSS pixels, in dark mode, and at 2x scale/195px. It also passed the create-role permission-only scrolling checks at phone heights, predefined Branch Manager permission editing, shared-shell navigation/refresh, and the existing report flow. This browser uses deterministic simulated API responses; it does not verify real API transactions or use a real account. Migration integration uses disposable databases.
+- The first browser pass exposed a zero-height permission scroller at 390×667; the create form was compacted and the production browser suite passed on rerun. A flaky unrelated async-transition assertion was changed to wait for completion; the full suite then passed.
+- App commits on the existing `dev` branch: `1f5b6ce`, `71617cb`, and `ee29756`. API commits: `a68a86c` and `be36224`. No push or branch switch was performed. Existing uncommitted API authentication work remains unstaged and unchanged.
