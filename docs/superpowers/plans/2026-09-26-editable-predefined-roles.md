@@ -2,7 +2,7 @@
 
 ## Goal
 
-Seed three ready-to-assign operational roles with editable permissions while keeping `SUPER_ADMIN` and `NO_ACCESS` protected. Work directly on the current `dev` branches, preserve existing commits and unrelated authentication changes, use one agent, and do not push.
+Seed three ready-to-assign operational roles with editable permissions. At the time this plan was written, it retained `SUPER_ADMIN` and `NO_ACCESS` as protected system roles. The later 2026-09-26 removal decision superseded that part: `NO_ACCESS` was removed through a forward migration, while `SUPER_ADMIN` remains the only protected system role. Work directly on the current `dev` branches, preserve existing commits and unrelated authentication changes, use one agent, and do not push.
 
 ## Default roles and grants
 
