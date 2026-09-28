@@ -34,4 +34,8 @@ export class DispatchQueryDto {
     | 'PARTIALLY_RECEIVED'
     | 'RECEIVED'
     | 'CLOSED_WITH_SHORTAGE';
+
+  @IsOptional()
+  @IsIn(['OPEN', 'RECOUNT_REQUESTED', 'RESOLVED', 'NONE'])
+  discrepancy_status?: 'OPEN' | 'RECOUNT_REQUESTED' | 'RESOLVED' | 'NONE';
 }

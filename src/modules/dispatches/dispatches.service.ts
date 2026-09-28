@@ -11,6 +11,8 @@ import type { CloseDispatchShortageDto } from './dto/close-dispatch-shortage.dto
 import type { CreateDispatchDto } from './dto/create-dispatch.dto';
 import type { DispatchQueryDto } from './dto/dispatch-query.dto';
 import type { ReceiveDispatchDto } from './dto/receive-dispatch.dto';
+import type { ReportDispatchDiscrepancyDto } from './dto/report-dispatch-discrepancy.dto';
+import type { RequestDispatchRecountDto } from './dto/request-dispatch-recount.dto';
 import { DispatchDraftsRepository } from './dispatch-drafts.repository';
 import { DispatchPostingRepository } from './dispatch-posting.repository';
 import { DispatchReceivingRepository } from './dispatch-receiving.repository';
@@ -101,6 +103,42 @@ export class DispatchesService {
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
       branch_ids: this.branchScope(access),
       items,
+    });
+  }
+
+  reportDiscrepancy(
+    id: string,
+    input: ReportDispatchDiscrepancyDto,
+    access: AccessContext,
+    idempotencyKey: string | undefined,
+  ) {
+    const note = input.note.trim();
+    if (!note || note.length > 500)
+      throw new BadRequestException('A discrepancy note is required');
+    return this.receivingRepository.reportDiscrepancy({
+      id,
+      actor_user_id: access.userId,
+      idempotency_key: this.requireIdempotencyKey(idempotencyKey),
+      branch_ids: this.branchScope(access),
+      note,
+    });
+  }
+
+  requestRecount(
+    id: string,
+    input: RequestDispatchRecountDto,
+    access: AccessContext,
+    idempotencyKey: string | undefined,
+  ) {
+    const reason = input.reason.trim();
+    if (!reason || reason.length > 500)
+      throw new BadRequestException('A recount reason is required');
+    return this.receivingRepository.requestRecount({
+      id,
+      actor_user_id: access.userId,
+      idempotency_key: this.requireIdempotencyKey(idempotencyKey),
+      branch_ids: this.branchScope(access),
+      reason,
     });
   }
 

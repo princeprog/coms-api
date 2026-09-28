@@ -11,7 +11,9 @@ import type { DB } from '../../database/db';
 import type {
   CloseShortageInput,
   DispatchDbExecutor,
+  ReportDiscrepancyInput,
   ReceiveInput,
+  RequestRecountInput,
 } from './dispatches.types';
 import { DispatchesRepository } from './dispatches.repository';
 import {
@@ -164,6 +166,14 @@ export class DispatchReceivingRepository {
           })
           .execute();
         await this.queries.refreshStatus(transaction, input.id);
+        await this.resolveDiscrepancyIfComplete(
+          transaction,
+          input.id,
+          input.actor_user_id,
+          input.idempotency_key,
+          'RESOLVED_RECEIVED',
+          'All dispatched quantities were received.',
+        );
 
         const details = await this.queries.findDetails(transaction, input.id);
         if (!details) throw new NotFoundException('Dispatch not found');
@@ -188,6 +198,172 @@ export class DispatchReceivingRepository {
           'RECEIPT_RECORDED',
         );
       throw new ConflictException('Idempotency key was already used');
+    }
+  }
+
+  async reportDiscrepancy(input: ReportDiscrepancyInput) {
+    try {
+      return await this.db.transaction().execute(async (transaction) => {
+        const dispatch = await this.queries.findDispatchForUpdate(
+          transaction,
+          input.id,
+          input.branch_ids,
+        );
+        if (!dispatch) throw new NotFoundException('Dispatch not found');
+        const previousEvent = await this.findDiscrepancyEventByIdempotencyKey(
+          transaction,
+          input.idempotency_key,
+        );
+        if (previousEvent)
+          return this.returnForDiscrepancyRetry(
+            transaction,
+            previousEvent,
+            input,
+            'REPORTED',
+            input.note,
+          );
+        if (input.branch_ids !== null)
+          await this.queries.requireActiveBranch(
+            transaction,
+            dispatch.branch_id,
+          );
+        if (
+          dispatch.status === 'DRAFT' ||
+          dispatch.status === 'RECEIVED' ||
+          dispatch.status === 'CLOSED_WITH_SHORTAGE'
+        )
+          throw new ConflictException(
+            'A discrepancy can only be reported while quantities remain in transit',
+          );
+
+        const remaining = await this.hasRemainingTransit(transaction, input.id);
+        if (!remaining)
+          throw new ConflictException(
+            'Dispatch has no remaining in-transit quantities',
+          );
+        if (!(await this.hasReceivedQuantity(transaction, input.id)))
+          throw new ConflictException(
+            'Record a partial receipt before reporting a discrepancy',
+          );
+        const active = await sql<{ id: string }>`
+          SELECT id FROM dispatch_discrepancies
+          WHERE dispatch_id = ${input.id} AND status <> 'RESOLVED'
+          FOR UPDATE
+        `.execute(transaction);
+        if (active.rows[0])
+          throw new ConflictException(
+            'A discrepancy is already open for this dispatch',
+          );
+
+        const discrepancy = await sql<{ id: string }>`
+          INSERT INTO dispatch_discrepancies
+            (dispatch_id, status, reported_by_user_id, idempotency_key)
+          VALUES
+            (${input.id}, 'OPEN', ${input.actor_user_id}, ${input.idempotency_key})
+          RETURNING id
+        `.execute(transaction);
+        const discrepancyId = discrepancy.rows[0]?.id;
+        if (!discrepancyId)
+          throw new ConflictException('Could not create discrepancy record');
+        await sql`
+          INSERT INTO dispatch_discrepancy_events
+            (discrepancy_id, event_type, actor_user_id, note, idempotency_key)
+          VALUES
+            (${discrepancyId}, 'REPORTED', ${input.actor_user_id}, ${input.note}, ${input.idempotency_key})
+        `.execute(transaction);
+        const details = await this.queries.findDetails(transaction, input.id);
+        if (!details) throw new NotFoundException('Dispatch not found');
+        return details;
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const previousEvent = await this.findDiscrepancyEventByIdempotencyKey(
+        this.db,
+        input.idempotency_key,
+      );
+      if (previousEvent)
+        return this.returnForDiscrepancyRetry(
+          this.db,
+          previousEvent,
+          input,
+          'REPORTED',
+          input.note,
+        );
+      throw new ConflictException('A discrepancy is already open for dispatch');
+    }
+  }
+
+  async requestRecount(input: RequestRecountInput) {
+    try {
+      return await this.db.transaction().execute(async (transaction) => {
+        const dispatch = await this.queries.findDispatchForUpdate(
+          transaction,
+          input.id,
+          input.branch_ids,
+        );
+        if (!dispatch) throw new NotFoundException('Dispatch not found');
+        const previousEvent = await this.findDiscrepancyEventByIdempotencyKey(
+          transaction,
+          input.idempotency_key,
+        );
+        if (previousEvent)
+          return this.returnForDiscrepancyRetry(
+            transaction,
+            previousEvent,
+            input,
+            'RECOUNT_REQUESTED',
+            input.reason,
+          );
+        if (input.branch_ids !== null)
+          await this.queries.requireActiveBranch(
+            transaction,
+            dispatch.branch_id,
+          );
+        const active = await sql<{ id: string; status: string }>`
+          SELECT id, status FROM dispatch_discrepancies
+          WHERE dispatch_id = ${input.id} AND status <> 'RESOLVED'
+          FOR UPDATE
+        `.execute(transaction);
+        const discrepancy = active.rows[0];
+        if (!discrepancy)
+          throw new ConflictException(
+            'No open discrepancy exists for dispatch',
+          );
+        if (discrepancy.status !== 'OPEN')
+          throw new ConflictException('A recount has already been requested');
+
+        await sql`
+          UPDATE dispatch_discrepancies
+          SET status = 'RECOUNT_REQUESTED',
+              recount_requested_by_user_id = ${input.actor_user_id},
+              recount_requested_at = now(), updated_at = now()
+          WHERE id = ${discrepancy.id}
+        `.execute(transaction);
+        await sql`
+          INSERT INTO dispatch_discrepancy_events
+            (discrepancy_id, event_type, actor_user_id, note, idempotency_key)
+          VALUES
+            (${discrepancy.id}, 'RECOUNT_REQUESTED', ${input.actor_user_id}, ${input.reason}, ${input.idempotency_key})
+        `.execute(transaction);
+        const details = await this.queries.findDetails(transaction, input.id);
+        if (!details) throw new NotFoundException('Dispatch not found');
+        return details;
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const previousEvent = await this.findDiscrepancyEventByIdempotencyKey(
+        this.db,
+        input.idempotency_key,
+      );
+      if (previousEvent)
+        return this.returnForDiscrepancyRetry(
+          this.db,
+          previousEvent,
+          input,
+          'RECOUNT_REQUESTED',
+          input.reason,
+        );
+      throw new ConflictException('A recount is already requested');
     }
   }
 
@@ -294,6 +470,14 @@ export class DispatchReceivingRepository {
           })
           .execute();
         await this.queries.refreshStatus(transaction, input.id);
+        await this.resolveDiscrepancyIfComplete(
+          transaction,
+          input.id,
+          input.actor_user_id,
+          input.idempotency_key,
+          'RESOLVED_SHORTAGE',
+          input.reason,
+        );
 
         const details = await this.queries.findDetails(transaction, input.id);
         if (!details) throw new NotFoundException('Dispatch not found');
@@ -331,6 +515,115 @@ export class DispatchReceivingRepository {
       .select(['id', 'dispatch_id', 'received_by_user_id'])
       .where('idempotency_key', '=', key)
       .executeTakeFirst();
+  }
+
+  private async hasRemainingTransit(
+    executor: DispatchDbExecutor,
+    dispatchId: string,
+  ) {
+    const result = await sql<{ has_remaining: boolean }>`
+      SELECT EXISTS (
+        SELECT 1 FROM dispatch_items AS di
+        WHERE di.dispatch_id = ${dispatchId}
+          AND di.quantity_dispatched >
+            coalesce((SELECT sum(dri.quantity_received)
+              FROM dispatch_receipt_items AS dri
+              WHERE dri.dispatch_item_id = di.id), 0)
+            + coalesce((SELECT sum(dsci.quantity_closed)
+              FROM dispatch_shortage_closure_items AS dsci
+              WHERE dsci.dispatch_item_id = di.id), 0)
+      ) AS has_remaining
+    `.execute(executor);
+    return result.rows[0]?.has_remaining === true;
+  }
+
+  private async hasReceivedQuantity(
+    executor: DispatchDbExecutor,
+    dispatchId: string,
+  ) {
+    const result = await sql<{ has_received: boolean }>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM dispatch_receipt_items AS dri
+        JOIN dispatch_items AS di ON di.id = dri.dispatch_item_id
+        WHERE di.dispatch_id = ${dispatchId}
+      ) AS has_received
+    `.execute(executor);
+    return result.rows[0]?.has_received === true;
+  }
+
+  private async resolveDiscrepancyIfComplete(
+    transaction: DispatchDbExecutor,
+    dispatchId: string,
+    actorUserId: string,
+    idempotencyKey: string,
+    eventType: 'RESOLVED_RECEIVED' | 'RESOLVED_SHORTAGE',
+    note: string,
+  ) {
+    if (await this.hasRemainingTransit(transaction, dispatchId)) return;
+    const active = await sql<{ id: string }>`
+      SELECT id FROM dispatch_discrepancies
+      WHERE dispatch_id = ${dispatchId} AND status <> 'RESOLVED'
+      FOR UPDATE
+    `.execute(transaction);
+    const discrepancyId = active.rows[0]?.id;
+    if (!discrepancyId) return;
+    await sql`
+      UPDATE dispatch_discrepancies
+      SET status = 'RESOLVED', resolved_at = now(), updated_at = now()
+      WHERE id = ${discrepancyId}
+    `.execute(transaction);
+    await sql`
+      INSERT INTO dispatch_discrepancy_events
+        (discrepancy_id, event_type, actor_user_id, note, idempotency_key)
+      VALUES
+        (${discrepancyId}, ${eventType}, ${actorUserId}, ${note}, ${idempotencyKey})
+    `.execute(transaction);
+  }
+
+  private findDiscrepancyEventByIdempotencyKey(
+    executor: DispatchDbExecutor,
+    key: string,
+  ) {
+    return sql<{
+      discrepancy_id: string;
+      dispatch_id: string;
+      event_type: string;
+      actor_user_id: string;
+      note: string;
+    }>`
+      SELECT e.discrepancy_id, d.dispatch_id, e.event_type, e.actor_user_id, e.note
+      FROM dispatch_discrepancy_events AS e
+      JOIN dispatch_discrepancies AS d ON d.id = e.discrepancy_id
+      WHERE e.idempotency_key = ${key}
+    `
+      .execute(executor)
+      .then((result) => result.rows[0]);
+  }
+
+  private async returnForDiscrepancyRetry(
+    executor: DispatchDbExecutor,
+    existing: {
+      discrepancy_id: string;
+      dispatch_id: string;
+      event_type: string;
+      actor_user_id: string;
+      note: string;
+    },
+    input: ReportDiscrepancyInput | RequestRecountInput,
+    expectedType: string,
+    expectedNote: string,
+  ) {
+    if (
+      existing.dispatch_id !== input.id ||
+      existing.actor_user_id !== input.actor_user_id ||
+      existing.event_type !== expectedType ||
+      existing.note !== expectedNote
+    )
+      throw new ConflictException('Idempotency key was already used');
+    const details = await this.queries.findDetails(executor, input.id);
+    if (!details) throw new NotFoundException('Dispatch not found');
+    return details;
   }
 
   private async returnForReceiptRetry(

@@ -160,6 +160,8 @@ export interface DailyBranchReportItems {
 export interface DailyBranchReports {
   branch_id: string;
   business_date: Timestamp;
+  completed_sales_amount: Generated<Numeric>;
+  completed_sales_count: Generated<number>;
   created_at: Generated<Timestamp>;
   created_by_user_id: string;
   id: Generated<string>;
@@ -171,6 +173,31 @@ export interface DailyBranchReports {
   submitted_at: Timestamp | null;
   submitted_by_user_id: string | null;
   updated_at: Generated<Timestamp>;
+  voided_sales_amount: Generated<Numeric>;
+  voided_sales_count: Generated<number>;
+}
+
+export interface DispatchDiscrepancies {
+  dispatch_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  recount_requested_at: Timestamp | null;
+  recount_requested_by_user_id: string | null;
+  reported_at: Generated<Timestamp>;
+  reported_by_user_id: string;
+  resolved_at: Timestamp | null;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface DispatchDiscrepancyEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  discrepancy_id: string;
+  event_type: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  note: string;
 }
 
 export interface Dispatches {
@@ -401,6 +428,8 @@ export interface DB {
   daily_branch_report_events: DailyBranchReportEvents;
   daily_branch_report_items: DailyBranchReportItems;
   daily_branch_reports: DailyBranchReports;
+  dispatch_discrepancies: DispatchDiscrepancies;
+  dispatch_discrepancy_events: DispatchDiscrepancyEvents;
   dispatch_events: DispatchEvents;
   dispatch_items: DispatchItems;
   dispatch_receipt_items: DispatchReceiptItems;

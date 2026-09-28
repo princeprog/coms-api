@@ -26,6 +26,8 @@ export type CloseShortageInput = ScopedActionInput & {
   reason: string;
   items: DispatchItemInput[];
 };
+export type ReportDiscrepancyInput = ScopedActionInput & { note: string };
+export type RequestRecountInput = ScopedActionInput & { reason: string };
 
 export type DispatchEvent = {
   dispatch_id: string;

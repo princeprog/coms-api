@@ -57,6 +57,13 @@ export class DispatchesRepository {
         'd.dispatched_at',
         'd.created_at',
         'd.updated_at',
+        sql<string | null>`(
+          SELECT dd.status
+          FROM dispatch_discrepancies AS dd
+          WHERE dd.dispatch_id = d.id
+          ORDER BY dd.reported_at DESC, dd.id DESC
+          LIMIT 1
+        )`.as('discrepancy_status'),
         sql<number>`(select count(*)::int from dispatch_items as di where di.dispatch_id = d.id)`.as(
           'item_count',
         ),
@@ -80,6 +87,41 @@ export class DispatchesRepository {
     if (query.status) {
       records = records.where('d.status', '=', query.status);
       count = count.where('d.status', '=', query.status);
+    }
+    if (query.discrepancy_status === 'NONE') {
+      records = records.where(
+        sql<boolean>`NOT EXISTS (
+          SELECT 1 FROM dispatch_discrepancies AS dd
+          WHERE dd.dispatch_id = d.id
+        )`,
+        '=',
+        true,
+      );
+      count = count.where(
+        sql<boolean>`NOT EXISTS (
+          SELECT 1 FROM dispatch_discrepancies AS dd
+          WHERE dd.dispatch_id = d.id
+        )`,
+        '=',
+        true,
+      );
+    } else if (query.discrepancy_status) {
+      records = records.where(
+        sql<boolean>`EXISTS (
+          SELECT 1 FROM dispatch_discrepancies AS dd
+          WHERE dd.dispatch_id = d.id AND dd.status = ${query.discrepancy_status}
+        )`,
+        '=',
+        true,
+      );
+      count = count.where(
+        sql<boolean>`EXISTS (
+          SELECT 1 FROM dispatch_discrepancies AS dd
+          WHERE dd.dispatch_id = d.id AND dd.status = ${query.discrepancy_status}
+        )`,
+        '=',
+        true,
+      );
     }
 
     const [items, result] = await Promise.all([
@@ -129,7 +171,14 @@ export class DispatchesRepository {
       .executeTakeFirst();
     if (!dispatch) return undefined;
 
-    const [items, receipts, shortageClosures, events] = await Promise.all([
+    const [
+      items,
+      receipts,
+      shortageClosures,
+      events,
+      discrepancy,
+      discrepancyEvents,
+    ] = await Promise.all([
       executor
         .selectFrom('dispatch_items as di')
         .innerJoin(
@@ -178,6 +227,50 @@ export class DispatchesRepository {
         .orderBy('de.created_at')
         .orderBy('de.id')
         .execute(),
+      sql<{
+        id: string;
+        status: 'OPEN' | 'RECOUNT_REQUESTED' | 'RESOLVED';
+        reported_by_user_id: string;
+        reported_by_name: string;
+        reported_at: Date;
+        recount_requested_by_user_id: string | null;
+        recount_requested_by_name: string | null;
+        recount_requested_at: Date | null;
+        resolved_at: Date | null;
+      }>`
+        SELECT dd.id, dd.status, dd.reported_by_user_id,
+               reporter.full_name AS reported_by_name, dd.reported_at,
+               dd.recount_requested_by_user_id,
+               recount_actor.full_name AS recount_requested_by_name,
+               dd.recount_requested_at, dd.resolved_at
+        FROM dispatch_discrepancies AS dd
+        JOIN auth.users AS reporter ON reporter.id = dd.reported_by_user_id
+        LEFT JOIN auth.users AS recount_actor
+          ON recount_actor.id = dd.recount_requested_by_user_id
+        WHERE dd.dispatch_id = ${id}
+        ORDER BY dd.reported_at DESC, dd.id DESC
+        LIMIT 1
+      `
+        .execute(executor)
+        .then((result) => result.rows[0] ?? null),
+      sql<{
+        id: string;
+        event_type: string;
+        actor_user_id: string;
+        actor_name: string;
+        note: string;
+        created_at: Date;
+      }>`
+        SELECT de.id, de.event_type, de.actor_user_id,
+               actor.full_name AS actor_name, de.note, de.created_at
+        FROM dispatch_discrepancy_events AS de
+        JOIN dispatch_discrepancies AS dd ON dd.id = de.discrepancy_id
+        JOIN auth.users AS actor ON actor.id = de.actor_user_id
+        WHERE dd.dispatch_id = ${id}
+        ORDER BY de.created_at, de.id
+      `
+        .execute(executor)
+        .then((result) => result.rows),
     ]);
 
     return {
@@ -206,6 +299,8 @@ export class DispatchesRepository {
           quantity_closed: normalizeDecimal(item.quantity_closed),
         })),
       })),
+      discrepancy,
+      discrepancy_events: discrepancyEvents,
       events,
     };
   }
