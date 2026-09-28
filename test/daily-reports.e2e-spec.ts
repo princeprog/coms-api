@@ -56,6 +56,7 @@ describe('daily report routes (e2e)', () => {
   let activeActorId: string;
   let reporterId: string;
   let reviewerId: string;
+  let superAdminId: string;
   let deniedUserId: string;
   let unassignedUserId: string;
   let branchId: string;
@@ -210,6 +211,13 @@ describe('daily report routes (e2e)', () => {
 
     reporterId = await createUser(reportRoleId, 'Reporter');
     reviewerId = await createUser(reportRoleId, 'Reviewer');
+    const superAdminRole = await db
+      .selectFrom('auth.roles')
+      .select('id')
+      .where('code', '=', 'SUPER_ADMIN')
+      .where('is_system', '=', true)
+      .executeTakeFirstOrThrow();
+    superAdminId = await createUser(superAdminRole.id, 'SuperAdmin');
     deniedUserId = await createUser(deniedRoleId, 'Denied');
     unassignedUserId = await createUser(reportRoleId, 'Unassigned');
     activeActorId = reporterId;
@@ -1109,5 +1117,52 @@ describe('daily report routes (e2e)', () => {
     ]);
     expect(normalizeDecimal(balances[0].quantity_on_hand)).toBe('4');
     expect(normalizeDecimal(balances[1].quantity_on_hand)).toBe('7.5');
+  });
+
+  it('lets protected Super Admin review submitted reports for inactive branches', async () => {
+    const reports = await Promise.all([
+      createReport(manilaDate(-2)),
+      createReport(manilaDate(-3)),
+    ]);
+
+    for (const { report } of reports) {
+      await request(app.getHttpServer())
+        .put(reportUrl(report.id))
+        .send({
+          items: report.items.map(
+            (item: {
+              stock_item_id: string;
+              ledger_closing_quantity: string;
+            }) => ({
+              stock_item_id: item.stock_item_id,
+              physical_closing_quantity: item.ledger_closing_quantity,
+              waste_quantity: '0',
+              adjustment_quantity: '0',
+            }),
+          ),
+        })
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`${reportUrl(report.id)}/submit`)
+        .expect(200);
+    }
+
+    await db
+      .updateTable('branches')
+      .set({ status: 'inactive' })
+      .where('id', '=', branchId)
+      .execute();
+    activeActorId = superAdminId;
+
+    const returned = await request(app.getHttpServer())
+      .post(`${reportUrl(reports[0]!.report.id)}/return`)
+      .send({ reason: 'Review the inactive branch report' })
+      .expect(200);
+    expect(returned.body.status).toBe('RETURNED');
+
+    const approved = await request(app.getHttpServer())
+      .post(`${reportUrl(reports[1]!.report.id)}/approve`)
+      .expect(200);
+    expect(approved.body.status).toBe('APPROVED');
   });
 });

@@ -658,6 +658,60 @@ describe('sales routes (e2e)', () => {
     ).resolves.toMatchObject({ status: 'COMPLETED' });
   });
 
+  it('serializes a sale void with approval of the matching branch report', async () => {
+    const sale = await postSale(randomUUID(), productId, '0.5');
+    expect(sale.status).toBe(201);
+    const saleId = sale.body.id as string;
+    const businessDate = await sql<{ business_date: string }>`
+      SELECT (created_at AT TIME ZONE 'Asia/Manila')::date::text AS business_date
+      FROM sales WHERE id = ${saleId}
+    `.execute(db);
+    const report = await sql<{ id: string }>`
+      INSERT INTO daily_branch_reports (
+        branch_id, business_date, status, idempotency_key,
+        created_by_user_id, submitted_by_user_id, submitted_at
+      ) VALUES (
+        ${branchId}, ${businessDate.rows[0]!.business_date}::date, 'SUBMITTED',
+        ${randomUUID()}, ${actorUserId}, ${actorUserId}, now()
+      ) RETURNING id
+    `.execute(db);
+    const reportId = report.rows[0]!.id;
+    dailyReportIds.push(reportId);
+
+    const approvalTransaction = await db.startTransaction().execute();
+    await approvalTransaction
+      .updateTable('daily_branch_reports')
+      .set({
+        status: 'APPROVED',
+        reviewed_by_user_id: actorUserId,
+        reviewed_at: new Date(),
+      })
+      .where('id', '=', reportId)
+      .execute();
+
+    const voidResponsePromise = request(app.getHttpServer())
+      .post(`/branches/${branchId}/sales/${saleId}/void`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ reason: 'Concurrent approval test' })
+      .then((result) => result);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      await approvalTransaction.commit().execute();
+    }
+
+    const response = await voidResponsePromise;
+    expect(response.status).toBe(409);
+    await expect(
+      db
+        .selectFrom('sales')
+        .select('status')
+        .where('id', '=', saleId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({ status: 'COMPLETED' });
+  });
+
   it('does not partially void a sale when a consumption movement is missing', async () => {
     const sale = await postSale(randomUUID(), multiIngredientProductId, '2');
     expect(sale.status).toBe(201);

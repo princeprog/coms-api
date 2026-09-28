@@ -88,6 +88,7 @@ export class DailyReportsService {
     reportId: string,
     input: ReturnDailyReportDto,
     actorUserId: string,
+    allowInactiveBranch = false,
   ) {
     const reason = input.reason.trim();
     if (!reason || reason.length > 500)
@@ -97,11 +98,22 @@ export class DailyReportsService {
       reportId,
       reason,
       actorUserId,
+      allowInactiveBranch,
     );
   }
 
-  approve(branchId: string, reportId: string, actorUserId: string) {
-    return this.repository.approve(branchId, reportId, actorUserId);
+  approve(
+    branchId: string,
+    reportId: string,
+    actorUserId: string,
+    allowInactiveBranch = false,
+  ) {
+    return this.repository.approve(
+      branchId,
+      reportId,
+      actorUserId,
+      allowInactiveBranch,
+    );
   }
 
   private validateBusinessDate(value: string) {

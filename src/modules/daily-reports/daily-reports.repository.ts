@@ -412,6 +412,7 @@ export class DailyReportsRepository {
     reportId: string,
     reason: string,
     actorUserId: string,
+    allowInactiveBranch = false,
   ) {
     return this.db.transaction().execute(async (transaction) => {
       const report = await this.lockReport(transaction, branchId, reportId);
@@ -419,7 +420,11 @@ export class DailyReportsRepository {
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'SUBMITTED')
         throw new ConflictException('Only submitted reports can be returned');
-      await this.requireActiveBranch(transaction, branchId);
+      await this.requireActiveBranch(
+        transaction,
+        branchId,
+        allowInactiveBranch,
+      );
       await transaction
         .updateTable('daily_branch_reports')
         .set({
@@ -444,14 +449,23 @@ export class DailyReportsRepository {
     });
   }
 
-  async approve(branchId: string, reportId: string, actorUserId: string) {
+  async approve(
+    branchId: string,
+    reportId: string,
+    actorUserId: string,
+    allowInactiveBranch = false,
+  ) {
     return this.db.transaction().execute(async (transaction) => {
       const report = await this.lockReport(transaction, branchId, reportId);
       if (report.status === 'APPROVED')
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'SUBMITTED')
         throw new ConflictException('Only submitted reports can be approved');
-      await this.requireActiveBranch(transaction, branchId);
+      await this.requireActiveBranch(
+        transaction,
+        branchId,
+        allowInactiveBranch,
+      );
       const items = await transaction
         .selectFrom('daily_branch_report_items')
         .select([
@@ -870,15 +884,19 @@ export class DailyReportsRepository {
     if (!branch) throw new NotFoundException('Branch not found');
   }
 
-  private async requireActiveBranch(executor: DbExecutor, branchId: string) {
+  private async requireActiveBranch(
+    executor: DbExecutor,
+    branchId: string,
+    allowInactive = false,
+  ) {
     const branch = await executor
       .selectFrom('branches')
-      .select('id')
+      .select(['id', 'status'])
       .where('id', '=', branchId)
-      .where('status', '=', 'active')
       .forShare()
       .executeTakeFirst();
-    if (!branch) throw new ConflictException('The branch is inactive');
+    if (!branch || (branch.status !== 'active' && !allowInactive))
+      throw new ConflictException('The branch is inactive');
   }
 
   private async manilaToday(executor: DbExecutor) {

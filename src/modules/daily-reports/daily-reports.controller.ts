@@ -97,6 +97,7 @@ export class DailyReportsController {
       reportId,
       input,
       access.userId,
+      isProtectedSuperAdmin(access),
     );
   }
 
@@ -108,6 +109,15 @@ export class DailyReportsController {
     @Param('reportId', ParseUUIDPipe) reportId: string,
     @CurrentAccessContext() access: AccessContext,
   ) {
-    return this.service.approve(branchId, reportId, access.userId);
+    return this.service.approve(
+      branchId,
+      reportId,
+      access.userId,
+      isProtectedSuperAdmin(access),
+    );
   }
+}
+
+function isProtectedSuperAdmin(access: AccessContext): boolean {
+  return access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN';
 }

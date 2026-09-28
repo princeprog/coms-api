@@ -135,16 +135,15 @@ export class SalesRepository {
           .executeTakeFirst();
         if (!sale) throw new NotFoundException('Sale not found');
 
-        const approvedReport = await sql<{ id: string }>`
-          SELECT id
+        const dailyReport = await sql<{ id: string; status: string }>`
+          SELECT id, status
           FROM daily_branch_reports
           WHERE branch_id = ${sale.branch_id}
             AND business_date =
               (${sale.created_at}::timestamptz AT TIME ZONE 'Asia/Manila')::date
-            AND status = 'APPROVED'
           FOR SHARE
         `.execute(transaction);
-        if (approvedReport.rows[0])
+        if (dailyReport.rows[0]?.status === 'APPROVED')
           throw new ConflictException(
             'A sale cannot be voided after its branch daily report is approved',
           );
