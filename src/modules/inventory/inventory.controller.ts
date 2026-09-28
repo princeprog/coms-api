@@ -29,19 +29,19 @@ export class InventoryController {
   constructor(private readonly service: InventoryService) {}
 
   @Get('commissary')
-  @RequirePermission('inventory.read')
+  @RequirePermission('inventory.commissary_read')
   listCommissary(@Query() query: InventoryQueryDto) {
     return this.service.listCommissary(query);
   }
 
   @Get('commissary/movements')
-  @RequirePermission('inventory.read')
+  @RequirePermission('inventory.commissary_read')
   listCommissaryMovements(@Query() query: InventoryMovementQueryDto) {
     return this.service.listCommissaryMovements(query);
   }
 
   @Post('commissary/adjustments')
-  @RequirePermission('inventory.adjust')
+  @RequirePermission('inventory.commissary_adjust')
   adjustCommissary(
     @Body() dto: CreateInventoryAdjustmentDto,
     @CurrentAccessContext() access: AccessContext,

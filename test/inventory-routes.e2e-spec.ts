@@ -26,11 +26,20 @@ type TestRequest = {
 describe('inventory routes (e2e)', () => {
   const suffix = randomUUID();
   const stockItemIds: string[] = [];
+  const roleIds: string[] = [];
+  const userIds: string[] = [];
   let branchId: string;
+  let otherBranchId: string;
   let inactiveBranchId: string | undefined;
   let actorUserId: string;
+  let branchManagerUserId: string;
+  let commissaryManagerUserId: string;
+  let superAdminUserId: string;
+  let scopedStockItemId: string;
+  let authorizedUserId: string;
   let branchIds: string[] = [];
   let app: INestApplication<App>;
+  let accessApp: INestApplication<App>;
   let guardedApp: INestApplication<App>;
   let db: Kysely<DB>;
 
@@ -99,6 +108,120 @@ describe('inventory routes (e2e)', () => {
 
     const first = await createStockItem(`Inventory ${suffix}`);
     stockItemIds.push(first);
+
+    const otherBranch = await db
+      .insertInto('branches')
+      .values({
+        code: `INV-OTHER-${suffix}`,
+        branch_name: `Other inventory ${suffix}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    otherBranchId = otherBranch.id;
+
+    const roleToken = suffix.replaceAll('-', '').slice(0, 12).toUpperCase();
+    const branchRole = await db
+      .insertInto('auth.roles')
+      .values({
+        code: `INV_BRANCH_${roleToken}`,
+        role_name: `Inventory Branch ${suffix}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const commissaryRole = await db
+      .insertInto('auth.roles')
+      .values({
+        code: `INV_COMMISSARY_${roleToken}`,
+        role_name: `Inventory Commissary ${suffix}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    roleIds.push(branchRole.id, commissaryRole.id);
+
+    const inventoryPermissions = await db
+      .selectFrom('auth.permissions')
+      .select(['id', 'action_key'])
+      .where('module_key', '=', 'inventory')
+      .where('action_key', 'in', [
+        'read',
+        'adjust',
+        'commissary_read',
+        'commissary_adjust',
+      ])
+      .execute();
+    const permissionIds = new Map(
+      inventoryPermissions.map(({ id, action_key }) => [action_key, id]),
+    );
+    if (permissionIds.size !== 4)
+      throw new Error('Inventory permission catalog is incomplete');
+    await db
+      .insertInto('auth.role_permissions')
+      .values([
+        {
+          role_id: branchRole.id,
+          permission_id: permissionIds.get('read')!,
+        },
+        {
+          role_id: branchRole.id,
+          permission_id: permissionIds.get('adjust')!,
+        },
+        {
+          role_id: commissaryRole.id,
+          permission_id: permissionIds.get('commissary_read')!,
+        },
+        {
+          role_id: commissaryRole.id,
+          permission_id: permissionIds.get('commissary_adjust')!,
+        },
+      ])
+      .execute();
+
+    const superAdminRole = await db
+      .selectFrom('auth.roles')
+      .select('id')
+      .where('code', '=', 'SUPER_ADMIN')
+      .where('is_system', '=', true)
+      .executeTakeFirstOrThrow();
+    branchManagerUserId = await createUser(branchRole.id, 'branch');
+    commissaryManagerUserId = await createUser(commissaryRole.id, 'commissary');
+    superAdminUserId = await createUser(superAdminRole.id, 'super');
+    userIds.push(
+      branchManagerUserId,
+      commissaryManagerUserId,
+      superAdminUserId,
+    );
+    await db
+      .insertInto('auth.branch_users')
+      .values({ user_id: branchManagerUserId, branch_id: branchId })
+      .execute();
+    scopedStockItemId = await createStockItem(`Scoped inventory ${suffix}`);
+    stockItemIds.push(scopedStockItemId);
+
+    authorizedUserId = branchManagerUserId;
+    const accessModule = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideGuard(AuthGatewayGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate: (execution: ExecutionContext) => {
+          execution.switchToHttp().getRequest<TestRequest>().user = {
+            id: authorizedUserId,
+          };
+          return true;
+        },
+      })
+      .compile();
+    accessApp = accessModule.createNestApplication();
+    accessApp.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
+    await accessApp.init();
   });
 
   afterAll(async () => {
@@ -129,7 +252,16 @@ describe('inventory routes (e2e)', () => {
         .where('id', '=', inactiveBranchId)
         .execute();
     }
-    await Promise.all([app.close(), guardedApp.close()]);
+    if (otherBranchId) {
+      await db.deleteFrom('branches').where('id', '=', otherBranchId).execute();
+    }
+    if (userIds.length) {
+      await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+    }
+    if (roleIds.length) {
+      await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+    }
+    await Promise.all([app.close(), accessApp.close(), guardedApp.close()]);
   });
 
   it.each([
@@ -156,6 +288,86 @@ describe('inventory routes (e2e)', () => {
         : await client.post(route.path);
     expect(response.status).toBe(403);
     expect(response.body.message).toBe('Authentication gateway required');
+  });
+
+  it('limits branch inventory permissions to assigned branches', async () => {
+    authorizedUserId = branchManagerUserId;
+    const client = request(accessApp.getHttpServer());
+    const assignedBalance = await client.get(`/inventory/branches/${branchId}`);
+    const assignedMovements = await client.get(
+      `/inventory/branches/${branchId}/movements`,
+    );
+    const branchAdjustment = await client
+      .post(`/inventory/branches/${branchId}/adjustments`)
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        stock_item_id: scopedStockItemId,
+        quantity_delta: '1',
+        reason: 'Scoped branch authorization test',
+      });
+    const otherBranchBalance = await client.get(
+      `/inventory/branches/${otherBranchId}`,
+    );
+    const otherBranchAdjustment = await client
+      .post(`/inventory/branches/${otherBranchId}/adjustments`)
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        stock_item_id: scopedStockItemId,
+        quantity_delta: '1',
+        reason: 'Out-of-scope authorization test',
+      });
+    const commissaryBalance = await client.get('/inventory/commissary');
+    const commissaryMovements = await client.get(
+      '/inventory/commissary/movements',
+    );
+    const commissaryAdjustment = await client
+      .post('/inventory/commissary/adjustments')
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        stock_item_id: scopedStockItemId,
+        quantity_delta: '1',
+        reason: 'Commissary authorization test',
+      });
+
+    expect(assignedBalance.status).toBe(200);
+    expect(assignedMovements.status).toBe(200);
+    expect(branchAdjustment.status).toBe(201);
+    expect(otherBranchBalance.status).toBe(403);
+    expect(otherBranchAdjustment.status).toBe(403);
+    expect(commissaryBalance.status).toBe(403);
+    expect(commissaryMovements.status).toBe(403);
+    expect(commissaryAdjustment.status).toBe(403);
+  });
+
+  it('authorizes commissary inventory with the dedicated permissions', async () => {
+    authorizedUserId = commissaryManagerUserId;
+    const client = request(accessApp.getHttpServer());
+    const balance = await client.get('/inventory/commissary');
+    const movements = await client.get('/inventory/commissary/movements');
+    const adjustment = await client
+      .post('/inventory/commissary/adjustments')
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        stock_item_id: scopedStockItemId,
+        quantity_delta: '1',
+        reason: 'Scoped commissary authorization test',
+      });
+    const branchBalance = await client.get(`/inventory/branches/${branchId}`);
+
+    expect(balance.status).toBe(200);
+    expect(movements.status).toBe(200);
+    expect(adjustment.status).toBe(201);
+    expect(branchBalance.status).toBe(403);
+  });
+
+  it('keeps the protected Super Admin inventory bypass', async () => {
+    authorizedUserId = superAdminUserId;
+    const client = request(accessApp.getHttpServer());
+
+    expect((await client.get('/inventory/commissary')).status).toBe(200);
+    expect(
+      (await client.get(`/inventory/branches/${otherBranchId}`)).status,
+    ).toBe(200);
   });
 
   it('validates adjustment input and requires an idempotency key', async () => {
@@ -433,5 +645,20 @@ describe('inventory routes (e2e)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     return stockItem.id;
+  }
+
+  async function createUser(roleId: string, label: string): Promise<string> {
+    const user = await db
+      .insertInto('auth.users')
+      .values({
+        email: `inventory-${label}-${suffix}@example.invalid`,
+        full_name: `Inventory ${label} ${suffix}`,
+        contact_number: `INV${suffix.slice(0, 12)}${label.slice(0, 1)}`,
+        hashed_password: 'not-used-by-test-auth-guard',
+        role_id: roleId,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return user.id;
   }
 });
