@@ -52,6 +52,10 @@ export class DailyReportsRepository {
         'return_reason',
         'created_at',
         'updated_at',
+        sql<string>`completed_sales_amount::text`.as('completed_sales_amount'),
+        'completed_sales_count',
+        sql<string>`voided_sales_amount::text`.as('voided_sales_amount'),
+        'voided_sales_count',
         sql<string>`business_date::text`.as('business_date'),
       ])
       .where('branch_id', '=', branchId)
@@ -177,6 +181,13 @@ export class DailyReportsRepository {
           })
           .returning('id')
           .executeTakeFirstOrThrow();
+
+        await this.refreshSalesSummary(
+          transaction,
+          report.id,
+          branchId,
+          businessDate,
+        );
 
         await transaction
           .insertInto('daily_branch_report_items')
@@ -314,6 +325,12 @@ export class DailyReportsRepository {
         WHERE item.daily_branch_report_id = ${reportId}
           AND item.stock_item_id = supplied.stock_item_id
       `.execute(transaction);
+      await this.refreshSalesSummary(
+        transaction,
+        reportId,
+        branchId,
+        report.business_date,
+      );
       await transaction
         .insertInto('daily_branch_report_events')
         .values({
@@ -359,6 +376,12 @@ export class DailyReportsRepository {
         reportItems.map((item) => item.stock_item_id),
       );
       await this.refreshReportItems(transaction, reportId, reportItems, totals);
+      await this.refreshSalesSummary(
+        transaction,
+        reportId,
+        branchId,
+        report.business_date,
+      );
       await transaction
         .updateTable('daily_branch_reports')
         .set({
@@ -522,6 +545,13 @@ export class DailyReportsRepository {
         }
       }
 
+      await this.refreshSalesSummary(
+        transaction,
+        reportId,
+        branchId,
+        report.business_date,
+      );
+
       await transaction
         .updateTable('daily_branch_reports')
         .set({
@@ -543,6 +573,43 @@ export class DailyReportsRepository {
         .execute();
       return this.findDetails(transaction, branchId, reportId);
     });
+  }
+
+  private async refreshSalesSummary(
+    executor: DbExecutor,
+    reportId: string,
+    branchId: string,
+    businessDate: string,
+  ) {
+    await sql`
+      WITH bounds AS (
+        SELECT
+          (${businessDate}::date::timestamp AT TIME ZONE 'Asia/Manila') AS day_start,
+          ((${businessDate}::date + 1)::timestamp AT TIME ZONE 'Asia/Manila') AS day_end
+      ), summary AS (
+        SELECT
+          coalesce(sum(sale.total_amount)
+            FILTER (WHERE event.event_type = 'COMPLETED'), 0) AS completed_amount,
+          count(*) FILTER (WHERE event.event_type = 'COMPLETED')::int AS completed_count,
+          coalesce(sum(sale.total_amount)
+            FILTER (WHERE event.event_type = 'VOIDED'), 0) AS voided_amount,
+          count(*) FILTER (WHERE event.event_type = 'VOIDED')::int AS voided_count
+        FROM sale_events AS event
+        JOIN sales AS sale ON sale.id = event.sale_id
+        CROSS JOIN bounds
+        WHERE sale.branch_id = ${branchId}
+          AND event.created_at >= bounds.day_start
+          AND event.created_at < bounds.day_end
+      )
+      UPDATE daily_branch_reports AS report
+      SET completed_sales_amount = summary.completed_amount,
+          completed_sales_count = summary.completed_count,
+          voided_sales_amount = summary.voided_amount,
+          voided_sales_count = summary.voided_count,
+          updated_at = now()
+      FROM summary
+      WHERE report.id = ${reportId} AND report.status <> 'APPROVED'
+    `.execute(executor);
   }
 
   private async refreshReportItems(
@@ -712,6 +779,10 @@ export class DailyReportsRepository {
         'return_reason',
         'created_at',
         'updated_at',
+        sql<string>`completed_sales_amount::text`.as('completed_sales_amount'),
+        'completed_sales_count',
+        sql<string>`voided_sales_amount::text`.as('voided_sales_amount'),
+        'voided_sales_count',
         sql<string>`business_date::text`.as('business_date'),
       ])
       .where('id', '=', reportId)

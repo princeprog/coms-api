@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ describe('sales routes (e2e)', () => {
   const branchIds: string[] = [];
   const productIds: string[] = [];
   const stockItemIds: string[] = [];
+  const dailyReportIds: string[] = [];
   let actorUserId: string;
   let deniedUserId: string;
   let branchId: string;
@@ -214,12 +215,24 @@ describe('sales routes (e2e)', () => {
   }, 30000);
 
   beforeEach(async () => {
+    if (dailyReportIds.length) {
+      await db
+        .deleteFrom('daily_branch_reports')
+        .where('id', 'in', dailyReportIds)
+        .execute();
+      dailyReportIds.length = 0;
+    }
     await clearSales();
     await setStock('5.0000');
   });
 
   afterAll(async () => {
     if (db && userIds.length) {
+      if (dailyReportIds.length)
+        await db
+          .deleteFrom('daily_branch_reports')
+          .where('id', 'in', dailyReportIds)
+          .execute();
       await clearSales();
       await db
         .deleteFrom('branch_inventory')
@@ -608,6 +621,41 @@ describe('sales routes (e2e)', () => {
         reversal_of_movement_id: expect.any(String),
       }),
     ]);
+  });
+
+  it('refuses to void a sale after its branch and business date report is approved', async () => {
+    const sale = await postSale(randomUUID(), productId, '0.5');
+    expect(sale.status).toBe(201);
+    const saleId = sale.body.id as string;
+    const businessDate = await sql<{ business_date: string }>`
+      SELECT (created_at AT TIME ZONE 'Asia/Manila')::date::text AS business_date
+      FROM sales WHERE id = ${saleId}
+    `.execute(db);
+    const report = await sql<{ id: string }>`
+      INSERT INTO daily_branch_reports (
+        branch_id, business_date, status, idempotency_key,
+        created_by_user_id, submitted_by_user_id, submitted_at,
+        reviewed_by_user_id, reviewed_at
+      ) VALUES (
+        ${branchId}, ${businessDate.rows[0]!.business_date}::date, 'APPROVED',
+        ${randomUUID()}, ${actorUserId}, ${actorUserId}, now(),
+        ${actorUserId}, now()
+      ) RETURNING id
+    `.execute(db);
+    dailyReportIds.push(report.rows[0]!.id);
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/sales/${saleId}/void`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ reason: 'Attempt after branch report approval' });
+    expect(response.status).toBe(409);
+    await expect(
+      db
+        .selectFrom('sales')
+        .select('status')
+        .where('id', '=', saleId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({ status: 'COMPLETED' });
   });
 
   it('does not partially void a sale when a consumption movement is missing', async () => {

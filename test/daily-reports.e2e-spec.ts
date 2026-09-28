@@ -338,6 +338,7 @@ describe('daily report routes (e2e)', () => {
         sale_id: sale.id,
         event_type: 'COMPLETED',
         actor_user_id: reporterId,
+        created_at: new Date('2026-09-23T06:00:00.000Z'),
       })
       .execute();
     const saleMovement = await db
@@ -363,6 +364,7 @@ describe('daily report routes (e2e)', () => {
         actor_user_id: reporterId,
         reason: 'Voided earlier sale',
         idempotency_key: randomUUID(),
+        created_at: new Date('2026-09-23T06:10:00.000Z'),
       })
       .execute();
     const saleVoidMovement = await db
@@ -423,6 +425,7 @@ describe('daily report routes (e2e)', () => {
         sale_id: laterSale.id,
         event_type: 'COMPLETED',
         actor_user_id: reporterId,
+        created_at: new Date('2026-09-24T08:00:00.000Z'),
       })
       .execute();
     const laterSaleMovement = await db
@@ -634,6 +637,10 @@ describe('daily report routes (e2e)', () => {
       branch_id: branchId,
       business_date: '2026-09-23',
       status: 'DRAFT',
+      completed_sales_amount: '2.0000',
+      completed_sales_count: 1,
+      voided_sales_amount: '2.0000',
+      voided_sales_count: 1,
     });
     expect(
       created.items.some(
@@ -737,7 +744,13 @@ describe('daily report routes (e2e)', () => {
     await request(app.getHttpServer())
       .post(`${reportUrl(created.id)}/submit`)
       .expect(200)
-      .expect(({ body }) => expect(body.status).toBe('SUBMITTED'));
+      .expect(({ body }) => {
+        expect(body.status).toBe('SUBMITTED');
+        expect(body.completed_sales_amount).toBe('2.0000');
+        expect(body.completed_sales_count).toBe(1);
+        expect(body.voided_sales_amount).toBe('2.0000');
+        expect(body.voided_sales_count).toBe(1);
+      });
 
     activeActorId = reviewerId;
     await request(app.getHttpServer())
@@ -788,6 +801,12 @@ describe('daily report routes (e2e)', () => {
     const approved = approvalResponses[0]!;
     expect(approvalResponses[1]!.body.status).toBe('APPROVED');
     expect(approved.body.status).toBe('APPROVED');
+    expect(approved.body).toMatchObject({
+      completed_sales_amount: '2.0000',
+      completed_sales_count: 1,
+      voided_sales_amount: '2.0000',
+      voided_sales_count: 1,
+    });
     const approvedItem = approved.body.items.find(
       (row: { stock_item_id: string }) => row.stock_item_id === stockItemId,
     );
