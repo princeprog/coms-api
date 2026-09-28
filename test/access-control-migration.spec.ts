@@ -11,6 +11,8 @@ import * as limits from '../src/database/migrations/20260922164052_auth_rate_lim
 import * as accessControl from '../src/database/migrations/20260923214210_access_control';
 import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
 import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
+import * as inventoryLocationPermissions from '../src/database/migrations/20260927201942_inventory_location_permissions';
+import * as roleScopedOperationPermissions from '../src/database/migrations/20260928223738_role_scoped_operation_permissions';
 import { PERMISSION_CATALOG } from '../src/modules/access-control/permission-catalog';
 import { RolesRepository } from '../src/modules/roles/roles.repository';
 
@@ -67,6 +69,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             '20260923214210_access_control': accessControl,
             '20260926011909_predefined_roles': predefinedRoles,
             '20260926032413_remove_no_access_role': noAccessRoleRemoval,
+            '20260927201942_inventory_location_permissions':
+              inventoryLocationPermissions,
+            '20260928223738_role_scoped_operation_permissions':
+              roleScopedOperationPermissions,
           }),
         },
       });
@@ -244,6 +250,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           'branch_products.availability_update',
           'branch_products.read',
           'branches.read',
+          'dashboard.read',
           'daily_reports.create',
           'daily_reports.read',
           'daily_reports.submit',
@@ -278,8 +285,11 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           'dispatches.create',
           'dispatches.dispatch',
           'dispatches.read',
+          'dispatches.reconcile',
           'dispatches.shortage_close',
           'inventory.adjust',
+          'inventory.commissary_adjust',
+          'inventory.commissary_read',
           'inventory.read',
           'products.create',
           'products.read',
@@ -304,6 +314,164 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       };
       for (const grants of Object.values(expectedGrants)) grants.sort();
       expect(grantsByRole).toEqual(expectedGrants);
+    });
+
+    it('scopes inventory grants without widening branch or custom roles', async () => {
+      const scopedGrants = await sql<{ code: string; action_key: string }>`
+        SELECT r.code, p.action_key
+        FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE p.module_key = 'inventory'
+          AND p.action_key IN ('commissary_read', 'commissary_adjust')
+        ORDER BY r.code, p.action_key
+      `.execute(testDb!);
+      expect(scopedGrants.rows).toEqual([
+        { code: 'COMMISSARY_MANAGER', action_key: 'commissary_adjust' },
+        { code: 'COMMISSARY_MANAGER', action_key: 'commissary_read' },
+      ]);
+
+      await sql`
+        INSERT INTO auth.role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM auth.roles AS r
+        CROSS JOIN auth.permissions AS p
+        WHERE r.code = 'CASHIER'
+          AND p.module_key = 'inventory'
+          AND p.action_key = 'commissary_read'
+      `.execute(testDb!);
+      await expect(
+        testDb!
+          .transaction()
+          .execute((trx) => inventoryLocationPermissions.down(trx)),
+      ).rejects.toThrow(/other roles.*CASHIER.*commissary_read/i);
+      await sql`
+        DELETE FROM auth.role_permissions AS rp
+        USING auth.roles AS r, auth.permissions AS p
+        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+          AND r.code = 'CASHIER'
+          AND p.module_key = 'inventory'
+          AND p.action_key = 'commissary_read'
+      `.execute(testDb!);
+
+      await testDb!
+        .transaction()
+        .execute((trx) => inventoryLocationPermissions.down(trx));
+      await sql`
+        DELETE FROM auth.role_permissions AS rp
+        USING auth.roles AS r, auth.permissions AS p
+        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+          AND r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'inventory' AND p.action_key = 'adjust'
+      `.execute(testDb!);
+      await testDb!
+        .transaction()
+        .execute((trx) => inventoryLocationPermissions.up(trx));
+
+      const conditionalGrants = await sql<{ action_key: string }>`
+        SELECT p.action_key
+        FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'inventory'
+          AND p.action_key IN ('commissary_read', 'commissary_adjust')
+        ORDER BY p.action_key
+      `.execute(testDb!);
+      expect(conditionalGrants.rows).toEqual([
+        { action_key: 'commissary_read' },
+      ]);
+
+      await testDb!
+        .transaction()
+        .execute((trx) => inventoryLocationPermissions.down(trx));
+      await sql`
+        INSERT INTO auth.role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM auth.roles AS r
+        CROSS JOIN auth.permissions AS p
+        WHERE r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'inventory' AND p.action_key = 'adjust'
+      `.execute(testDb!);
+      await testDb!
+        .transaction()
+        .execute((trx) => inventoryLocationPermissions.up(trx));
+    });
+
+    it('grants role-scoped access conditionally and guards rollback', async () => {
+      const grants = await sql<{ code: string; key: string }>`
+        SELECT r.code, p.module_key || '.' || p.action_key AS key
+        FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE p.module_key = 'dashboard' OR p.action_key = 'reconcile'
+        ORDER BY r.code, key
+      `.execute(testDb!);
+      expect(grants.rows).toEqual([
+        { code: 'BRANCH_MANAGER', key: 'dashboard.read' },
+        { code: 'COMMISSARY_MANAGER', key: 'dispatches.reconcile' },
+      ]);
+
+      const customRole = await sql<{ id: string }>`
+        INSERT INTO auth.roles (code, role_name)
+        VALUES ('CUSTOM_DASHBOARD', 'Custom Dashboard')
+        RETURNING id
+      `.execute(testDb!);
+      await sql`
+        INSERT INTO auth.role_permissions (role_id, permission_id)
+        SELECT ${customRole.rows[0].id}, id FROM auth.permissions
+        WHERE module_key = 'dashboard' AND action_key = 'global_read'
+      `.execute(testDb!);
+      await expect(
+        testDb!.transaction().execute((trx) =>
+          roleScopedOperationPermissions.down(trx),
+        ),
+      ).rejects.toThrow(/CUSTOM_DASHBOARD.*dashboard.global_read/i);
+      const permissionAfterRejectedRollback = await sql<{ count: number }>`
+        SELECT count(*)::int AS count FROM auth.permissions
+        WHERE module_key = 'dashboard' AND action_key = 'global_read'
+      `.execute(testDb!);
+      expect(permissionAfterRejectedRollback.rows[0].count).toBe(1);
+      await sql`DELETE FROM auth.roles WHERE id = ${customRole.rows[0].id}`.execute(
+        testDb!,
+      );
+
+      await sql`
+        DELETE FROM auth.role_permissions AS rp
+        USING auth.roles AS r, auth.permissions AS p
+        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+          AND r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'dispatches' AND p.action_key = 'shortage_close'
+      `.execute(testDb!);
+      await testDb!
+        .transaction()
+        .execute((trx) => roleScopedOperationPermissions.down(trx));
+      await testDb!
+        .transaction()
+        .execute((trx) => roleScopedOperationPermissions.up(trx));
+      const conditionalGrant = await sql<{ count: number }>`
+        SELECT count(*)::int AS count
+        FROM auth.role_permissions AS rp
+        JOIN auth.roles AS r ON r.id = rp.role_id
+        JOIN auth.permissions AS p ON p.id = rp.permission_id
+        WHERE r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'dispatches' AND p.action_key = 'reconcile'
+      `.execute(testDb!);
+      expect(conditionalGrant.rows[0].count).toBe(0);
+
+      await sql`
+        INSERT INTO auth.role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM auth.roles AS r
+        CROSS JOIN auth.permissions AS p
+        WHERE r.code = 'COMMISSARY_MANAGER'
+          AND p.module_key = 'dispatches' AND p.action_key = 'shortage_close'
+      `.execute(testDb!);
+      await testDb!
+        .transaction()
+        .execute((trx) => roleScopedOperationPermissions.down(trx));
+      await testDb!
+        .transaction()
+        .execute((trx) => roleScopedOperationPermissions.up(trx));
     });
 
     it('keeps edited predefined grants and refuses to roll them back', async () => {
@@ -334,6 +502,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
             '20260923214210_access_control': accessControl,
             '20260926011909_predefined_roles': predefinedRoles,
             '20260926032413_remove_no_access_role': noAccessRoleRemoval,
+            '20260927201942_inventory_location_permissions':
+              inventoryLocationPermissions,
+            '20260928223738_role_scoped_operation_permissions':
+              roleScopedOperationPermissions,
           }),
         },
       });
@@ -344,6 +516,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         WHERE role_id = ${role.rows[0].id}
       `.execute(testDb!);
       expect(grants.rows[0].count).toBe(0);
+
+      await testDb!
+        .transaction()
+        .execute((trx) => roleScopedOperationPermissions.down(trx));
+      await testDb!
+        .transaction()
+        .execute((trx) => inventoryLocationPermissions.down(trx));
 
       await expect(predefinedRoles.down(testDb!)).rejects.toThrow(
         /CASHIER.*changed/i,

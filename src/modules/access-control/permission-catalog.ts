@@ -105,12 +105,32 @@ export const PERMISSION_CATALOG = [
   {
     module_key: 'inventory',
     action_key: 'read',
-    description: 'View inventory',
+    description: 'View assigned branch inventory',
   },
   {
     module_key: 'inventory',
     action_key: 'adjust',
-    description: 'Adjust inventory with a reason',
+    description: 'Adjust assigned branch inventory with a reason',
+  },
+  {
+    module_key: 'inventory',
+    action_key: 'commissary_read',
+    description: 'View commissary inventory',
+  },
+  {
+    module_key: 'inventory',
+    action_key: 'commissary_adjust',
+    description: 'Adjust commissary inventory with a reason',
+  },
+  {
+    module_key: 'dashboard',
+    action_key: 'read',
+    description: 'View performance for assigned branches',
+  },
+  {
+    module_key: 'dashboard',
+    action_key: 'global_read',
+    description: 'View overall and any-branch performance',
   },
   {
     module_key: 'supplier_receipts',
@@ -176,6 +196,11 @@ export const PERMISSION_CATALOG = [
     module_key: 'dispatches',
     action_key: 'shortage_close',
     description: 'Close an in-transit shortage with a reason',
+  },
+  {
+    module_key: 'dispatches',
+    action_key: 'reconcile',
+    description: 'Review dispatch receipt discrepancies and request recounts',
   },
   { module_key: 'products', action_key: 'read', description: 'View products' },
   {
