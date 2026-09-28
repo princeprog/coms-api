@@ -28,6 +28,7 @@ describe('stock request routes (e2e)', () => {
   const requestIds: string[] = [];
   const stockItemIds: string[] = [];
   const userIds: string[] = [];
+  const roleIds: string[] = [];
   let branchId: string;
   let otherBranchId: string;
   let actorUserId: string;
@@ -101,6 +102,16 @@ describe('stock request routes (e2e)', () => {
     actorUserId = actor.id;
     currentUserId = actorUserId;
 
+    const deniedRole = await db
+      .insertInto('auth.roles')
+      .values({
+        code: `STOCK_REQUEST_DENIED_${suffix.slice(0, 8).toUpperCase()}`,
+        role_name: `Stock Request Denied ${suffix.slice(0, 8)}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    roleIds.push(deniedRole.id);
+
     const otherUser = await db
       .insertInto('auth.users')
       .values({
@@ -108,6 +119,7 @@ describe('stock request routes (e2e)', () => {
         full_name: 'Stock Request E2E Test User',
         contact_number: `SR-${suffix.slice(0, 20)}`,
         hashed_password: 'test-only-hash',
+        role_id: deniedRole.id,
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -184,10 +196,12 @@ describe('stock request routes (e2e)', () => {
       await db.deleteFrom('branches').where('id', '=', otherBranchId).execute();
     if (userIds.length)
       await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+    if (roleIds.length)
+      await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
     await Promise.all([
-      app.close(),
-      guardedApp.close(),
-      deniedPermissionApp.close(),
+      app?.close(),
+      guardedApp?.close(),
+      deniedPermissionApp?.close(),
     ]);
   });
 
