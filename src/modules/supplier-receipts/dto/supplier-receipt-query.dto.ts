@@ -1,6 +1,5 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -35,7 +34,4 @@ export class SupplierReceiptQueryDto {
   @IsUUID()
   supplier_id?: string;
 
-  @IsOptional()
-  @IsIn(['DRAFT', 'POSTED'])
-  status?: 'DRAFT' | 'POSTED';
 }
