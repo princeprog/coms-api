@@ -140,37 +140,8 @@ export const PERMISSION_CATALOG = [
   {
     module_key: 'supplier_receipts',
     action_key: 'create',
-    description: 'Record supplier receipts',
-  },
-  {
-    module_key: 'supplier_receipts',
-    action_key: 'post',
-    description: 'Post supplier receipts to inventory',
-  },
-  {
-    module_key: 'stock_requests',
-    action_key: 'read',
-    description: 'View stock requests',
-  },
-  {
-    module_key: 'stock_requests',
-    action_key: 'create',
-    description: 'Create branch stock requests',
-  },
-  {
-    module_key: 'stock_requests',
-    action_key: 'approve',
-    description: 'Approve stock requests',
-  },
-  {
-    module_key: 'stock_requests',
-    action_key: 'reject',
-    description: 'Reject stock requests',
-  },
-  {
-    module_key: 'stock_requests',
-    action_key: 'cancel',
-    description: 'Cancel own stock requests',
+    description:
+      'Record a supplier delivery and immediately add received quantities to commissary inventory',
   },
   {
     module_key: 'dispatches',

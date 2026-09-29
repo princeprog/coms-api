@@ -209,7 +209,7 @@ export interface Dispatches {
   id: Generated<string>;
   idempotency_key: string;
   status: Generated<string>;
-  stock_request_id: string;
+  stock_request_id: string | null;
   updated_at: Generated<Timestamp>;
 }
 
@@ -229,7 +229,8 @@ export interface DispatchItems {
   dispatch_id: string;
   id: Generated<string>;
   quantity_dispatched: Numeric;
-  stock_request_item_id: string;
+  stock_item_id: string;
+  stock_request_item_id: string | null;
 }
 
 export interface DispatchReceiptItems {
@@ -391,10 +392,9 @@ export interface SupplierReceipts {
   created_by_user_id: string;
   id: Generated<string>;
   idempotency_key: string;
-  posted_at: Timestamp | null;
-  posted_by_user_id: string | null;
+  recorded_at: Timestamp;
+  recorded_by_user_id: string;
   received_at: Timestamp;
-  status: Generated<string>;
   supplier_id: string;
   updated_at: Generated<Timestamp>;
 }

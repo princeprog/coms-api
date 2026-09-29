@@ -158,13 +158,49 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         SELECT module_key, action_key, description FROM auth.permissions
         ORDER BY module_key, action_key
       `.execute(testDb!);
-      expect(permissions.rows).toEqual(
-        [...PERMISSION_CATALOG].sort((left, right) =>
+      const catalogBeforeDirectWorkflows = [
+        ...PERMISSION_CATALOG.map((permission) =>
+          permission.module_key === 'supplier_receipts' &&
+          permission.action_key === 'create'
+            ? { ...permission, description: 'Record supplier receipts' }
+            : permission,
+        ),
+        {
+          module_key: 'supplier_receipts',
+          action_key: 'post',
+          description: 'Post supplier receipts to inventory',
+        },
+        {
+          module_key: 'stock_requests',
+          action_key: 'read',
+          description: 'View stock requests',
+        },
+        {
+          module_key: 'stock_requests',
+          action_key: 'create',
+          description: 'Create branch stock requests',
+        },
+        {
+          module_key: 'stock_requests',
+          action_key: 'approve',
+          description: 'Approve stock requests',
+        },
+        {
+          module_key: 'stock_requests',
+          action_key: 'reject',
+          description: 'Reject stock requests',
+        },
+        {
+          module_key: 'stock_requests',
+          action_key: 'cancel',
+          description: 'Cancel own stock requests',
+        },
+      ].sort((left, right) =>
           `${left.module_key}.${left.action_key}`.localeCompare(
             `${right.module_key}.${right.action_key}`,
           ),
-        ),
-      );
+        );
+      expect(permissions.rows).toEqual(catalogBeforeDirectWorkflows);
 
       const tables = await sql<{
         branches: string | null;
