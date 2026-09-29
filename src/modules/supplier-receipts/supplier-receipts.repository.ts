@@ -20,13 +20,13 @@ type CreateReceiptInput = {
   supplier_id: string;
   received_at: string;
   items: ReceiptItemInput[];
-  created_by_user_id: string;
+  recorded_by_user_id: string;
   idempotency_key: string;
 };
 
 type ReceiptListInput = Pick<
   SupplierReceiptQueryDto,
-  'page' | 'page_size' | 'search' | 'supplier_id' | 'status'
+  'page' | 'page_size' | 'search' | 'supplier_id'
 >;
 
 type DbExecutor = Kysely<DB> | Transaction<DB>;
@@ -38,16 +38,17 @@ export class SupplierReceiptsRepository {
   async list(input: ReceiptListInput) {
     let records = this.db
       .selectFrom('supplier_receipts as sr')
+      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
       .select([
         'sr.id',
         'sr.supplier_id',
         's.supplier_name',
         sql<string>`to_char(sr.received_at, 'YYYY-MM-DD')`.as('received_at'),
-        'sr.status',
-        'sr.created_by_user_id',
-        'sr.posted_by_user_id',
-        'sr.posted_at',
+        'sr.idempotency_key',
+        'sr.recorded_by_user_id',
+        'recorder.full_name as recorded_by_name',
+        'sr.recorded_at',
         'sr.created_at',
         'sr.updated_at',
         sql<string>`coalesce((select sum(sri.quantity_received * sri.unit_cost)::text from supplier_receipt_items as sri where sri.supplier_receipt_id = sr.id), '0')`.as(
@@ -70,10 +71,6 @@ export class SupplierReceiptsRepository {
     if (input.supplier_id) {
       records = records.where('sr.supplier_id', '=', input.supplier_id);
       count = count.where('sr.supplier_id', '=', input.supplier_id);
-    }
-    if (input.status) {
-      records = records.where('sr.status', '=', input.status);
-      count = count.where('sr.status', '=', input.status);
     }
     if (input.search) {
       const pattern = this.searchPattern(input.search);
@@ -130,6 +127,11 @@ export class SupplierReceiptsRepository {
           throw new NotFoundException(
             'One or more active stock items were not found',
           );
+        if (stockItemIds.length !== input.items.length)
+          throw new BadRequestException(
+            'A stock item may appear only once in a supplier delivery',
+          );
+
 
         const receipt = await transaction
           .insertInto('supplier_receipts')
@@ -137,12 +139,14 @@ export class SupplierReceiptsRepository {
             supplier_id: input.supplier_id,
             received_at: input.received_at,
             idempotency_key: input.idempotency_key,
-            created_by_user_id: input.created_by_user_id,
+            created_by_user_id: input.recorded_by_user_id,
+            recorded_by_user_id: input.recorded_by_user_id,
+            recorded_at: sql<Date>`now()`,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
 
-        await transaction
+        const receiptItems = await transaction
           .insertInto('supplier_receipt_items')
           .values(
             input.items.map((item) => ({
@@ -151,7 +155,50 @@ export class SupplierReceiptsRepository {
               quantity_received: item.quantity_received,
               unit_cost: item.unit_cost,
             })),
+          .returning(['id', 'stock_item_id', 'quantity_received'])
+          .execute();
+
+        await transaction
+          .insertInto('commissary_inventory')
+          .values(
+            stockItemIds
+              .slice()
+              .sort()
+              .map((stock_item_id) => ({ stock_item_id, quantity_on_hand: '0' })),
           )
+          .onConflict((conflict) => conflict.column('stock_item_id').doNothing())
+          .execute();
+        await transaction
+          .selectFrom('commissary_inventory')
+          .select('stock_item_id')
+          .where('stock_item_id', 'in', stockItemIds)
+          .orderBy('stock_item_id')
+          .forUpdate()
+          )
+        for (const item of receiptItems) {
+          await transaction
+            .updateTable('commissary_inventory')
+            .set({
+              quantity_on_hand: sql`quantity_on_hand + ${item.quantity_received}`,
+              updated_at: sql<Date>`now()`,
+            })
+            .where('stock_item_id', '=', item.stock_item_id)
+            .executeTakeFirstOrThrow();
+          await transaction
+            .insertInto('inventory_movements')
+            .values({
+              inventory_scope: 'COMMISSARY',
+              branch_id: null,
+              stock_item_id: item.stock_item_id,
+              movement_type: 'RECEIPT',
+              quantity_delta: item.quantity_received,
+              reason: `Supplier receipt ${receipt.id}`,
+              actor_user_id: input.recorded_by_user_id,
+              idempotency_key: null,
+              supplier_receipt_item_id: item.id,
+            })
+            .execute();
+        }
           .execute();
 
         const detail = await this.findDetails(transaction, receipt.id);
@@ -171,101 +218,20 @@ export class SupplierReceiptsRepository {
     }
   }
 
-  async post(id: string, actorUserId: string) {
-    return this.db.transaction().execute(async (transaction) => {
-      const receipt = await transaction
-        .selectFrom('supplier_receipts')
-        .select(['id', 'status'])
-        .where('id', '=', id)
-        .forUpdate()
-        .executeTakeFirst();
-      if (!receipt) throw new NotFoundException('Supplier receipt not found');
-      if (receipt.status === 'POSTED') {
-        const detail = await this.findDetails(transaction, id);
-        if (!detail) throw new NotFoundException('Supplier receipt not found');
-        return detail;
-      }
-      if (receipt.status !== 'DRAFT')
-        throw new ConflictException(
-          'Supplier receipt cannot be posted in its current state',
-        );
-
-      const items = await transaction
-        .selectFrom('supplier_receipt_items')
-        .select(['id', 'stock_item_id', 'quantity_received'])
-        .where('supplier_receipt_id', '=', id)
-        .orderBy('stock_item_id')
-        .orderBy('id')
-        .execute();
-      if (!items.length)
-        throw new BadRequestException('Supplier receipt has no items to post');
-
-      for (const item of items) {
-        await transaction
-          .insertInto('commissary_inventory')
-          .values({ stock_item_id: item.stock_item_id, quantity_on_hand: '0' })
-          .onConflict((conflict) =>
-            conflict.column('stock_item_id').doNothing(),
-          )
-          .execute();
-
-        await transaction
-          .updateTable('commissary_inventory')
-          .set({
-            quantity_on_hand: sql`quantity_on_hand + ${item.quantity_received}`,
-            updated_at: sql<Date>`now()`,
-          })
-          .where('stock_item_id', '=', item.stock_item_id)
-          .executeTakeFirstOrThrow();
-
-        await transaction
-          .insertInto('inventory_movements')
-          .values({
-            inventory_scope: 'COMMISSARY',
-            branch_id: null,
-            stock_item_id: item.stock_item_id,
-            movement_type: 'RECEIPT',
-            quantity_delta: item.quantity_received,
-            reason: `Supplier receipt ${id}`,
-            actor_user_id: actorUserId,
-            idempotency_key: null,
-            supplier_receipt_item_id: item.id,
-          })
-          .execute();
-      }
-
-      await transaction
-        .updateTable('supplier_receipts')
-        .set({
-          status: 'POSTED',
-          posted_by_user_id: actorUserId,
-          posted_at: sql<Date>`now()`,
-          updated_at: sql<Date>`now()`,
-        })
-        .where('id', '=', id)
-        .where('status', '=', 'DRAFT')
-        .executeTakeFirstOrThrow();
-
-      const detail = await this.findDetails(transaction, id);
-      if (!detail) throw new NotFoundException('Supplier receipt not found');
-      return detail;
-    });
-  }
-
   private async findDetails(executor: DbExecutor, id: string) {
     const receipt = await executor
       .selectFrom('supplier_receipts as sr')
+      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
       .select([
         'sr.id',
         'sr.supplier_id',
         's.supplier_name',
         sql<string>`to_char(sr.received_at, 'YYYY-MM-DD')`.as('received_at'),
-        'sr.status',
         'sr.idempotency_key',
-        'sr.created_by_user_id',
-        'sr.posted_by_user_id',
-        'sr.posted_at',
+        'sr.recorded_by_user_id',
+        'recorder.full_name as recorded_by_name',
+        'sr.recorded_at',
         'sr.created_at',
         'sr.updated_at',
         sql<string>`coalesce((select sum(sri.quantity_received * sri.unit_cost)::text from supplier_receipt_items as sri where sri.supplier_receipt_id = sr.id), '0')`.as(
@@ -305,7 +271,7 @@ export class SupplierReceiptsRepository {
         'id',
         'supplier_id',
         sql<string>`to_char(received_at, 'YYYY-MM-DD')`.as('received_at'),
-        'created_by_user_id',
+        'recorded_by_user_id',
       ])
       .where('idempotency_key', '=', key)
       .executeTakeFirst();
@@ -317,7 +283,7 @@ export class SupplierReceiptsRepository {
       id: string;
       supplier_id: string;
       received_at: string;
-      created_by_user_id: string;
+      recorded_by_user_id: string;
     },
     input: CreateReceiptInput,
   ) {
@@ -329,7 +295,7 @@ export class SupplierReceiptsRepository {
     const sameRequest =
       existing.supplier_id === input.supplier_id &&
       existing.received_at === input.received_at &&
-      existing.created_by_user_id === input.created_by_user_id &&
+      existing.recorded_by_user_id === input.recorded_by_user_id &&
       this.itemFingerprint(existingItems) === this.itemFingerprint(input.items);
     if (!sameRequest)
       throw new ConflictException(

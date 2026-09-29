@@ -46,7 +46,7 @@ describe('SupplierReceiptsService', () => {
           unit_cost: '89.25',
         },
       ],
-      created_by_user_id: actorId,
+      recorded_by_user_id: actorId,
       idempotency_key: idempotencyKey,
     });
   });
@@ -107,6 +107,25 @@ describe('SupplierReceiptsService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it('rejects duplicate stock-item lines before recording a delivery', async () => {
+    const repository = { create: vi.fn() };
+    const service = new SupplierReceiptsService(repository as never);
+    const stockItemId = randomUUID();
+    const input = {
+      supplier_id: randomUUID(),
+      received_at: '2026-09-24',
+      items: [
+        { stock_item_id: stockItemId, quantity_received: '1', unit_cost: '2' },
+        { stock_item_id: stockItemId, quantity_received: '3', unit_cost: '4' },
+      ],
+    };
+
+    await expect(
+      service.create(input as never, randomUUID(), randomUUID()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
   it.each(['2026-02-30', '2026-09-24T12:30:00Z', '0000-01-01'])(
     'rejects invalid date-only received date %s',
     async (receivedAt) => {
@@ -131,11 +150,10 @@ describe('SupplierReceiptsService', () => {
     },
   );
 
-  it('trims and omits a blank list search and delegates posting with the actor', async () => {
+  it('trims and omits a blank list search and delegates receipt reads', async () => {
     const repository = {
       list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
       findById: vi.fn().mockResolvedValue({ id: 'receipt-1' }),
-      post: vi.fn().mockResolvedValue({ id: 'receipt-1', status: 'POSTED' }),
     };
     const service = new SupplierReceiptsService(repository as never);
     const query = { page: 2, page_size: 10, search: '   ' } as never;
@@ -144,12 +162,7 @@ describe('SupplierReceiptsService', () => {
     await expect(service.get('receipt-1')).resolves.toEqual({
       id: 'receipt-1',
     });
-    await expect(service.post('receipt-1', 'actor-1')).resolves.toMatchObject({
-      status: 'POSTED',
-    });
-
     expect(repository.list).toHaveBeenCalledWith({ page: 2, page_size: 10 });
-    expect(repository.post).toHaveBeenCalledWith('receipt-1', 'actor-1');
   });
 
   it('reports a missing receipt as not found', async () => {

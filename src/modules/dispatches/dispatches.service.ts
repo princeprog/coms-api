@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -56,18 +55,25 @@ export class DispatchesService {
     idempotencyKey: string | undefined,
   ) {
     const key = this.requireIdempotencyKey(idempotencyKey);
-    const stockRequest = await this.repository.findRequestForDispatch(
-      input.stock_request_id,
-    );
-    if (!stockRequest) throw new NotFoundException('Stock request not found');
-    if (!this.canAccessBranch(stockRequest.branch_id, access))
+    if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 100)
+      throw new BadRequestException('A dispatch must contain between 1 and 100 items');
+    const branch = await this.repository.findActiveBranch(input.branch_id);
+    if (!branch) throw new NotFoundException('Active branch not found');
+    if (!this.canAccessBranch(input.branch_id, access))
       throw new ForbiddenException('Branch access required');
-    if (stockRequest.status !== 'APPROVED')
-      throw new ConflictException(
-        'Only approved stock requests can be dispatched',
-      );
+    const seen = new Set<string>();
+    const items = input.items.map((item) => {
+      if (seen.has(item.stock_item_id))
+        throw new BadRequestException('A stock item may appear only once per dispatch');
+      seen.add(item.stock_item_id);
+      return {
+        stock_item_id: item.stock_item_id,
+        quantity_dispatched: this.normalizeDispatchQuantity(item.quantity_dispatched),
+      };
+    });
     return this.draftsRepository.createDraft({
-      stock_request_id: input.stock_request_id,
+      branch_id: input.branch_id,
+      items,
       created_by_user_id: access.userId,
       idempotency_key: key,
     });
@@ -214,6 +220,21 @@ export class DispatchesService {
         'A valid Idempotency-Key header is required',
       );
     return key;
+  }
+
+  private normalizeDispatchQuantity(value: string): string {
+    if (
+      typeof value !== 'string' ||
+      value.length > 80 ||
+      !DECIMAL_PATTERN.test(value)
+    )
+      throw new BadRequestException('Dispatched quantity must be a decimal string');
+    const [wholePart, fractionPart = ''] = value.split('.');
+    const whole = wholePart.replace(/^0+(?=\d)/, '');
+    const fraction = fractionPart.replace(/0+$/, '');
+    if (whole === '0' && fraction.length === 0)
+      throw new BadRequestException('Dispatched quantity must be greater than zero');
+    return `${whole}${fraction ? `.${fraction}` : ''}`;
   }
 
   private branchScope(access: AccessContext): string[] | null {

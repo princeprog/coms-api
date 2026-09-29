@@ -4,7 +4,8 @@ import type { DB } from '../../database/db';
 export type DispatchDbExecutor = Kysely<DB> | Transaction<DB>;
 
 export type CreateDraftInput = {
-  stock_request_id: string;
+  branch_id: string;
+  items: Array<{ stock_item_id: string; quantity_dispatched: string }>;
   created_by_user_id: string;
   idempotency_key: string;
 };

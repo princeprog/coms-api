@@ -67,7 +67,6 @@ describe('supplier receipt routes (e2e)', () => {
             permissions: [
               'supplier_receipts.read',
               'supplier_receipts.create',
-              'supplier_receipts.post',
               'inventory.read',
             ],
             branchIds: [],
@@ -152,10 +151,6 @@ describe('supplier receipt routes (e2e)', () => {
       path: '/supplier-receipts/00000000-0000-4000-8000-000000000001',
     },
     { method: 'POST', path: '/supplier-receipts' },
-    {
-      method: 'POST',
-      path: '/supplier-receipts/00000000-0000-4000-8000-000000000001/post',
-    },
   ])('requires the authentication gateway for $method $path', async (route) => {
     const client = request(guardedApp.getHttpServer());
     const response =
@@ -213,7 +208,7 @@ describe('supplier receipt routes (e2e)', () => {
     expect(invalidCost.status).toBe(400);
   });
 
-  it('creates an idempotent draft, lists details, and posts each receipt line exactly once', async () => {
+  it('records an idempotent final delivery and adds each line to inventory exactly once', async () => {
     const idempotencyKey = randomUUID();
     const path = '/supplier-receipts';
     const receipt = {
@@ -250,8 +245,8 @@ describe('supplier receipt routes (e2e)', () => {
       supplier_id: supplierId,
       supplier_name: `Receipt Supplier ${suffix}`,
       received_at: '2026-09-24',
-      status: 'DRAFT',
       created_by_user_id: actorUserId,
+      recorded_by_user_id: actorUserId,
       total_cost: '33.625',
     });
     expect(created.body.items).toHaveLength(2);
@@ -268,7 +263,7 @@ describe('supplier receipt routes (e2e)', () => {
         items: [{ ...receipt.items[0], quantity_received: '3' }],
       });
     const listed = await request(app.getHttpServer()).get(
-      `/supplier-receipts?status=DRAFT&supplier_id=${supplierId}&search=${encodeURIComponent(`Receipt Supplier ${suffix}`)}`,
+      `/supplier-receipts?supplier_id=${supplierId}&search=${encodeURIComponent(`Receipt Supplier ${suffix}`)}`,
     );
     const detail = await request(app.getHttpServer()).get(
       `/supplier-receipts/${created.body.id}`,
@@ -281,20 +276,18 @@ describe('supplier receipt routes (e2e)', () => {
     expect(listed.body).toMatchObject({ total: 1, page: 1, page_size: 25 });
     expect(listed.body.items[0]).toMatchObject({
       id: created.body.id,
+      idempotency_key: idempotencyKey,
       item_count: 2,
       total_cost: '33.625',
     });
     expect(detail.status).toBe(200);
     expect(detail.body).toMatchObject({
       id: created.body.id,
-      status: 'DRAFT',
       total_cost: '33.625',
+      recorded_by_user_id: actorUserId,
     });
 
-    const posted = await request(app.getHttpServer()).post(
-      `${path}/${created.body.id}/post`,
-    );
-    const repeatedPost = await request(app.getHttpServer()).post(
+    const unavailablePost = await request(app.getHttpServer()).post(
       `${path}/${created.body.id}/post`,
     );
     const itemIds = created.body.items.map((item: { id: string }) => item.id);
@@ -316,14 +309,7 @@ describe('supplier receipt routes (e2e)', () => {
       .orderBy('stock_item_id')
       .execute();
 
-    expect(posted.status).toBe(201);
-    expect(posted.body).toMatchObject({
-      id: created.body.id,
-      status: 'POSTED',
-      posted_by_user_id: actorUserId,
-    });
-    expect(repeatedPost.status).toBe(201);
-    expect(repeatedPost.body.id).toBe(posted.body.id);
+    expect(unavailablePost.status).toBe(404);
     expect(movements).toHaveLength(2);
     expect(
       movements
@@ -340,7 +326,7 @@ describe('supplier receipt routes (e2e)', () => {
     expect(balanceByStockItemId.get(stockItemIds[1])).toBe('1');
   });
 
-  it('coalesces simultaneous create and post retries into one posted receipt', async () => {
+  it('coalesces simultaneous create retries into one inventory update', async () => {
     const idempotencyKey = randomUUID();
     const path = '/supplier-receipts';
     const receipt = {
@@ -365,10 +351,6 @@ describe('supplier receipt routes (e2e)', () => {
     expect(duplicate.body.id).toBe(first.body.id);
     receiptIds.push(first.body.id);
 
-    const [posted, retry] = await Promise.all([
-      request(app.getHttpServer()).post(`${path}/${first.body.id}/post`),
-      request(app.getHttpServer()).post(`${path}/${first.body.id}/post`),
-    ]);
     const movementCount = await db
       .selectFrom('inventory_movements')
       .select((eb) => eb.fn.countAll<number>().as('total'))
@@ -380,9 +362,7 @@ describe('supplier receipt routes (e2e)', () => {
       .where('stock_item_id', '=', stockItemIds[2])
       .executeTakeFirstOrThrow();
 
-    expect(posted.status).toBe(201);
-    expect(retry.status).toBe(201);
-    expect(retry.body.id).toBe(first.body.id);
+    expect(first.body.id).toBe(duplicate.body.id);
     expect(Number(movementCount.total)).toBe(1);
     expect(balance.quantity_on_hand).toBe('3');
   });

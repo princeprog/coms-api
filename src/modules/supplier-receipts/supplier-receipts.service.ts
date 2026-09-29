@@ -21,7 +21,6 @@ export class SupplierReceiptsService {
       page_size: query.page_size,
       ...(search ? { search } : {}),
       ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
-      ...(query.status ? { status: query.status } : {}),
     });
   }
 
@@ -56,6 +55,12 @@ export class SupplierReceiptsService {
         'A receipt must contain between 1 and 100 items',
       );
 
+    const stockItemIds = input.items.map((item) => item.stock_item_id);
+    if (new Set(stockItemIds).size !== stockItemIds.length)
+      throw new BadRequestException(
+        'A stock item may appear only once in a supplier delivery',
+      );
+
     const items = input.items.map((item) => ({
       stock_item_id: item.stock_item_id,
       quantity_received: this.normalizeDecimal(item.quantity_received, true),
@@ -66,13 +71,9 @@ export class SupplierReceiptsService {
       supplier_id: input.supplier_id,
       received_at: input.received_at,
       items,
-      created_by_user_id: actorUserId,
+      recorded_by_user_id: actorUserId,
       idempotency_key: key,
     });
-  }
-
-  post(id: string, actorUserId: string) {
-    return this.repository.post(id, actorUserId);
   }
 
   private normalizeDecimal(value: string, mustBePositive: boolean): string {

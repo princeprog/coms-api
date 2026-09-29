@@ -46,12 +46,4 @@ export class SupplierReceiptsController {
     return this.service.create(dto, access.userId, idempotencyKey);
   }
 
-  @Post(':id/post')
-  @RequirePermission('supplier_receipts.post')
-  post(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentAccessContext() access: AccessContext,
-  ) {
-    return this.service.post(id, access.userId);
-  }
 }

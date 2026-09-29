@@ -24,10 +24,11 @@ type DbExecutor = DispatchDbExecutor;
 export class DispatchesRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
-  findRequestForDispatch(id: string) {
+  findActiveBranch(id: string) {
     return this.db
-      .selectFrom('stock_requests')
-      .select(['branch_id', 'status'])
+      .selectFrom('branches')
+      .select(['id', 'status'])
+      .where('status', '=', 'active')
       .where('id', '=', id)
       .executeTakeFirst();
   }
@@ -36,7 +37,6 @@ export class DispatchesRepository {
     let records = this.db
       .selectFrom('dispatches as d')
       .innerJoin('branches as b', 'b.id', 'd.branch_id')
-      .innerJoin('stock_requests as sr', 'sr.id', 'd.stock_request_id')
       .innerJoin('auth.users as creator', 'creator.id', 'd.created_by_user_id')
       .leftJoin(
         'auth.users as dispatcher',
@@ -45,10 +45,8 @@ export class DispatchesRepository {
       )
       .select([
         'd.id',
-        'd.stock_request_id',
         'd.branch_id',
         'b.branch_name',
-        'sr.status as stock_request_status',
         'd.status',
         'd.created_by_user_id',
         'creator.full_name as created_by_name',
@@ -144,7 +142,6 @@ export class DispatchesRepository {
     const dispatch = await executor
       .selectFrom('dispatches as d')
       .innerJoin('branches as b', 'b.id', 'd.branch_id')
-      .innerJoin('stock_requests as sr', 'sr.id', 'd.stock_request_id')
       .innerJoin('auth.users as creator', 'creator.id', 'd.created_by_user_id')
       .leftJoin(
         'auth.users as dispatcher',
@@ -153,10 +150,8 @@ export class DispatchesRepository {
       )
       .select([
         'd.id',
-        'd.stock_request_id',
         'd.branch_id',
         'b.branch_name',
-        'sr.status as stock_request_status',
         'd.status',
         'd.idempotency_key',
         'd.created_by_user_id',
@@ -181,19 +176,12 @@ export class DispatchesRepository {
     ] = await Promise.all([
       executor
         .selectFrom('dispatch_items as di')
-        .innerJoin(
-          'stock_request_items as sri',
-          'sri.id',
-          'di.stock_request_item_id',
-        )
-        .innerJoin('stock_items as si', 'si.id', 'sri.stock_item_id')
+        .innerJoin('stock_items as si', 'si.id', 'di.stock_item_id')
         .select([
           'di.id',
-          'di.stock_request_item_id',
-          'sri.stock_item_id',
+          'di.stock_item_id',
           'si.stock_item_name',
           'si.unit',
-          sql<string>`sri.quantity_requested::text`.as('quantity_requested'),
           sql<string>`di.quantity_dispatched::text`.as('quantity_dispatched'),
           sql<string>`coalesce((select sum(dri.quantity_received) from dispatch_receipt_items as dri where dri.dispatch_item_id = di.id), 0)::text`.as(
             'quantity_received',
@@ -277,7 +265,6 @@ export class DispatchesRepository {
       ...dispatch,
       items: items.map((item) => ({
         ...item,
-        quantity_requested: normalizeDecimal(item.quantity_requested),
         quantity_dispatched: normalizeDecimal(item.quantity_dispatched),
         quantity_received: normalizeDecimal(item.quantity_received),
         quantity_shortage_closed: normalizeDecimal(
@@ -319,12 +306,7 @@ export class DispatchesRepository {
         'dr.id',
       )
       .leftJoin('dispatch_items as di', 'di.id', 'dri.dispatch_item_id')
-      .leftJoin(
-        'stock_request_items as sri',
-        'sri.id',
-        'di.stock_request_item_id',
-      )
-      .leftJoin('stock_items as si', 'si.id', 'sri.stock_item_id')
+      .leftJoin('stock_items as si', 'si.id', 'di.stock_item_id')
       .select([
         'dr.id',
         'dr.received_by_user_id',
@@ -332,7 +314,7 @@ export class DispatchesRepository {
         'dr.created_at',
         'dri.id as receipt_item_id',
         'di.id as dispatch_item_id',
-        'sri.stock_item_id',
+        'di.stock_item_id',
         'si.stock_item_name',
         'si.unit',
         sql<string>`dri.quantity_received::text`.as('quantity_received'),
@@ -402,12 +384,7 @@ export class DispatchesRepository {
         'dsc.id',
       )
       .leftJoin('dispatch_items as di', 'di.id', 'dsci.dispatch_item_id')
-      .leftJoin(
-        'stock_request_items as sri',
-        'sri.id',
-        'di.stock_request_item_id',
-      )
-      .leftJoin('stock_items as si', 'si.id', 'sri.stock_item_id')
+      .leftJoin('stock_items as si', 'si.id', 'di.stock_item_id')
       .select([
         'dsc.id',
         'dsc.closed_by_user_id',
@@ -416,7 +393,7 @@ export class DispatchesRepository {
         'dsc.created_at',
         'dsci.id as closure_item_id',
         'di.id as dispatch_item_id',
-        'sri.stock_item_id',
+        'di.stock_item_id',
         'si.stock_item_name',
         'si.unit',
         sql<string>`dsci.quantity_closed::text`.as('quantity_closed'),
@@ -481,14 +458,9 @@ export class DispatchesRepository {
   async loadDispatchItems(executor: DbExecutor, dispatchId: string) {
     return executor
       .selectFrom('dispatch_items as di')
-      .innerJoin(
-        'stock_request_items as sri',
-        'sri.id',
-        'di.stock_request_item_id',
-      )
-      .select(['di.id', 'sri.stock_item_id', 'di.quantity_dispatched'])
+      .select(['di.id', 'di.stock_item_id', 'di.quantity_dispatched'])
       .where('di.dispatch_id', '=', dispatchId)
-      .orderBy('sri.stock_item_id')
+      .orderBy('di.stock_item_id')
       .orderBy('di.id')
       .execute();
   }
