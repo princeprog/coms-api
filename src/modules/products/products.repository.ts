@@ -1,3 +1,8 @@
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql, type Kysely } from 'kysely';
 import { DATABASE } from '../../database/database.module';
@@ -25,14 +30,13 @@ export class ProductsRepository {
       .orderBy('product_name')
       .orderBy('id')
       .limit(input.page_size)
-      .offset((input.page - 1) * input.page_size);
+      .offset(paginationOffset(input));
     let count = this.db
       .selectFrom('products')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
     if (input.search) {
-      const escapedSearch = input.search.replace(/[\\%_]/g, '\\$&');
-      const pattern = `%${escapedSearch}%`;
+      const pattern = containsSearchPattern(input.search);
       records = records.where('product_name', 'ilike', pattern);
       count = count.where('product_name', 'ilike', pattern);
     }
@@ -45,12 +49,7 @@ export class ProductsRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: input.page,
-      page_size: input.page_size,
-    };
+    return paginatedResult(items, Number(result.total), input);
   }
 
   findById(id: string) {

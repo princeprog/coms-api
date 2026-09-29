@@ -1,3 +1,8 @@
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
 import {
   BadRequestException,
   ConflictException,
@@ -60,13 +65,13 @@ export class InventoryRepository {
       .orderBy('si.stock_item_name')
       .orderBy('si.id')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('stock_items')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
     if (query.search) {
-      const pattern = this.searchPattern(query.search);
+      const pattern = containsSearchPattern(query.search);
       records = records.where('si.stock_item_name', 'ilike', pattern);
       count = count.where('stock_item_name', 'ilike', pattern);
     }
@@ -75,12 +80,7 @@ export class InventoryRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   async listBranch(branchId: string, query: InventoryQueryDto) {
@@ -106,13 +106,13 @@ export class InventoryRepository {
       .orderBy('si.stock_item_name')
       .orderBy('si.id')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('stock_items')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
     if (query.search) {
-      const pattern = this.searchPattern(query.search);
+      const pattern = containsSearchPattern(query.search);
       records = records.where('si.stock_item_name', 'ilike', pattern);
       count = count.where('stock_item_name', 'ilike', pattern);
     }
@@ -121,12 +121,7 @@ export class InventoryRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   async listMovements(
@@ -155,7 +150,7 @@ export class InventoryRepository {
       .orderBy('im.created_at', 'desc')
       .orderBy('im.id', 'desc')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('inventory_movements')
       .select((eb) => eb.fn.countAll<number>().as('total'))
@@ -177,12 +172,7 @@ export class InventoryRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   async postAdjustment(input: AdjustmentInput) {
@@ -331,10 +321,6 @@ export class InventoryRepository {
     const fraction = fractionPart.replace(/0+$/, '');
     const isZero = whole === '0' && fraction.length === 0;
     return `${negative && !isZero ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`;
-  }
-
-  private searchPattern(search: string) {
-    return `%${search.replace(/[\\%_]/g, '\\$&')}%`;
   }
 
   private isUniqueViolation(error: unknown): boolean {

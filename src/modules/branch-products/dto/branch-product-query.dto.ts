@@ -1,29 +1,9 @@
-import { Transform, Type } from 'class-transformer';
-import {
-  IsBoolean,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  MaxLength,
-  Min,
-} from 'class-validator';
+import { parseBooleanFilter } from '../../../common/utils/list-filters';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
-export class BranchProductQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(1_000_000)
-  page = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  page_size = 25;
-
+export class BranchProductQueryDto extends PaginationQueryDto {
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
@@ -31,11 +11,7 @@ export class BranchProductQueryDto {
   search?: string;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-    return value;
-  })
+  @Transform(({ value }) => parseBooleanFilter(value))
   @IsBoolean()
   is_available?: boolean;
 }

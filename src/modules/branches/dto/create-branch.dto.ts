@@ -3,16 +3,11 @@ import {
   IsDateString,
   IsOptional,
   IsString,
-  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
 
 export class CreateBranchDto {
-  @IsString()
-  @Matches(/^[A-Z0-9][A-Z0-9_-]{1,49}$/)
-  code!: string;
-
   @IsString()
   @MinLength(2)
   @MaxLength(160)

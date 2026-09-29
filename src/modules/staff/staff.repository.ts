@@ -1,3 +1,8 @@
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
 import {
   BadRequestException,
   ConflictException,
@@ -23,8 +28,9 @@ export class StaffRepository {
     search?: string,
     branchId?: string,
     visibleBranchIds?: string[],
+    status?: 'active' | 'inactive' | 'unassigned',
   ) {
-    const pattern = search?.trim() ? `%${search.trim()}%` : undefined;
+    const pattern = search?.trim() ? containsSearchPattern(search) : undefined;
     let records = this.db
       .selectFrom('auth.users as u')
       .leftJoin('auth.roles as r', 'r.id', 'u.role_id')
@@ -40,7 +46,7 @@ export class StaffRepository {
       ])
       .orderBy('u.full_name')
       .limit(pageSize)
-      .offset((page - 1) * pageSize);
+      .offset(paginationOffset({ page, page_size: pageSize }));
     let count = this.db
       .selectFrom('auth.users as u')
       .select((eb) => eb.fn.countAll<number>().as('total'));
@@ -70,6 +76,14 @@ export class StaffRepository {
         ]),
       );
     }
+    if (status === 'active' || status === 'inactive') {
+      const isActive = status === 'active';
+      records = records.where('u.is_active', '=', isActive);
+      count = count.where('u.is_active', '=', isActive);
+    } else if (status === 'unassigned') {
+      records = records.where('u.role_id', 'is', null);
+      count = count.where('u.role_id', 'is', null);
+    }
     const [staff, total] = await Promise.all([
       records.execute(),
       count.executeTakeFirstOrThrow(),
@@ -77,17 +91,16 @@ export class StaffRepository {
     const branchesByUser = await this.activeBranchesForUsers(
       staff.map(({ id }) => id),
     );
-    return {
-      items: staff.map((member) => ({
+    return paginatedResult(
+      staff.map((member) => ({
         ...member,
         branch_ids: (branchesByUser.get(member.id) ?? []).filter(
           (id) => !visibleBranchIds || visibleBranchIds.includes(id),
         ),
       })),
-      total: Number(total.total),
-      page,
-      page_size: pageSize,
-    };
+      Number(total.total),
+      { page, page_size: pageSize },
+    );
   }
 
   async findById(

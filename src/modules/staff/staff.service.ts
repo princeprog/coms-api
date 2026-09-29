@@ -21,6 +21,7 @@ export class StaffService {
       page_size: number;
       search?: string;
       branch_id?: string;
+      status?: 'active' | 'inactive' | 'unassigned';
     },
     actorBranchIds: string[],
     actorIsSuperAdmin: boolean,
@@ -36,6 +37,7 @@ export class StaffService {
       query.search,
       branchId,
       actorIsSuperAdmin ? undefined : actorBranchIds,
+      query.status,
     );
   }
 
@@ -91,9 +93,9 @@ export class StaffService {
       throw new BadRequestException('A valid staff email is required');
     if (fullName.length < 2 || fullName.length > 160)
       throw new BadRequestException('Staff name must be 2 to 160 characters');
-    if (contactNumber.length < 7 || contactNumber.length > 30)
+    if (!/^(?:0|\+63)(?:9\d|89)\d{8}$/.test(contactNumber))
       throw new BadRequestException(
-        'Contact number must be 7 to 30 characters',
+        'Contact number must be a Philippine mobile number',
       );
     if (input.password.length < 12 || input.password.length > 128)
       throw new BadRequestException('Password must be 12 to 128 characters');

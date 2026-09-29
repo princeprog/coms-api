@@ -1,5 +1,15 @@
 # Authentication operations
 
+## Runtime and password hashes
+
+The API requires Node.js 24.7.0 or newer. Passwords use Node's built-in
+`node:crypto` Argon2id implementation with the existing work factors
+(`m=19456,t=2,p=1`) and standard version-19 PHC strings. Existing account hashes
+remain usable. This avoids loading the unsigned native addon that Windows
+Application Control blocked on the development machine. Node currently marks
+its Argon2 API as a release candidate; keep the runtime on a supported Node 24
+release and revisit this implementation when the API's stability level changes.
+
 ## Configuration
 
 Next.js is the supported authentication gateway. Every Nest auth request requires

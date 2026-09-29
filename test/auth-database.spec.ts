@@ -423,7 +423,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     it('scopes branch listings and applies branch create, update, and deactivate transitions', async () => {
       const branches = new BranchesService(new BranchesRepository(db));
       const created = await branches.create({
-        code: 'DB_BRANCH_TEST',
         branch_name: 'Database Branch Test',
         has_dine_in: true,
       });
@@ -466,11 +465,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       });
       const branches = new BranchesService(new BranchesRepository(db));
       const branch = await branches.create({
-        code: 'DB_STAFF_BRANCH',
         branch_name: 'Staff Test Branch',
       });
       const externalBranch = await branches.create({
-        code: 'DB_STAFF_BRANCH_B',
         branch_name: 'Staff Other Branch',
       });
       const staffRepository = new StaffRepository(db);
@@ -644,6 +641,34 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         branch.id,
         [branch.id],
         false,
+      );
+      await expect(
+        staff.list(
+          { page: 1, page_size: 25, branch_id: branch.id, status: 'active' },
+          [branch.id],
+          false,
+        ),
+      ).resolves.toMatchObject({ items: [], total: 0 });
+      await expect(
+        staff.list(
+          { page: 1, page_size: 25, branch_id: branch.id, status: 'inactive' },
+          [branch.id],
+          false,
+        ),
+      ).resolves.toMatchObject({
+        items: [expect.objectContaining({ id: member.id, is_active: false })],
+        total: 1,
+      });
+      const unassignedPage = await staff.list(
+        { page: 1, page_size: 25, status: 'unassigned' },
+        [],
+        true,
+      );
+      expect(unassignedPage.items).toContainEqual(
+        expect.objectContaining({ id: unassigned.id, role_id: null }),
+      );
+      expect(unassignedPage.items.every((item) => item.role_id === null)).toBe(
+        true,
       );
       await expect(
         services[1].authenticateAccess(session.tokens.accessToken),

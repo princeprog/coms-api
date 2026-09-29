@@ -10,6 +10,29 @@ vi.mock('../auth/password-hashing', () => ({
 }));
 
 describe('StaffService', () => {
+  it('passes the selected staff status to the scoped repository query', async () => {
+    const branchId = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+    const repository = {
+      list: vi.fn().mockReturnValue({ items: [], total: 0 }),
+    };
+    const service = new StaffService(repository as never);
+
+    await service.list(
+      { page: 2, page_size: 25, branch_id: branchId, status: 'inactive' },
+      [branchId],
+      false,
+    );
+
+    expect(repository.list).toHaveBeenCalledWith(
+      2,
+      25,
+      undefined,
+      branchId,
+      [branchId],
+      'inactive',
+    );
+  });
+
   it('normalizes account identity and hashes the password before creation', async () => {
     const repository = { create: vi.fn().mockResolvedValue({ id: 'staff-1' }) };
     const service = new StaffService(repository as never);
@@ -36,6 +59,28 @@ describe('StaffService', () => {
       role_id: '4',
       branch_ids: [],
     });
+  });
+
+  it('rejects non-Philippine and malformed staff contact numbers', async () => {
+    const repository = { create: vi.fn() };
+    const service = new StaffService(repository as never);
+
+    for (const contactNumber of ['abc1234567', '+14155550123', '0917123456']) {
+      await expect(
+        service.create(
+          {
+            email: 'staff@example.com',
+            full_name: 'Staff Member',
+            contact_number: contactNumber,
+            password: 'long test password',
+            branch_ids: [],
+          },
+          [],
+          true,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('rejects self role changes and empty profile updates', async () => {

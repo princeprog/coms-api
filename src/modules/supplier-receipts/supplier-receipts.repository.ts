@@ -1,3 +1,8 @@
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
 import {
   BadRequestException,
   ConflictException,
@@ -38,8 +43,8 @@ export class SupplierReceiptsRepository {
   async list(input: ReceiptListInput) {
     let records = this.db
       .selectFrom('supplier_receipts as sr')
-      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
+      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .select([
         'sr.id',
         'sr.supplier_id',
@@ -62,7 +67,7 @@ export class SupplierReceiptsRepository {
       .orderBy('sr.created_at', 'desc')
       .orderBy('sr.id', 'desc')
       .limit(input.page_size)
-      .offset((input.page - 1) * input.page_size);
+      .offset(paginationOffset(input));
     let count = this.db
       .selectFrom('supplier_receipts as sr')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
@@ -73,7 +78,7 @@ export class SupplierReceiptsRepository {
       count = count.where('sr.supplier_id', '=', input.supplier_id);
     }
     if (input.search) {
-      const pattern = this.searchPattern(input.search);
+      const pattern = containsSearchPattern(input.search);
       records = records.where('s.supplier_name', 'ilike', pattern);
       count = count.where('s.supplier_name', 'ilike', pattern);
     }
@@ -82,12 +87,7 @@ export class SupplierReceiptsRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: input.page,
-      page_size: input.page_size,
-    };
+    return paginatedResult(items, Number(result.total), input);
   }
 
   findById(id: string) {
@@ -127,11 +127,11 @@ export class SupplierReceiptsRepository {
           throw new NotFoundException(
             'One or more active stock items were not found',
           );
+
         if (stockItemIds.length !== input.items.length)
           throw new BadRequestException(
             'A stock item may appear only once in a supplier delivery',
           );
-
 
         const receipt = await transaction
           .insertInto('supplier_receipts')
@@ -155,6 +155,7 @@ export class SupplierReceiptsRepository {
               quantity_received: item.quantity_received,
               unit_cost: item.unit_cost,
             })),
+          )
           .returning(['id', 'stock_item_id', 'quantity_received'])
           .execute();
 
@@ -174,7 +175,7 @@ export class SupplierReceiptsRepository {
           .where('stock_item_id', 'in', stockItemIds)
           .orderBy('stock_item_id')
           .forUpdate()
-          )
+          .execute();
         for (const item of receiptItems) {
           await transaction
             .updateTable('commissary_inventory')
@@ -199,7 +200,6 @@ export class SupplierReceiptsRepository {
             })
             .execute();
         }
-          .execute();
 
         const detail = await this.findDetails(transaction, receipt.id);
         if (!detail)
@@ -221,8 +221,8 @@ export class SupplierReceiptsRepository {
   private async findDetails(executor: DbExecutor, id: string) {
     const receipt = await executor
       .selectFrom('supplier_receipts as sr')
-      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
+      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
       .select([
         'sr.id',
         'sr.supplier_id',
@@ -332,10 +332,6 @@ export class SupplierReceiptsRepository {
     const whole = wholePart.replace(/^0+(?=\d)/, '');
     const fraction = fractionPart.replace(/0+$/, '');
     return `${whole}${fraction ? `.${fraction}` : ''}`;
-  }
-
-  private searchPattern(search: string) {
-    return `%${search.replace(/[\\%_]/g, '\\$&')}%`;
   }
 
   private isUniqueViolation(error: unknown): boolean {

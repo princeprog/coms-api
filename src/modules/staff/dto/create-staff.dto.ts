@@ -21,8 +21,9 @@ export class CreateStaffDto {
   full_name!: string;
 
   @IsString()
-  @MinLength(7)
-  @MaxLength(30)
+  @Matches(/^(?:0|\+63)(?:9\d|89)\d{8}$/, {
+    message: 'Contact number must be a Philippine mobile number',
+  })
   contact_number!: string;
 
   @IsString()

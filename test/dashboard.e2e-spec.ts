@@ -34,8 +34,6 @@ describe('dashboard routes (e2e)', () => {
   let productId: string;
   let stockItemId: string;
   let dispatchId: string;
-  let stockRequestId: string;
-  let stockRequestItemId: string;
 
   async function createBranch(name: string) {
     const branch = await db
@@ -235,31 +233,10 @@ describe('dashboard routes (e2e)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     stockItemId = stockItem.id;
-    const stockRequest = await db
-      .insertInto('stock_requests')
-      .values({
-        branch_id: assignedBranchId,
-        requested_by_user_id: branchManagerId,
-        status: 'APPROVED',
-        idempotency_key: randomUUID(),
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    stockRequestId = stockRequest.id;
-    const requestItem = await db
-      .insertInto('stock_request_items')
-      .values({
-        stock_request_id: stockRequest.id,
-        stock_item_id: stockItem.id,
-        quantity_requested: '10',
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    stockRequestItemId = requestItem.id;
     const dispatch = await db
       .insertInto('dispatches')
       .values({
-        stock_request_id: stockRequest.id,
+        stock_request_id: null,
         branch_id: assignedBranchId,
         status: 'PARTIALLY_RECEIVED',
         idempotency_key: randomUUID(),
@@ -274,7 +251,8 @@ describe('dashboard routes (e2e)', () => {
       .insertInto('dispatch_items')
       .values({
         dispatch_id: dispatch.id,
-        stock_request_item_id: requestItem.id,
+        stock_item_id: stockItem.id,
+        stock_request_item_id: null,
         quantity_dispatched: '10',
       })
       .execute();
@@ -307,16 +285,6 @@ describe('dashboard routes (e2e)', () => {
         );
         await db.deleteFrom('dispatch_items').where('dispatch_id', '=', dispatchId).execute();
         await db.deleteFrom('dispatches').where('id', '=', dispatchId).execute();
-      }
-      if (stockRequestId) {
-        await db
-          .deleteFrom('stock_request_items')
-          .where('id', '=', stockRequestItemId)
-          .execute();
-        await db
-          .deleteFrom('stock_requests')
-          .where('id', '=', stockRequestId)
-          .execute();
       }
       if (reportIds.length)
         await db.deleteFrom('daily_branch_reports').where('id', 'in', reportIds).execute();

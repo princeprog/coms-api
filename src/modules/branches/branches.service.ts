@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import type { AccessContext } from '../access-control/access-control.types';
 import type { BranchQueryDto } from './dto/branch-query.dto';
 import { BranchesRepository } from './branches.repository';
@@ -27,13 +30,29 @@ export class BranchesService {
     return branch;
   }
 
-  create(input: Parameters<BranchesRepository['create']>[0]) {
+  async create(
+    input: Omit<Parameters<BranchesRepository['create']>[0], 'code'>,
+  ) {
     const branchName = input.branch_name.trim();
     if (branchName.length < 2)
       throw new BadRequestException(
         'Branch name must contain at least 2 characters',
       );
-    return this.repository.create({ ...input, branch_name: branchName });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const code = `BR-${randomBytes(8).toString('hex').toUpperCase()}`;
+      try {
+        return await this.repository.create({
+          ...input,
+          branch_name: branchName,
+          code,
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+      }
+    }
+    throw new ServiceUnavailableException(
+      'Could not create branch. Try again.',
+    );
   }
 
   async update(id: string, input: Parameters<BranchesRepository['update']>[1]) {

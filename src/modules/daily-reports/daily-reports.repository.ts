@@ -1,4 +1,8 @@
 import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -62,7 +66,7 @@ export class DailyReportsRepository {
       .orderBy('business_date', 'desc')
       .orderBy('id', 'desc')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('daily_branch_reports')
       .select((expression) => expression.fn.countAll<number>().as('total'))
@@ -75,12 +79,7 @@ export class DailyReportsRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   find(branchId: string, reportId: string) {

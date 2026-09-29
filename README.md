@@ -57,6 +57,12 @@ $ pnpm run test:e2e
 $ pnpm run test:cov
 ```
 
+## List queries
+
+List endpoints support selectable page sizes and resource-specific filters. See
+[Paginated list queries](docs/list-queries.md) for the request and response
+contract.
+
 ## Create an account
 
 See [Authentication operations](docs/authentication.md) for gateway configuration,

@@ -1,4 +1,8 @@
 import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
+import {
   ConflictException,
   Inject,
   Injectable,
@@ -49,7 +53,7 @@ export class SalesRepository {
       .orderBy('s.created_at', 'desc')
       .orderBy('s.id', 'desc')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     const count = this.db
       .selectFrom('sales')
       .select((eb) => eb.fn.countAll<number>().as('total'))
@@ -58,12 +62,7 @@ export class SalesRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(total.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(total.total), query);
   }
 
   findById(branchId: string, saleId: string) {

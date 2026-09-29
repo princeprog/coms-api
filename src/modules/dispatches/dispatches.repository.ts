@@ -1,4 +1,8 @@
 import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -28,8 +32,8 @@ export class DispatchesRepository {
     return this.db
       .selectFrom('branches')
       .select(['id', 'status'])
-      .where('status', '=', 'active')
       .where('id', '=', id)
+      .where('status', '=', 'active')
       .executeTakeFirst();
   }
 
@@ -69,7 +73,7 @@ export class DispatchesRepository {
       .orderBy('d.created_at', 'desc')
       .orderBy('d.id', 'desc')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('dispatches as d')
       .select((eb) => eb.fn.countAll<number>().as('total'));
@@ -126,12 +130,7 @@ export class DispatchesRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   findById(id: string) {

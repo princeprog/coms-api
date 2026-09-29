@@ -66,7 +66,6 @@ describe('daily report routes (e2e)', () => {
   let flowStockItemId: string;
   let flowSupplierId: string;
   let flowReceiptId: string;
-  let flowRequestId: string;
   let flowDispatchId: string;
   let app: INestApplication<App>;
   let db: Kysely<DB>;
@@ -176,10 +175,6 @@ describe('daily report routes (e2e)', () => {
       'daily_reports.approve',
       'supplier_receipts.read',
       'supplier_receipts.create',
-      'supplier_receipts.post',
-      'stock_requests.read',
-      'stock_requests.create',
-      'stock_requests.approve',
       'dispatches.read',
       'dispatches.create',
       'dispatches.dispatch',
@@ -191,7 +186,6 @@ describe('daily report routes (e2e)', () => {
       .where('module_key', 'in', [
         'daily_reports',
         'supplier_receipts',
-        'stock_requests',
         'dispatches',
       ])
       .execute();
@@ -527,20 +521,6 @@ describe('daily report routes (e2e)', () => {
         await db
           .deleteFrom('dispatches')
           .where('id', '=', flowDispatchId)
-          .execute();
-      }
-      if (flowRequestId) {
-        await db
-          .deleteFrom('stock_request_events')
-          .where('stock_request_id', '=', flowRequestId)
-          .execute();
-        await db
-          .deleteFrom('stock_request_items')
-          .where('stock_request_id', '=', flowRequestId)
-          .execute();
-        await db
-          .deleteFrom('stock_requests')
-          .where('id', '=', flowRequestId)
           .execute();
       }
       if (flowReceiptId) {
@@ -940,7 +920,7 @@ describe('daily report routes (e2e)', () => {
       .expect(409);
   });
 
-  it('takes a supplier receipt through branch replenishment and daily report approval', async () => {
+  it('takes a final supplier delivery through a direct dispatch and daily report approval', async () => {
     const businessDate = manilaDate(-1);
     const supplierReceipt = await request(app.getHttpServer())
       .post('/supplier-receipts')
@@ -958,35 +938,18 @@ describe('daily report routes (e2e)', () => {
       })
       .expect(201);
     flowReceiptId = supplierReceipt.body.id as string;
-    expect(supplierReceipt.body.status).toBe('DRAFT');
-
-    const postedSupplierReceipt = await request(app.getHttpServer())
-      .post(`/supplier-receipts/${flowReceiptId}/post`)
-      .expect(201);
-    expect(postedSupplierReceipt.body.status).toBe('POSTED');
-
-    const requestResponse = await request(app.getHttpServer())
-      .post('/stock-requests')
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        branch_id: flowBranchId,
-        items: [{ stock_item_id: flowStockItemId, quantity_requested: '8' }],
-      })
-      .expect(201);
-    flowRequestId = requestResponse.body.id as string;
-    expect(requestResponse.body.status).toBe('PENDING');
-
-    activeActorId = reviewerId;
-    const approvedRequest = await request(app.getHttpServer())
-      .post(`/stock-requests/${flowRequestId}/approve`)
-      .expect(201);
-    expect(approvedRequest.body.status).toBe('APPROVED');
+    expect(supplierReceipt.body.recorded_by_user_id).toBe(activeActorId);
 
     activeActorId = reporterId;
     const dispatchDraft = await request(app.getHttpServer())
       .post('/dispatches')
       .set('Idempotency-Key', randomUUID())
-      .send({ stock_request_id: flowRequestId })
+      .send({
+        branch_id: flowBranchId,
+        items: [
+          { stock_item_id: flowStockItemId, quantity_dispatched: '8' },
+        ],
+      })
       .expect(201);
     flowDispatchId = dispatchDraft.body.id as string;
     const dispatchItemId = dispatchDraft.body.items[0].id as string;
@@ -1013,7 +976,12 @@ describe('daily report routes (e2e)', () => {
     await request(app.getHttpServer())
       .post('/dispatches')
       .set('Idempotency-Key', randomUUID())
-      .send({ stock_request_id: flowRequestId })
+      .send({
+        branch_id: flowBranchId,
+        items: [
+          { stock_item_id: flowStockItemId, quantity_dispatched: '1' },
+        ],
+      })
       .expect(403);
     activeActorId = reporterId;
 

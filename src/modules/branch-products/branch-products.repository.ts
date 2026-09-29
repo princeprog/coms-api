@@ -1,3 +1,8 @@
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
 import {
   ConflictException,
   Inject,
@@ -36,7 +41,7 @@ export class BranchProductsRepository {
       .orderBy('p.product_name')
       .orderBy('bp.product_id')
       .limit(query.page_size)
-      .offset((query.page - 1) * query.page_size);
+      .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('branch_products as bp')
       .innerJoin('products as p', 'p.id', 'bp.product_id')
@@ -44,8 +49,7 @@ export class BranchProductsRepository {
       .where('bp.branch_id', '=', branchId);
 
     if (query.search) {
-      const escapedSearch = query.search.replace(/[\\%_]/g, '\\$&');
-      const pattern = `%${escapedSearch}%`;
+      const pattern = containsSearchPattern(query.search);
       records = records.where('p.product_name', 'ilike', pattern);
       count = count.where('p.product_name', 'ilike', pattern);
     }
@@ -58,12 +62,7 @@ export class BranchProductsRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return {
-      items,
-      total: Number(result.total),
-      page: query.page,
-      page_size: query.page_size,
-    };
+    return paginatedResult(items, Number(result.total), query);
   }
 
   async findByIds(branchId: string, productId: string) {

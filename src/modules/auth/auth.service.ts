@@ -2,7 +2,6 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Selectable, Transaction } from 'kysely';
-import * as argon2 from 'argon2';
 import type { AuthTokenFamilies, DB } from '../../database/db';
 import {
   ACCESS_TOKEN_TYPE,
@@ -11,7 +10,7 @@ import {
 } from '../../config/auth.config';
 import { recordAuthEvent } from '../../common/utils/auth-events';
 import type { LoginDto } from './dto/login.dto';
-import { PASSWORD_HASH_OPTIONS } from './password-hashing';
+import { hashPassword, verifyPassword } from './password-hashing';
 import { AuthRepository } from './auth.repository';
 import { AuthRateLimitRepository } from './auth-rate-limit.repository';
 import { AuthRateLimitException } from './auth-rate-limit.service';
@@ -51,9 +50,8 @@ function validUuid(value: unknown): value is string {
 
 @Injectable()
 export class AuthService {
-  private readonly dummyPasswordHashPromise = argon2.hash(
+  private readonly dummyPasswordHashPromise = hashPassword(
     'coms-dummy-password-value',
-    PASSWORD_HASH_OPTIONS,
   );
   constructor(
     private readonly repository: AuthRepository,
@@ -65,7 +63,7 @@ export class AuthService {
     const user = await this.repository.findByEmail(
       dto.email.trim().toLowerCase(),
     );
-    const matches = await argon2.verify(
+    const matches = await verifyPassword(
       user?.hashed_password ?? (await this.dummyPasswordHashPromise),
       dto.password,
     );

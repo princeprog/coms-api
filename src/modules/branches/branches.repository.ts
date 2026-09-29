@@ -1,4 +1,8 @@
 import {
+  paginatedResult,
+  paginationOffset,
+} from '../../common/utils/pagination';
+import {
   ConflictException,
   Inject,
   Injectable,
@@ -15,13 +19,13 @@ export class BranchesRepository {
 
   async list(page: number, pageSize: number, branchIds?: string[]) {
     if (branchIds && branchIds.length === 0)
-      return { items: [], total: 0, page, page_size: pageSize };
+      return paginatedResult([], 0, { page, page_size: pageSize });
     let records = this.db
       .selectFrom('branches')
       .selectAll()
       .orderBy('branch_name')
       .limit(pageSize)
-      .offset((page - 1) * pageSize);
+      .offset(paginationOffset({ page, page_size: pageSize }));
     let count = this.db
       .selectFrom('branches')
       .select((eb) => eb.fn.countAll<number>().as('total'));
@@ -33,7 +37,10 @@ export class BranchesRepository {
       records.execute(),
       count.executeTakeFirstOrThrow(),
     ]);
-    return { items, total: Number(result.total), page, page_size: pageSize };
+    return paginatedResult(items, Number(result.total), {
+      page,
+      page_size: pageSize,
+    });
   }
 
   findById(id: string) {
