@@ -285,6 +285,26 @@ export interface InventoryMovements {
   supplier_receipt_item_id: string | null;
 }
 
+export interface MigrationStockRequestPermissionCatalogBackup {
+  action_key: string;
+  description: string;
+  module_key: string;
+}
+
+export interface MigrationStockRequestPermissionGrantBackup {
+  action_key: string;
+  module_key: string;
+  role_id: Int8;
+}
+
+export interface MigrationSupplierReceiptCreateDescriptionBackup {
+  description: string;
+}
+
+export interface MigrationSupplierReceiptPostGrantBackup {
+  role_id: Int8;
+}
+
 export interface ProductIngredients {
   created_at: Generated<Timestamp>;
   product_id: string;
@@ -392,9 +412,9 @@ export interface SupplierReceipts {
   created_by_user_id: string;
   id: Generated<string>;
   idempotency_key: string;
+  received_at: Timestamp;
   recorded_at: Timestamp;
   recorded_by_user_id: string;
-  received_at: Timestamp;
   supplier_id: string;
   updated_at: Generated<Timestamp>;
 }
@@ -438,6 +458,10 @@ export interface DB {
   dispatch_shortage_closures: DispatchShortageClosures;
   dispatches: Dispatches;
   inventory_movements: InventoryMovements;
+  migration_stock_request_permission_catalog_backup: MigrationStockRequestPermissionCatalogBackup;
+  migration_stock_request_permission_grant_backup: MigrationStockRequestPermissionGrantBackup;
+  migration_supplier_receipt_create_description_backup: MigrationSupplierReceiptCreateDescriptionBackup;
+  migration_supplier_receipt_post_grant_backup: MigrationSupplierReceiptPostGrantBackup;
   product_ingredients: ProductIngredients;
   products: Products;
   sale_events: SaleEvents;
