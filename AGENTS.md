@@ -1,5 +1,7 @@
 # COMS API instructions
 
+Every new COMS chat, handoff, resumed session, or compacted context must read `C:\Users\Al Prince\.codex\skills\data-management-page-ux\SKILL.md` from disk before exploration, planning, review, or implementation. Apply it alongside the project skills below.
+
 ## Required project skill
 
 Before creating, modifying, reviewing, or refactoring NestJS backend code, read and follow:
