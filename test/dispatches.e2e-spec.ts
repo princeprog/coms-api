@@ -35,12 +35,28 @@ describe('dispatch routes (e2e)', () => {
   let deniedUserId: string;
   let currentUserId: string;
   let branchIds: string[] = [];
+  let sendPermissions: AccessContext['permissions'] = [
+    'dispatches.read',
+    'dispatches.create',
+    'dispatches.dispatch',
+    'dispatches.receive',
+    'dispatches.shortage_close',
+    'dispatches.reconcile',
+  ];
   let app: INestApplication<App>;
   let guardedApp: INestApplication<App>;
   let deniedPermissionApp: INestApplication<App>;
   let db: Kysely<DB>;
 
   beforeAll(async () => {
+    const target = new URL(process.env.DATABASE_URL!).pathname.slice(1);
+    if (
+      !target.startsWith('coms_dispatch_test_') ||
+      target !== process.env.COMS_TEST_DATABASE_NAME
+    )
+      throw new Error(
+        'Run dispatch integration using node scripts/test-disposable-db.cjs',
+      );
     const guardedModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -69,14 +85,7 @@ describe('dispatch routes (e2e)', () => {
               isSystem: false,
               isActive: true,
             },
-            permissions: [
-              'dispatches.read',
-              'dispatches.create',
-              'dispatches.dispatch',
-              'dispatches.receive',
-              'dispatches.shortage_close',
-              'dispatches.reconcile',
-            ],
+            permissions: sendPermissions,
             branchIds,
           };
           return true;
@@ -813,6 +822,237 @@ describe('dispatch routes (e2e)', () => {
       quantity_shortage_closed: '20',
       quantity_in_transit: '0',
     });
+  });
+
+  it('sends multiple exact decimal lines atomically and replays concurrent requests after receipt', async () => {
+    await setCommissaryBalance(stockItemIds[0], '10');
+    await setCommissaryBalance(stockItemIds[1], '5');
+    const key = randomUUID();
+    const payload = dispatchPayload([
+      { stock_item_id: stockItemIds[0], quantity_dispatched: '002.5000' },
+      { stock_item_id: stockItemIds[1], quantity_dispatched: '1.125' },
+    ]);
+    const send = () =>
+      request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', key)
+        .send(payload);
+    const responses = await Promise.all([send(), send(), send()]);
+    expect(responses.map((r) => r.status)).toEqual([201, 201, 201]);
+    const dispatched = responses[0].body;
+    dispatchIds.push(dispatched.id);
+    expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
+    expect(dispatched.status).toBe('IN_TRANSIT');
+    expect(
+      dispatched.events.filter(
+        (event: { event_type: string }) => event.event_type === 'DISPATCHED',
+      ),
+    ).toHaveLength(1);
+    expect(await commissaryBalance(stockItemIds[0])).toBe('7.5');
+    expect(await commissaryBalance(stockItemIds[1])).toBe('3.875');
+    const movements = await db
+      .selectFrom('inventory_movements')
+      .selectAll()
+      .where(
+        'dispatch_item_id',
+        'in',
+        dispatched.items.map((line: { id: string }) => line.id),
+      )
+      .execute();
+    expect(movements).toHaveLength(2);
+    const item = dispatched.items.find(
+      (line: { stock_item_id: string }) =>
+        line.stock_item_id === stockItemIds[0],
+    );
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post(`/dispatches/${dispatched.id}/receive`)
+          .set('Idempotency-Key', randomUUID())
+          .send({
+            items: [{ dispatch_item_id: item.id, quantity_received: '1' }],
+          })
+      ).status,
+    ).toBe(201);
+    expect((await send()).body.status).toBe('PARTIALLY_RECEIVED');
+    const rest = dispatched.items.map(
+      (line: { id: string; stock_item_id: string }) => ({
+        dispatch_item_id: line.id,
+        quantity_received:
+          line.stock_item_id === stockItemIds[0] ? '1.5' : '1.125',
+      }),
+    );
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post(`/dispatches/${dispatched.id}/receive`)
+          .set('Idempotency-Key', randomUUID())
+          .send({ items: rest })
+      ).status,
+    ).toBe(201);
+    expect((await send()).body.status).toBe('RECEIVED');
+    expect(await commissaryBalance(stockItemIds[0])).toBe('7.5');
+    expect(await commissaryBalance(stockItemIds[1])).toBe('3.875');
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/dispatches/send')
+          .set('Idempotency-Key', key)
+          .send({
+            ...payload,
+            items: [
+              { stock_item_id: stockItemIds[0], quantity_dispatched: '3' },
+            ],
+          })
+      ).status,
+    ).toBe(409);
+    currentUserId = deniedUserId;
+    expect((await send()).status).toBe(409);
+    currentUserId = actorUserId;
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/dispatches')
+          .set('Idempotency-Key', key)
+          .send(payload)
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post(`/dispatches/${dispatched.id}/dispatch`)
+          .set('Idempotency-Key', key)
+          .send({})
+      ).status,
+    ).toBe(409);
+  });
+
+  it('rolls back all lines and the record when any balance is insufficient', async () => {
+    await setCommissaryBalance(stockItemIds[0], '10');
+    await setCommissaryBalance(stockItemIds[1], '0');
+    const before = await movementCount(stockItemIds);
+    const key = randomUUID();
+    const response = await request(app.getHttpServer())
+      .post('/dispatches/send')
+      .set('Idempotency-Key', key)
+      .send(
+        dispatchPayload(
+          stockItemIds.map((stock_item_id) => ({
+            stock_item_id,
+            quantity_dispatched: '1',
+          })),
+        ),
+      );
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('Dispatch oil');
+    expect(await commissaryBalance(stockItemIds[0])).toBe('10');
+    expect(await commissaryBalance(stockItemIds[1])).toBe('0');
+    expect(await movementCount(stockItemIds)).toBe(before);
+    expect(
+      await db
+        .selectFrom('dispatches')
+        .select('id')
+        .where('idempotency_key', '=', key)
+        .execute(),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .selectFrom('dispatch_events')
+        .select('id')
+        .where('idempotency_key', '=', key)
+        .execute(),
+    ).toHaveLength(0);
+  });
+
+  it('rejects inactive branches/items and unassigned branches without saved dispatches', async () => {
+    const payload = dispatchPayload([
+      { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
+    ]);
+    const send = (body = payload) =>
+      request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', randomUUID())
+        .send(body);
+    expect((await send({ ...payload, branch_id: otherBranchId })).status).toBe(
+      403,
+    );
+    await db
+      .updateTable('branches')
+      .set({ status: 'inactive' })
+      .where('id', '=', branchId)
+      .execute();
+    expect((await send()).status).toBe(404);
+    await db
+      .updateTable('branches')
+      .set({ status: 'active' })
+      .where('id', '=', branchId)
+      .execute();
+    await db
+      .updateTable('stock_items')
+      .set({ is_active: false })
+      .where('id', '=', stockItemIds[0])
+      .execute();
+    expect((await send()).status).toBe(404);
+    await db
+      .updateTable('stock_items')
+      .set({ is_active: true })
+      .where('id', '=', stockItemIds[0])
+      .execute();
+  });
+
+  it.each(['dispatches.create', 'dispatches.dispatch'] as const)(
+    'rejects sending without %s',
+    async (permission) => {
+      const original = sendPermissions;
+      sendPermissions = original.filter((item) => item !== permission);
+      const key = randomUUID();
+      try {
+        expect(
+          (
+            await request(app.getHttpServer())
+              .post('/dispatches/send')
+              .set('Idempotency-Key', key)
+              .send(
+                dispatchPayload([
+                  { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
+                ]),
+              )
+          ).status,
+        ).toBe(403);
+        expect(
+          await db
+            .selectFrom('dispatches')
+            .select('id')
+            .where('idempotency_key', '=', key)
+            .execute(),
+        ).toHaveLength(0);
+      } finally {
+        sendPermissions = original;
+      }
+    },
+  );
+
+  it('allows only one concurrent dispatch to consume limited stock', async () => {
+    await setCommissaryBalance(stockItemIds[0], '3');
+    const before = await movementCount([stockItemIds[0]]);
+    const responses = await Promise.all(
+      [1, 2].map(() =>
+        request(app.getHttpServer())
+          .post('/dispatches/send')
+          .set('Idempotency-Key', randomUUID())
+          .send(
+            dispatchPayload([
+              { stock_item_id: stockItemIds[0], quantity_dispatched: '2' },
+            ]),
+          ),
+      ),
+    );
+    expect(responses.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+      201, 400,
+    ]);
+    dispatchIds.push(responses.find((r) => r.status === 201)!.body.id);
+    expect(await commissaryBalance(stockItemIds[0])).toBe('1');
+    expect(await movementCount([stockItemIds[0]])).toBe(before + 1);
   });
 
   async function createBranch(name: string): Promise<string> {

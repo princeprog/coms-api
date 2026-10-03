@@ -188,7 +188,7 @@ export class DispatchesRepository {
           sql<string>`coalesce((select sum(dsci.quantity_closed) from dispatch_shortage_closure_items as dsci where dsci.dispatch_item_id = di.id), 0)::text`.as(
             'quantity_shortage_closed',
           ),
-          sql<string>`(di.quantity_dispatched - coalesce((select sum(dri.quantity_received) from dispatch_receipt_items as dri where dri.dispatch_item_id = di.id), 0) - coalesce((select sum(dsci.quantity_closed) from dispatch_shortage_closure_items as dsci where dsci.dispatch_item_id = di.id), 0))::text`.as(
+          sql<string>`(CASE WHEN ${dispatch.status} = 'DRAFT' THEN 0 ELSE di.quantity_dispatched - coalesce((select sum(dri.quantity_received) from dispatch_receipt_items as dri where dri.dispatch_item_id = di.id), 0) - coalesce((select sum(dsci.quantity_closed) from dispatch_shortage_closure_items as dsci where dsci.dispatch_item_id = di.id), 0) END)::text`.as(
             'quantity_in_transit',
           ),
         ])
@@ -558,7 +558,7 @@ export class DispatchesRepository {
       .selectFrom('branches')
       .select(['id', 'status'])
       .where('id', '=', branchId)
-      .forUpdate()
+      .forNoKeyUpdate()
       .executeTakeFirst();
     if (!branch || branch.status !== 'active')
       throw new NotFoundException('Active branch not found');

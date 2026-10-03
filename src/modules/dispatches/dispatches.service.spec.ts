@@ -25,6 +25,32 @@ function accessContext(branchIds: string[]): AccessContext {
 }
 
 describe('DispatchesService direct creation', () => {
+  it.each(['dispatches.create', 'dispatches.dispatch'] as const)(
+    'requires %s when sending',
+    async (missing) => {
+      const branchId = randomUUID();
+      const access = accessContext([branchId]);
+      access.permissions = ['dispatches.create', 'dispatches.dispatch'].filter(
+        (p) => p !== missing,
+      ) as AccessContext['permissions'];
+      const service = new DispatchesService(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+      await expect(
+        service.send(
+          {
+            branch_id: branchId,
+            items: [{ stock_item_id: randomUUID(), quantity_dispatched: '1' }],
+          },
+          access,
+          randomUUID(),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    },
+  );
   it('creates a draft from the selected branch and normalized stock lines', async () => {
     const branchId = randomUUID();
     const stockItemId = randomUUID();
@@ -33,7 +59,9 @@ describe('DispatchesService direct creation', () => {
       findActiveBranch: vi.fn().mockResolvedValue({ id: branchId }),
     };
     const drafts = {
-      createDraft: vi.fn().mockResolvedValue({ id: 'dispatch-1', status: 'DRAFT' }),
+      createDraft: vi
+        .fn()
+        .mockResolvedValue({ id: 'dispatch-1', status: 'DRAFT' }),
     };
     const service = new DispatchesService(
       repository as never,

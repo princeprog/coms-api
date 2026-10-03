@@ -65,7 +65,9 @@ export class DispatchDraftsRepository {
           .forUpdate()
           .execute();
         if (items.length !== stockItemIds.length)
-          throw new NotFoundException('One or more active stock items were not found');
+          throw new NotFoundException(
+            'One or more active stock items were not found',
+          );
 
         const dispatch = await transaction
           .insertInto('dispatches')
@@ -132,6 +134,14 @@ export class DispatchDraftsRepository {
     existing: { id: string; branch_id: string; created_by_user_id: string },
     input: CreateDraftInput,
   ) {
+    const event = await this.queries.findEventByIdempotencyKey(
+      executor,
+      input.idempotency_key,
+    );
+    if (!event || event.event_type !== 'CREATED')
+      throw new ConflictException(
+        'Idempotency key was already used for another action',
+      );
     if (
       existing.branch_id !== input.branch_id ||
       existing.created_by_user_id !== input.created_by_user_id
@@ -156,11 +166,15 @@ export class DispatchDraftsRepository {
   }
 
   private fingerprint(
-    items: Array<{ stock_item_id: string; quantity_dispatched: string | number }>,
+    items: Array<{
+      stock_item_id: string;
+      quantity_dispatched: string | number;
+    }>,
   ) {
     return items
-      .map(({ stock_item_id, quantity_dispatched }) =>
-        `${stock_item_id}:${String(quantity_dispatched)}`,
+      .map(
+        ({ stock_item_id, quantity_dispatched }) =>
+          `${stock_item_id}:${String(quantity_dispatched)}`,
       )
       .sort()
       .join('|');

@@ -55,27 +55,72 @@ export class DispatchesService {
     idempotencyKey: string | undefined,
   ) {
     const key = this.requireIdempotencyKey(idempotencyKey);
-    if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 100)
-      throw new BadRequestException('A dispatch must contain between 1 and 100 items');
+    if (
+      !Array.isArray(input.items) ||
+      input.items.length < 1 ||
+      input.items.length > 100
+    )
+      throw new BadRequestException(
+        'A dispatch must contain between 1 and 100 items',
+      );
     const branch = await this.repository.findActiveBranch(input.branch_id);
     if (!branch) throw new NotFoundException('Active branch not found');
     if (!this.canAccessBranch(input.branch_id, access))
       throw new ForbiddenException('Branch access required');
-    const seen = new Set<string>();
-    const items = input.items.map((item) => {
-      if (seen.has(item.stock_item_id))
-        throw new BadRequestException('A stock item may appear only once per dispatch');
-      seen.add(item.stock_item_id);
-      return {
-        stock_item_id: item.stock_item_id,
-        quantity_dispatched: this.normalizeDispatchQuantity(item.quantity_dispatched),
-      };
-    });
+    const items = this.normalizeDispatchItems(input);
     return this.draftsRepository.createDraft({
       branch_id: input.branch_id,
       items,
       created_by_user_id: access.userId,
       idempotency_key: key,
+    });
+  }
+
+  async send(
+    input: CreateDispatchDto,
+    access: AccessContext,
+    idempotencyKey: string | undefined,
+  ) {
+    if (
+      !this.isSuperAdmin(access) &&
+      (!access.permissions.includes('dispatches.create') ||
+        !access.permissions.includes('dispatches.dispatch'))
+    )
+      throw new ForbiddenException(
+        'Creating and sending a dispatch requires both dispatch creation and sending permissions',
+      );
+    if (!this.canAccessBranch(input.branch_id, access))
+      throw new ForbiddenException('Branch access required');
+    return this.postingRepository.createAndSend({
+      branch_id: input.branch_id,
+      items: this.normalizeDispatchItems(input),
+      created_by_user_id: access.userId,
+      idempotency_key: this.requireIdempotencyKey(idempotencyKey),
+    });
+  }
+
+  private normalizeDispatchItems(input: CreateDispatchDto) {
+    if (
+      !Array.isArray(input.items) ||
+      input.items.length < 1 ||
+      input.items.length > 100
+    )
+      throw new BadRequestException(
+        'A dispatch must contain between 1 and 100 items',
+      );
+    const seen = new Set<string>();
+    return input.items.map((item) => {
+      if (seen.has(item.stock_item_id))
+        throw new BadRequestException(
+          'A stock item may appear only once per dispatch',
+        );
+      seen.add(item.stock_item_id);
+      return {
+        stock_item_id: item.stock_item_id,
+        quantity_dispatched: this.normalizeDispatchQuantity(
+          item.quantity_dispatched,
+        ),
+      };
     });
   }
 
@@ -228,12 +273,16 @@ export class DispatchesService {
       value.length > 80 ||
       !DECIMAL_PATTERN.test(value)
     )
-      throw new BadRequestException('Dispatched quantity must be a decimal string');
+      throw new BadRequestException(
+        'Dispatched quantity must be a decimal string',
+      );
     const [wholePart, fractionPart = ''] = value.split('.');
     const whole = wholePart.replace(/^0+(?=\d)/, '');
     const fraction = fractionPart.replace(/0+$/, '');
     if (whole === '0' && fraction.length === 0)
-      throw new BadRequestException('Dispatched quantity must be greater than zero');
+      throw new BadRequestException(
+        'Dispatched quantity must be greater than zero',
+      );
     return `${whole}${fraction ? `.${fraction}` : ''}`;
   }
 

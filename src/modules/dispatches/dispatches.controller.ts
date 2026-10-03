@@ -10,7 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
-import { RequirePermission } from '../../common/decorators/access-policy.decorator';
+import {
+  RequirePermission,
+  RequireBranchScope,
+} from '../../common/decorators/access-policy.decorator';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -54,6 +57,17 @@ export class DispatchesController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.service.create(dto, access, idempotencyKey);
+  }
+
+  @Post('send')
+  @RequirePermission('dispatches.dispatch')
+  @RequireBranchScope()
+  send(
+    @Body() dto: CreateDispatchDto,
+    @CurrentAccessContext() access: AccessContext,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
+    return this.service.send(dto, access, idempotencyKey);
   }
 
   @Post(':id/dispatch')
