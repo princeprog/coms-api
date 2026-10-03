@@ -32,6 +32,11 @@ export class DispatchPostingRepository {
       return await this.db.transaction().execute(async (transaction) => {
         const retry = await this.findSendRetry(transaction, input);
         if (retry) return retry;
+        await this.queries.requireActiveBranch(transaction, input.branch_id);
+        const activeStockItems = await this.lockActiveStock(
+          transaction,
+          input.items.map((item) => item.stock_item_id),
+        );
         // Both unique keys are claimed before any stock deduction.
         const dispatch = await transaction
           .insertInto('dispatches')
@@ -55,7 +60,6 @@ export class DispatchPostingRepository {
             idempotency_key: input.idempotency_key,
           })
           .execute();
-        await this.queries.requireActiveBranch(transaction, input.branch_id);
         await transaction
           .insertInto('dispatch_items')
           .values(
@@ -71,6 +75,7 @@ export class DispatchPostingRepository {
           transaction,
           dispatch.id,
           input.created_by_user_id,
+          activeStockItems,
         );
         const details = await this.queries.findDetails(
           transaction,
@@ -239,23 +244,17 @@ export class DispatchPostingRepository {
     transaction: DispatchDbExecutor,
     dispatchId: string,
     actorUserId: string,
+    lockedStock?: Array<{ id: string; stock_item_name: string; unit: string }>,
   ) {
     const items = await this.queries.loadDispatchItems(transaction, dispatchId);
     if (!items.length)
       throw new BadRequestException('Dispatch has no items to post');
-    const stockItemIds = items.map((item) => item.stock_item_id);
-    const activeStockItems = await transaction
-      .selectFrom('stock_items')
-      .select(['id', 'stock_item_name', 'unit'])
-      .where('id', 'in', stockItemIds)
-      .where('is_active', '=', true)
-      .orderBy('id')
-      .forNoKeyUpdate()
-      .execute();
-    if (activeStockItems.length !== stockItemIds.length)
-      throw new NotFoundException(
-        'One or more active stock items were not found',
-      );
+    const activeStockItems =
+      lockedStock ??
+      (await this.lockActiveStock(
+        transaction,
+        items.map((item) => item.stock_item_id),
+      ));
 
     for (const item of items) {
       await transaction
@@ -294,5 +293,26 @@ export class DispatchPostingRepository {
         })
         .execute();
     }
+  }
+
+  private async lockActiveStock(
+    transaction: DispatchDbExecutor,
+    stockItemIds: string[],
+  ) {
+    // Lock before inserting line FKs; their user order can otherwise deadlock
+    // with supplier receiving or legacy drafts that lock stock in ID order.
+    const activeStockItems = await transaction
+      .selectFrom('stock_items')
+      .select(['id', 'stock_item_name', 'unit'])
+      .where('id', 'in', stockItemIds)
+      .where('is_active', '=', true)
+      .orderBy('id')
+      .forNoKeyUpdate()
+      .execute();
+    if (activeStockItems.length !== stockItemIds.length)
+      throw new NotFoundException(
+        'One or more active stock items were not found',
+      );
+    return activeStockItems;
   }
 }

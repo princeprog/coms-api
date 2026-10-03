@@ -388,6 +388,7 @@ describe('dispatch routes (e2e)', () => {
       Array.from({ length: 12 }, () => 201),
     );
     expect(new Set(createdIds).size).toBe(1);
+    expect(responses[0].body.items[0].quantity_in_transit).toBe('0');
   });
 
   it('dispatches approved quantities atomically, supports concurrent retries and partial receipts, then closes a shortage', async () => {
@@ -843,6 +844,9 @@ describe('dispatch routes (e2e)', () => {
     dispatchIds.push(dispatched.id);
     expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
     expect(dispatched.status).toBe('IN_TRANSIT');
+    expect(dispatched.created_by_user_id).toBe(actorUserId);
+    expect(dispatched.dispatched_by_user_id).toBe(actorUserId);
+    expect(dispatched.dispatched_at).toBeTruthy();
     expect(
       dispatched.events.filter(
         (event: { event_type: string }) => event.event_type === 'DISPATCHED',
@@ -860,6 +864,10 @@ describe('dispatch routes (e2e)', () => {
       )
       .execute();
     expect(movements).toHaveLength(2);
+    expect(movements.map((line) => line.quantity_delta).sort()).toEqual([
+      '-1.125',
+      '-2.5',
+    ]);
     const item = dispatched.items.find(
       (line: { stock_item_id: string }) =>
         line.stock_item_id === stockItemIds[0],
@@ -965,6 +973,8 @@ describe('dispatch routes (e2e)', () => {
   });
 
   it('rejects inactive branches/items and unassigned branches without saved dispatches', async () => {
+    const before = await db.selectFrom('dispatches').select('id').execute();
+    const beforeMovements = await movementCount(stockItemIds);
     const payload = dispatchPayload([
       { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
     ]);
@@ -976,6 +986,24 @@ describe('dispatch routes (e2e)', () => {
     expect((await send({ ...payload, branch_id: otherBranchId })).status).toBe(
       403,
     );
+    const missingBranch = randomUUID();
+    const originalBranches = branchIds;
+    branchIds = [missingBranch];
+    try {
+      expect(
+        (await send({ ...payload, branch_id: missingBranch })).status,
+      ).toBe(404);
+    } finally {
+      branchIds = originalBranches;
+    }
+    expect(
+      (
+        await send({
+          ...payload,
+          items: [{ stock_item_id: randomUUID(), quantity_dispatched: '1' }],
+        })
+      ).status,
+    ).toBe(404);
     await db
       .updateTable('branches')
       .set({ status: 'inactive' })
@@ -998,6 +1026,10 @@ describe('dispatch routes (e2e)', () => {
       .set({ is_active: true })
       .where('id', '=', stockItemIds[0])
       .execute();
+    expect(
+      await db.selectFrom('dispatches').select('id').execute(),
+    ).toHaveLength(before.length);
+    expect(await movementCount(stockItemIds)).toBe(beforeMovements);
   });
 
   it.each(['dispatches.create', 'dispatches.dispatch'] as const)(
@@ -1053,6 +1085,124 @@ describe('dispatch routes (e2e)', () => {
     dispatchIds.push(responses.find((r) => r.status === 201)!.body.id);
     expect(await commissaryBalance(stockItemIds[0])).toBe('1');
     expect(await movementCount([stockItemIds[0]])).toBe(before + 1);
+  });
+
+  it('sends reversed item lines while another branch creates a legacy draft without a lock cycle', async () => {
+    const [first, second] = [...stockItemIds].sort();
+    await setCommissaryBalance(first, '10');
+    await setCommissaryBalance(second, '10');
+    const originalBranches = branchIds;
+    branchIds = [branchId, otherBranchId];
+    // Pause after the first FK check to force the formerly unsafe interleaving.
+    await sql`
+      CREATE FUNCTION dispatch_test_pause() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.stock_item_id = ${sql.lit(second)}::uuid THEN
+          PERFORM pg_sleep(1);
+        END IF;
+        RETURN NEW;
+      END $$
+    `.execute(db);
+    await sql`CREATE TRIGGER zz_dispatch_test_pause AFTER INSERT ON dispatch_items
+      FOR EACH ROW EXECUTE FUNCTION dispatch_test_pause()`.execute(db);
+    const payload = dispatchPayload([
+      { stock_item_id: second, quantity_dispatched: '2' },
+      { stock_item_id: first, quantity_dispatched: '2' },
+    ]);
+    try {
+      const sending = request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', randomUUID())
+        .send(payload)
+        .then((response) => response);
+      const deadline = Date.now() + 4000;
+      let paused = false;
+      while (!paused && Date.now() < deadline) {
+        const state = await sql<{ paused: boolean }>`
+          SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event = 'PgSleep'
+            AND query LIKE 'insert into "dispatch_items"%') AS paused
+        `.execute(db);
+        paused = state.rows[0].paused;
+        if (!paused) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(paused).toBe(true);
+      const drafting = request(app.getHttpServer())
+        .post('/dispatches')
+        .set('Idempotency-Key', randomUUID())
+        .send({ ...payload, branch_id: otherBranchId });
+      const responses = await Promise.all([sending, drafting]);
+      dispatchIds.push(
+        ...responses.filter((r) => r.status === 201).map((r) => r.body.id),
+      );
+      expect(responses.map((r) => r.status)).toEqual([201, 201]);
+      expect(responses[0].body.status).toBe('IN_TRANSIT');
+      expect(
+        responses[1].body.items.every(
+          (line: { quantity_in_transit: string }) =>
+            line.quantity_in_transit === '0',
+        ),
+      ).toBe(true);
+      expect(await commissaryBalance(first)).toBe('8');
+      expect(await commissaryBalance(second)).toBe('8');
+    } finally {
+      branchIds = originalBranches;
+      await sql`DROP TRIGGER IF EXISTS zz_dispatch_test_pause ON dispatch_items`.execute(
+        db,
+      );
+      await sql`DROP FUNCTION IF EXISTS dispatch_test_pause()`.execute(db);
+    }
+  });
+
+  it('conflicts concurrent cross-action keys across branches without a lock cycle', async () => {
+    await setCommissaryBalance(stockItemIds[0], '10');
+    const originalBranches = branchIds;
+    branchIds = [branchId, otherBranchId];
+    const key = randomUUID();
+    await sql`CREATE FUNCTION dispatch_test_key_pause() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.idempotency_key = ${sql.lit(key)}::uuid THEN PERFORM pg_sleep(1); END IF;
+        RETURN NEW;
+      END $$`.execute(db);
+    await sql`CREATE TRIGGER zz_dispatch_test_key_pause AFTER INSERT ON dispatches
+      FOR EACH ROW EXECUTE FUNCTION dispatch_test_key_pause()`.execute(db);
+    const payload = dispatchPayload([
+      { stock_item_id: stockItemIds[0], quantity_dispatched: '2' },
+    ]);
+    try {
+      const sending = request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', key)
+        .send(payload)
+        .then((response) => response);
+      const deadline = Date.now() + 4000;
+      let paused = false;
+      while (!paused && Date.now() < deadline) {
+        const state = await sql<{ paused: boolean }>`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+          AND wait_event = 'PgSleep' AND query LIKE 'insert into "dispatches"%'
+        ) AS paused`.execute(db);
+        paused = state.rows[0].paused;
+        if (!paused) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(paused).toBe(true);
+      const drafting = request(app.getHttpServer())
+        .post('/dispatches')
+        .set('Idempotency-Key', key)
+        .send({ ...payload, branch_id: otherBranchId });
+      const responses = await Promise.all([sending, drafting]);
+      dispatchIds.push(
+        ...responses.filter((r) => r.status === 201).map((r) => r.body.id),
+      );
+      expect(responses.map((r) => r.status)).toEqual([201, 409]);
+      expect(await commissaryBalance(stockItemIds[0])).toBe('8');
+    } finally {
+      branchIds = originalBranches;
+      await sql`DROP TRIGGER IF EXISTS zz_dispatch_test_key_pause ON dispatches`.execute(
+        db,
+      );
+      await sql`DROP FUNCTION IF EXISTS dispatch_test_key_pause()`.execute(db);
+    }
   });
 
   async function createBranch(name: string): Promise<string> {

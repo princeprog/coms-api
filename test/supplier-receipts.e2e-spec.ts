@@ -245,7 +245,6 @@ describe('supplier receipt routes (e2e)', () => {
       supplier_id: supplierId,
       supplier_name: `Receipt Supplier ${suffix}`,
       received_at: '2026-09-24',
-      created_by_user_id: actorUserId,
       recorded_by_user_id: actorUserId,
       total_cost: '33.625',
     });
