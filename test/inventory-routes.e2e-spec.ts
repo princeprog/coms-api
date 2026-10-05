@@ -305,9 +305,13 @@ describe('inventory routes (e2e)', () => {
         quantity_delta: '1',
         reason: 'Scoped branch authorization test',
       });
-    const otherBranchBalance = await client.get(
-      `/inventory/branches/${otherBranchId}`,
-    );
+    const otherBranchBalance = await client
+      .get(`/inventory/branches/${otherBranchId}`)
+      .query({
+        search: 'Flour',
+        is_active: 'true',
+        category: 'Baking',
+      });
     const otherBranchAdjustment = await client
       .post(`/inventory/branches/${otherBranchId}/adjustments`)
       .set('Idempotency-Key', randomUUID())
@@ -330,6 +334,9 @@ describe('inventory routes (e2e)', () => {
       });
 
     expect(assignedBalance.status).toBe(200);
+    expect(assignedBalance.body.available_categories).toEqual(
+      expect.arrayContaining([expect.any(String)]),
+    );
     expect(assignedMovements.status).toBe(200);
     expect(branchAdjustment.status).toBe(201);
     expect(otherBranchBalance.status).toBe(403);
@@ -355,6 +362,9 @@ describe('inventory routes (e2e)', () => {
     const branchBalance = await client.get(`/inventory/branches/${branchId}`);
 
     expect(balance.status).toBe(200);
+    expect(balance.body.available_categories).toEqual(
+      expect.arrayContaining([expect.any(String)]),
+    );
     expect(movements.status).toBe(200);
     expect(adjustment.status).toBe(201);
     expect(branchBalance.status).toBe(403);
@@ -368,6 +378,81 @@ describe('inventory routes (e2e)', () => {
     expect(
       (await client.get(`/inventory/branches/${otherBranchId}`)).status,
     ).toBe(200);
+  });
+
+  it('filters both inventory scopes and returns unfiltered distinct categories', async () => {
+    const activeBakingId = await createStockItem(
+      `Filter flour ${suffix}`,
+      'Baking',
+      true,
+    );
+    const inactiveBakingId = await createStockItem(
+      `Filter rice ${suffix}`,
+      'Baking',
+      false,
+    );
+    const activePantryId = await createStockItem(
+      `Filter oil ${suffix}`,
+      'Pantry',
+      true,
+    );
+    stockItemIds.push(activeBakingId, inactiveBakingId, activePantryId);
+
+    for (const path of [
+      '/inventory/commissary',
+      `/inventory/branches/${branchId}`,
+    ]) {
+      const byCategorySearch = await request(app.getHttpServer())
+        .get(path)
+        .query({ search: 'Baking', page_size: 100 });
+      expect(byCategorySearch.status).toBe(200);
+      expect(
+        byCategorySearch.body.items.map((item: { id: string }) => item.id),
+      ).toEqual(expect.arrayContaining([activeBakingId, inactiveBakingId]));
+
+      const inactiveZeroBalance = await request(app.getHttpServer())
+        .get(path)
+        .query({ is_active: 'false', category: 'Baking', page_size: 100 });
+      expect(inactiveZeroBalance.status).toBe(200);
+      expect(inactiveZeroBalance.body.total).toBe(1);
+      expect(inactiveZeroBalance.body.items[0]).toMatchObject({
+        id: inactiveBakingId,
+        is_active: false,
+        quantity_on_hand: '0',
+      });
+
+      const filtered = await request(app.getHttpServer()).get(path).query({
+        search: 'Filter',
+        is_active: 'true',
+        category: 'Baking',
+        page: 1,
+        page_size: 1,
+      });
+      expect(filtered.status).toBe(200);
+      expect(filtered.body).toMatchObject({ total: 1, page: 1, page_size: 1 });
+      expect(
+        filtered.body.items.map((item: { id: string }) => item.id),
+      ).toEqual([activeBakingId]);
+      expect(filtered.body.items[0].quantity_on_hand).toBe('0');
+      expect(filtered.body.available_categories).toContain('Baking');
+      expect(filtered.body.available_categories).toContain('Pantry');
+      expect(new Set(filtered.body.available_categories).size).toBe(
+        filtered.body.available_categories.length,
+      );
+    }
+  });
+
+  it('validates inventory status and category query filters', async () => {
+    const client = request(app.getHttpServer());
+    const invalidStatus = await client
+      .get('/inventory/commissary')
+      .query({ is_active: 'yes' });
+    const longCategory = await client
+      .get('/inventory/commissary')
+      .query({ category: 'x'.repeat(81) });
+
+    expect(invalidStatus.status).toBe(400);
+    expect(longCategory.status).toBe(400);
   });
 
   it('validates adjustment input and requires an idempotency key', async () => {
@@ -638,10 +723,14 @@ describe('inventory routes (e2e)', () => {
     expect(balance).toBeUndefined();
   });
 
-  async function createStockItem(name: string): Promise<string> {
+  async function createStockItem(
+    name: string,
+    category = 'Test',
+    is_active = true,
+  ): Promise<string> {
     const stockItem = await db
       .insertInto('stock_items')
-      .values({ stock_item_name: name, category: 'Test', unit: 'kg' })
+      .values({ stock_item_name: name, category, unit: 'kg', is_active })
       .returning('id')
       .executeTakeFirstOrThrow();
     return stockItem.id;

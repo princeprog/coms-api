@@ -31,7 +31,15 @@ type CreateReceiptInput = {
 
 type ReceiptListInput = Pick<
   SupplierReceiptQueryDto,
-  'page' | 'page_size' | 'search' | 'supplier_id'
+  | 'page'
+  | 'page_size'
+  | 'search'
+  | 'supplier_id'
+  | 'received_from'
+  | 'received_to'
+  | 'min_cost'
+  | 'max_cost'
+  | 'sort'
 >;
 
 type DbExecutor = Kysely<DB> | Transaction<DB>;
@@ -41,10 +49,15 @@ export class SupplierReceiptsRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
   async list(input: ReceiptListInput) {
+    const totalCost = sql<string>`coalesce((select sum(sri.quantity_received * sri.unit_cost) from supplier_receipt_items as sri where sri.supplier_receipt_id = sr.id), 0)`;
     let records = this.db
       .selectFrom('supplier_receipts as sr')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
-      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
+      .innerJoin(
+        'auth.users as recorder',
+        'recorder.id',
+        'sr.recorded_by_user_id',
+      )
       .select([
         'sr.id',
         'sr.supplier_id',
@@ -63,9 +76,6 @@ export class SupplierReceiptsRepository {
           'item_count',
         ),
       ])
-      .orderBy('sr.received_at', 'desc')
-      .orderBy('sr.created_at', 'desc')
-      .orderBy('sr.id', 'desc')
       .limit(input.page_size)
       .offset(paginationOffset(input));
     let count = this.db
@@ -82,6 +92,69 @@ export class SupplierReceiptsRepository {
       records = records.where('s.supplier_name', 'ilike', pattern);
       count = count.where('s.supplier_name', 'ilike', pattern);
     }
+    if (input.received_from) {
+      records = records.where(
+        'sr.received_at',
+        '>=',
+        sql<Date>`${input.received_from}::date`,
+      );
+      count = count.where(
+        'sr.received_at',
+        '>=',
+        sql<Date>`${input.received_from}::date`,
+      );
+    }
+    if (input.received_to) {
+      records = records.where(
+        'sr.received_at',
+        '<=',
+        sql<Date>`${input.received_to}::date`,
+      );
+      count = count.where(
+        'sr.received_at',
+        '<=',
+        sql<Date>`${input.received_to}::date`,
+      );
+    }
+    if (input.min_cost) {
+      records = records.where(
+        totalCost,
+        '>=',
+        sql<string>`${input.min_cost}::numeric`,
+      );
+      count = count.where(
+        totalCost,
+        '>=',
+        sql<string>`${input.min_cost}::numeric`,
+      );
+    }
+    if (input.max_cost) {
+      records = records.where(
+        totalCost,
+        '<=',
+        sql<string>`${input.max_cost}::numeric`,
+      );
+      count = count.where(
+        totalCost,
+        '<=',
+        sql<string>`${input.max_cost}::numeric`,
+      );
+    }
+    if (input.sort === 'cost_highest' || input.sort === 'cost_lowest')
+      records = records.orderBy(
+        totalCost,
+        input.sort === 'cost_highest' ? 'desc' : 'asc',
+      );
+    if (input.sort === 'supplier_asc' || input.sort === 'supplier_desc')
+      records = records.orderBy(
+        's.supplier_name',
+        input.sort === 'supplier_asc' ? 'asc' : 'desc',
+      );
+    const direction = input.sort === 'oldest' ? 'asc' : 'desc';
+    records = records
+      .orderBy('sr.received_at', direction)
+      .orderBy('sr.created_at', direction)
+      .orderBy('sr.id', direction);
 
     const [items, result] = await Promise.all([
       records.execute(),
@@ -165,9 +238,14 @@ export class SupplierReceiptsRepository {
             stockItemIds
               .slice()
               .sort()
-              .map((stock_item_id) => ({ stock_item_id, quantity_on_hand: '0' })),
+              .map((stock_item_id) => ({
+                stock_item_id,
+                quantity_on_hand: '0',
+              })),
           )
-          .onConflict((conflict) => conflict.column('stock_item_id').doNothing())
+          .onConflict((conflict) =>
+            conflict.column('stock_item_id').doNothing(),
+          )
           .execute();
         await transaction
           .selectFrom('commissary_inventory')
@@ -222,7 +300,11 @@ export class SupplierReceiptsRepository {
     const receipt = await executor
       .selectFrom('supplier_receipts as sr')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
-      .innerJoin('auth.users as recorder', 'recorder.id', 'sr.recorded_by_user_id')
+      .innerJoin(
+        'auth.users as recorder',
+        'recorder.id',
+        'sr.recorded_by_user_id',
+      )
       .select([
         'sr.id',
         'sr.supplier_id',

@@ -67,20 +67,42 @@ export class InventoryRepository {
       .limit(query.page_size)
       .offset(paginationOffset(query));
     let count = this.db
-      .selectFrom('stock_items')
+      .selectFrom('stock_items as si')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
     if (query.search) {
       const pattern = containsSearchPattern(query.search);
-      records = records.where('si.stock_item_name', 'ilike', pattern);
-      count = count.where('stock_item_name', 'ilike', pattern);
+      records = records.where((eb) =>
+        eb.or([
+          eb('si.stock_item_name', 'ilike', pattern),
+          eb('si.category', 'ilike', pattern),
+        ]),
+      );
+      count = count.where((eb) =>
+        eb.or([
+          eb('si.stock_item_name', 'ilike', pattern),
+          eb('si.category', 'ilike', pattern),
+        ]),
+      );
+    }
+    if (query.is_active !== undefined) {
+      records = records.where('si.is_active', '=', query.is_active);
+      count = count.where('si.is_active', '=', query.is_active);
+    }
+    if (query.category) {
+      records = records.where('si.category', '=', query.category);
+      count = count.where('si.category', '=', query.category);
     }
 
-    const [items, result] = await Promise.all([
+    const [items, result, categories] = await Promise.all([
       records.execute(),
       count.executeTakeFirstOrThrow(),
+      this.listAvailableCategories(),
     ]);
-    return paginatedResult(items, Number(result.total), query);
+    return {
+      ...paginatedResult(items, Number(result.total), query),
+      available_categories: categories,
+    };
   }
 
   async listBranch(branchId: string, query: InventoryQueryDto) {
@@ -108,20 +130,52 @@ export class InventoryRepository {
       .limit(query.page_size)
       .offset(paginationOffset(query));
     let count = this.db
-      .selectFrom('stock_items')
+      .selectFrom('stock_items as si')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
     if (query.search) {
       const pattern = containsSearchPattern(query.search);
-      records = records.where('si.stock_item_name', 'ilike', pattern);
-      count = count.where('stock_item_name', 'ilike', pattern);
+      records = records.where((eb) =>
+        eb.or([
+          eb('si.stock_item_name', 'ilike', pattern),
+          eb('si.category', 'ilike', pattern),
+        ]),
+      );
+      count = count.where((eb) =>
+        eb.or([
+          eb('si.stock_item_name', 'ilike', pattern),
+          eb('si.category', 'ilike', pattern),
+        ]),
+      );
+    }
+    if (query.is_active !== undefined) {
+      records = records.where('si.is_active', '=', query.is_active);
+      count = count.where('si.is_active', '=', query.is_active);
+    }
+    if (query.category) {
+      records = records.where('si.category', '=', query.category);
+      count = count.where('si.category', '=', query.category);
     }
 
-    const [items, result] = await Promise.all([
+    const [items, result, categories] = await Promise.all([
       records.execute(),
       count.executeTakeFirstOrThrow(),
+      this.listAvailableCategories(),
     ]);
-    return paginatedResult(items, Number(result.total), query);
+    return {
+      ...paginatedResult(items, Number(result.total), query),
+      available_categories: categories,
+    };
+  }
+
+  private async listAvailableCategories(): Promise<string[]> {
+    const categories = await this.db
+      .selectFrom('stock_items')
+      .select('category')
+      .distinct()
+      .orderBy('category')
+      .execute();
+    return categories.map(({ category }) => category);
   }
 
   async listMovements(

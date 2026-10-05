@@ -21,6 +21,7 @@ import type {
   ScopedActionInput,
 } from './dispatches.types';
 import { normalizeDecimal } from './dispatches.repository.utils';
+import { containsSearchPattern } from '../../common/utils/list-filters';
 
 type DbExecutor = DispatchDbExecutor;
 
@@ -70,13 +71,27 @@ export class DispatchesRepository {
           'item_count',
         ),
       ])
-      .orderBy('d.created_at', 'desc')
-      .orderBy('d.id', 'desc')
       .limit(query.page_size)
       .offset(paginationOffset(query));
     let count = this.db
       .selectFrom('dispatches as d')
+      .innerJoin('branches as b', 'b.id', 'd.branch_id')
       .select((eb) => eb.fn.countAll<number>().as('total'));
+
+    if (query.search) {
+      const pattern = containsSearchPattern(query.search);
+      records = records.where('b.branch_name', 'ilike', pattern);
+      count = count.where('b.branch_name', 'ilike', pattern);
+    }
+    if (query.sort === 'branch_asc' || query.sort === 'branch_desc')
+      records = records.orderBy(
+        'b.branch_name',
+        query.sort === 'branch_asc' ? 'asc' : 'desc',
+      );
+    const direction = query.sort === 'oldest' ? 'asc' : 'desc';
+    records = records
+      .orderBy('d.created_at', direction)
+      .orderBy('d.id', direction);
 
     if (branchIds !== null) {
       records = records.where('d.branch_id', 'in', branchIds);

@@ -406,6 +406,71 @@ describe('supplier receipt routes (e2e)', () => {
     expect(inactiveStockItem.status).toBe(404);
   });
 
+  it('filters delivery dates and numeric totals before sorting and pagination', async () => {
+    for (const [date, cost] of [
+      ['2026-10-01', '2'],
+      ['2026-10-02', '10'],
+      ['2026-10-03', '100'],
+    ]) {
+      const result = await request(app.getHttpServer())
+        .post('/supplier-receipts')
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          supplier_id: supplierId,
+          received_at: date,
+          items: [
+            {
+              stock_item_id: stockItemIds[0],
+              quantity_received: '1',
+              unit_cost: cost,
+            },
+          ],
+        });
+      expect(result.status).toBe(201);
+      receiptIds.push(result.body.id);
+    }
+    const query = {
+      supplier_id: supplierId,
+      received_from: '2026-10-01',
+      received_to: '2026-10-02',
+      min_cost: '2',
+      max_cost: '10',
+      sort: 'cost_highest',
+      page_size: 1,
+    };
+    const first = await request(app.getHttpServer())
+      .get('/supplier-receipts')
+      .query(query);
+    expect(first.status).toBe(200);
+    expect(first.body.total).toBe(2);
+    expect(
+      first.body.items.map((item: { total_cost: string }) => item.total_cost),
+    ).toEqual(['10']);
+    const second = await request(app.getHttpServer())
+      .get('/supplier-receipts')
+      .query({ ...query, page: 2 });
+    expect(
+      second.body.items.map((item: { total_cost: string }) => item.total_cost),
+    ).toEqual(['2']);
+    const ascending = await request(app.getHttpServer())
+      .get('/supplier-receipts')
+      .query({ ...query, sort: 'cost_lowest' });
+    expect(ascending.body.items[0].total_cost).toBe('2');
+  });
+
+  it.each([
+    { received_from: '2026-02-30' },
+    { received_from: '2026-10-03', received_to: '2026-10-01' },
+    { min_cost: '10', max_cost: '2' },
+    { min_cost: '-1' },
+    { sort: 'unsafe' },
+  ])('rejects invalid delivery directory query %j', async (query) => {
+    const result = await request(app.getHttpServer())
+      .get('/supplier-receipts')
+      .query(query);
+    expect(result.status).toBe(400);
+  });
+
   async function createSupplier(name: string): Promise<string> {
     const supplier = await db
       .insertInto('suppliers')

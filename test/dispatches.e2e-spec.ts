@@ -1205,6 +1205,50 @@ describe('dispatch routes (e2e)', () => {
     }
   });
 
+  it('searches and sorts branch names within the authorized dispatch scope', async () => {
+    const originalBranches = branchIds;
+    const a = await createBranch(`Directory A ${suffix}`);
+    const z = await createBranch(`Directory Z ${suffix}`);
+    for (const id of [z, a]) {
+      const row = await db
+        .insertInto('dispatches')
+        .values({
+          branch_id: id,
+          created_by_user_id: actorUserId,
+          status: 'DRAFT',
+          idempotency_key: randomUUID(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      dispatchIds.push(row.id);
+    }
+    branchIds = [a, z];
+    try {
+      const result = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({
+          search: `Directory ${' '}`,
+          sort: 'branch_asc',
+          page_size: 1,
+        });
+      expect(result.status).toBe(200);
+      expect(result.body.total).toBe(2);
+      expect(result.body.items[0].branch_id).toBe(a);
+      const descending = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({ search: 'Directory', sort: 'branch_desc', page_size: 1 });
+      expect(descending.body.items[0].branch_id).toBe(z);
+      branchIds = [a];
+      const scoped = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({ search: 'Directory', sort: 'branch_desc' });
+      expect(scoped.body.total).toBe(1);
+      expect(scoped.body.items[0].branch_id).toBe(a);
+    } finally {
+      branchIds = originalBranches;
+    }
+  });
+
   async function createBranch(name: string): Promise<string> {
     const branch = await db
       .insertInto('branches')

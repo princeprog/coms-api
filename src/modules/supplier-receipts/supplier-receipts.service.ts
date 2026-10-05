@@ -16,9 +16,40 @@ export class SupplierReceiptsService {
 
   list(query: SupplierReceiptQueryDto) {
     const search = query.search?.trim();
+    for (const date of [query.received_from, query.received_to]) {
+      if (date && !this.isDateOnly(date))
+        throw new BadRequestException(
+          'Delivery dates must be valid YYYY-MM-DD dates',
+        );
+    }
+    if (
+      query.received_from &&
+      query.received_to &&
+      query.received_from > query.received_to
+    )
+      throw new BadRequestException(
+        'Delivery start date must be on or before the end date',
+      );
+    if (query.min_cost && query.max_cost) {
+      const [minWhole, minFraction = ''] = query.min_cost.split('.');
+      const [maxWhole, maxFraction = ''] = query.max_cost.split('.');
+      const scale = Math.max(minFraction.length, maxFraction.length);
+      if (
+        BigInt(minWhole + minFraction.padEnd(scale, '0')) >
+        BigInt(maxWhole + maxFraction.padEnd(scale, '0'))
+      )
+        throw new BadRequestException(
+          'Minimum cost must be less than or equal to maximum cost',
+        );
+    }
     return this.repository.list({
       page: query.page,
       page_size: query.page_size,
+      ...(query.received_from ? { received_from: query.received_from } : {}),
+      ...(query.received_to ? { received_to: query.received_to } : {}),
+      ...(query.min_cost ? { min_cost: query.min_cost } : {}),
+      ...(query.max_cost ? { max_cost: query.max_cost } : {}),
+      ...(query.sort ? { sort: query.sort } : {}),
       ...(search ? { search } : {}),
       ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
     });
