@@ -4,6 +4,8 @@ import type { PermissionKey } from '../../modules/access-control/permission-cata
 export const ACCESS_PERMISSION_KEY = 'coms:access-permission';
 export const BRANCH_SCOPE_KEY = 'coms:branch-scope';
 export const ALLOW_UNASSIGNED_ROLE_KEY = 'coms:allow-unassigned-role';
+export const SUPER_ADMIN_ONLY_KEY = 'coms:super-admin-only';
+export const RequireSuperAdmin = () => SetMetadata(SUPER_ADMIN_ONLY_KEY, true);
 export const RequirePermission = (permission: PermissionKey) =>
   SetMetadata(ACCESS_PERMISSION_KEY, permission);
 export const RequireBranchScope = () => SetMetadata(BRANCH_SCOPE_KEY, true);

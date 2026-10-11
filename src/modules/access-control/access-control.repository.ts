@@ -2,11 +2,14 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Kysely } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
-import { PERMISSION_CATALOG, type PermissionKey } from './permission-catalog';
+import {
+  EDITABLE_PERMISSION_CATALOG,
+  type PermissionKey,
+} from './permission-catalog';
 import type { AccessContext } from './access-control.types';
 
 const KNOWN_PERMISSION_KEYS = new Set<string>(
-  PERMISSION_CATALOG.map(
+  EDITABLE_PERMISSION_CATALOG.map(
     ({ module_key, action_key }) => `${module_key}.${action_key}`,
   ),
 );

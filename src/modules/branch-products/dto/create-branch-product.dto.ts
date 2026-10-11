@@ -1,13 +1,20 @@
-import { IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsIn,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateBranchProductDto {
   @IsUUID()
   product_id!: string;
 
-  @IsString()
-  @MaxLength(80)
-  @Matches(/^\d+(?:\.\d+)?$/, {
-    message: 'price must be a nonnegative decimal string',
-  })
-  price!: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2)
+  @ArrayUnique()
+  @IsIn(['DINE_IN', 'TAKEAWAY'], { each: true })
+  service_types!: ('DINE_IN' | 'TAKEAWAY')[];
 }

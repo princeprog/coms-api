@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 
 export class UpdateBranchDto {
+  @IsOptional() @IsBoolean() has_takeaway?: boolean;
   @IsOptional()
   @IsString()
   @MinLength(2)

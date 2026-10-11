@@ -7,7 +7,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { parse } from 'dotenv';
 import { Pool } from 'pg';
@@ -19,9 +19,6 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { DB } from '../src/database/db';
-import * as initial from '../src/database/migrations/20260920174538_auth';
-import * as rotation from '../src/database/migrations/20260921120000_auth_token_rotation';
-import * as limits from '../src/database/migrations/20260922164052_auth_rate_limits';
 import { AuthRepository } from '../src/modules/auth/auth.repository';
 import { AuthRateLimitRepository } from '../src/modules/auth/auth-rate-limit.repository';
 import { AuthRateLimitService } from '../src/modules/auth/auth-rate-limit.service';
@@ -34,9 +31,6 @@ import { AuthGuard } from '../src/common/guards/auth.guard';
 import { AccessControlRepository } from '../src/modules/access-control/access-control.repository';
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
 import { AccessControlGuard } from '../src/common/guards/access-control.guard';
-import * as accessControl from '../src/database/migrations/20260923214210_access_control';
-import * as predefinedRoles from '../src/database/migrations/20260926011909_predefined_roles';
-import * as noAccessRoleRemoval from '../src/database/migrations/20260926032413_remove_no_access_role';
 import { hashPassword } from '../src/modules/auth/password-hashing';
 import { DATABASE } from '../src/database/database.module';
 import { RolesRepository } from '../src/modules/roles/roles.repository';
@@ -93,14 +87,17 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const migrator = new Migrator({
         db,
         provider: {
-          getMigrations: async () => ({
-            initial,
-            rotation,
-            zz_limits: limits,
-            zzz_access_control: accessControl,
-            zzzz_predefined_roles: predefinedRoles,
-            zzzzz_no_access_role_removal: noAccessRoleRemoval,
-          }),
+          getMigrations: async () =>
+            Object.fromEntries(
+              await Promise.all(
+                readdirSync('src/database/migrations')
+                  .filter((file) => file.endsWith('.ts'))
+                  .map(async (file) => [
+                    file.slice(0, -3),
+                    await import('../src/database/migrations/' + file),
+                  ]),
+              ),
+            ),
         },
       });
       expect((await migrator.migrateToLatest()).error).toBeUndefined();

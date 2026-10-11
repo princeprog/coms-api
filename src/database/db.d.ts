@@ -11,6 +11,18 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
 export type Numeric = ColumnType<string, number | string, number | string>;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
@@ -100,6 +112,7 @@ export interface Branches {
   created_at: Generated<Timestamp>;
   date_opened: Timestamp | null;
   has_dine_in: Generated<boolean>;
+  has_takeaway: Generated<boolean>;
   id: Generated<string>;
   status: Generated<string>;
   updated_at: Generated<Timestamp>;
@@ -112,12 +125,23 @@ export interface BranchInventory {
   updated_at: Generated<Timestamp>;
 }
 
+export interface BranchProductPrices {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  price: Numeric;
+  product_id: string;
+  revision: Generated<number>;
+  updated_at: Generated<Timestamp>;
+  updated_by_user_id: string | null;
+}
+
 export interface BranchProducts {
   branch_id: string;
   created_at: Generated<Timestamp>;
   is_available: Generated<boolean>;
   price: Numeric;
   product_id: string;
+  service_types: Generated<string[]>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -285,6 +309,72 @@ export interface InventoryMovements {
   supplier_receipt_item_id: string | null;
 }
 
+export interface MenuRequestEvents {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  details: Json | null;
+  event_type: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  reason: string | null;
+  request_id: string;
+}
+
+export interface MenuRequests {
+  approved_details: Json | null;
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  decision_reason: string | null;
+  id: Generated<string>;
+  idempotency_key: string;
+  kind: string;
+  product_id: string | null;
+  proposal: Json;
+  reason: string;
+  requested_by_user_id: string;
+  resulting_product_id: string | null;
+  reviewed_by_user_id: string | null;
+  revision: Generated<number>;
+  status: Generated<string>;
+  target_snapshot: Json | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MenuTemplateApplications {
+  actor_user_id: string;
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key: string;
+  preview_token: string;
+  result: Json;
+  template_id: string;
+  template_revision: number;
+}
+
+export interface MenuTemplateItems {
+  product_id: string;
+  service_types: string[];
+  template_id: string;
+}
+
+export interface MenuTemplates {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  description: string | null;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  name: string;
+  revision: Generated<number>;
+  updated_at: Generated<Timestamp>;
+  updated_by_user_id: string;
+}
+
+export interface MigrationMenuGrants {
+  permission_id: Int8;
+  role_id: Int8;
+}
+
 export interface MigrationStockRequestPermissionCatalogBackup {
   action_key: string;
   description: string;
@@ -305,12 +395,23 @@ export interface MigrationSupplierReceiptPostGrantBackup {
   role_id: Int8;
 }
 
+export interface PaymentMethods {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  kind: string;
+  name: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface ProductIngredients {
+  component_type: Generated<string>;
   created_at: Generated<Timestamp>;
   product_id: string;
   quantity_required: Numeric;
   stock_item_id: string;
   updated_at: Generated<Timestamp>;
+  usage_scope: Generated<string>;
 }
 
 export interface Products {
@@ -318,8 +419,23 @@ export interface Products {
   description: string | null;
   id: Generated<string>;
   is_active: Generated<boolean>;
+  preparation_type: Generated<string>;
+  price: Numeric;
+  price_revision: Generated<number>;
   product_name: string;
+  recipe_revision: Generated<number>;
+  service_types: Generated<string[]>;
+  setup_revision: Generated<number>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface ProductSetupOperations {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  fingerprint: string;
+  idempotency_key: string;
+  product_id: string;
+  result: Json;
 }
 
 export interface SaleEvents {
@@ -344,6 +460,7 @@ export interface SaleItems {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
   line_total: Numeric;
+  price_revision: number | null;
   product_id: string;
   product_name_snapshot: string;
   quantity: Numeric;
@@ -357,6 +474,9 @@ export interface Sales {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
   idempotency_key: string;
+  inventory_deducted: Generated<boolean>;
+  payment_method_id: string | null;
+  service_type: string | null;
   status: string;
   tender_method: string;
   total_amount: Numeric;
@@ -370,6 +490,7 @@ export interface StockItems {
   stock_item_name: string;
   unit: string;
   updated_at: Generated<Timestamp>;
+  usage_types: Generated<string[]>;
 }
 
 export interface StockRequestEvents {
@@ -442,6 +563,7 @@ export interface DB {
   "auth.token_families": AuthTokenFamilies;
   "auth.users": AuthUsers;
   branch_inventory: BranchInventory;
+  branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
   branches: Branches;
   commissary_inventory: CommissaryInventory;
@@ -458,11 +580,19 @@ export interface DB {
   dispatch_shortage_closures: DispatchShortageClosures;
   dispatches: Dispatches;
   inventory_movements: InventoryMovements;
+  menu_request_events: MenuRequestEvents;
+  menu_requests: MenuRequests;
+  menu_template_applications: MenuTemplateApplications;
+  menu_template_items: MenuTemplateItems;
+  menu_templates: MenuTemplates;
+  migration_menu_grants: MigrationMenuGrants;
   migration_stock_request_permission_catalog_backup: MigrationStockRequestPermissionCatalogBackup;
   migration_stock_request_permission_grant_backup: MigrationStockRequestPermissionGrantBackup;
   migration_supplier_receipt_create_description_backup: MigrationSupplierReceiptCreateDescriptionBackup;
   migration_supplier_receipt_post_grant_backup: MigrationSupplierReceiptPostGrantBackup;
+  payment_methods: PaymentMethods;
   product_ingredients: ProductIngredients;
+  product_setup_operations: ProductSetupOperations;
   products: Products;
   sale_events: SaleEvents;
   sale_item_consumptions: SaleItemConsumptions;

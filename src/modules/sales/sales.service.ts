@@ -31,22 +31,29 @@ export class SalesService {
       throw new BadRequestException('Tender method is required');
 
     const seen = new Set<string>();
-    const items = input.items.map(({ product_id, quantity }) => {
-      if (seen.has(product_id))
-        throw new BadRequestException(
-          'A product may appear only once in a sale',
-        );
-      seen.add(product_id);
-      return {
-        productId: product_id,
-        quantity: this.normalizePositiveDecimal(quantity),
-      };
-    });
+    const items = input.items.map(
+      ({ product_id, quantity, price_revision }) => {
+        if (seen.has(product_id))
+          throw new BadRequestException(
+            'A product may appear only once in a sale',
+          );
+        seen.add(product_id);
+        return {
+          productId: product_id,
+          quantity: this.normalizePositiveDecimal(quantity),
+          priceRevision: price_revision,
+        };
+      },
+    );
 
     return this.repository.create({
       branchId,
       actorUserId,
       tenderMethod,
+      ...(input.payment_method_id
+        ? { paymentMethodId: input.payment_method_id }
+        : {}),
+      serviceType: input.service_type,
       idempotencyKey: key,
       items,
     });

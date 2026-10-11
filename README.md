@@ -33,6 +33,9 @@ $ pnpm install
 
 ## Compile and run the project
 
+The API defaults to `http://localhost:3006`. Set `WEB_ORIGIN=http://localhost:3005`
+in your local `.env` for the frontend. `PORT` can override the API port.
+
 ```bash
 # development
 $ pnpm run start
@@ -148,3 +151,7 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Current product and menu workflow
+
+See [Simple Products and Branch Menus](docs/simple-products-release.md) for global pricing, Super Admin menu ownership, financial-only sales, historical voids, verification and coordinated release. Local app/API ports are 3005/3006. Earlier branch-pricing, recipe, request, template and stock-usage workflows are retired.

@@ -16,6 +16,7 @@ import {
   ACCESS_PERMISSION_KEY,
   ALLOW_UNASSIGNED_ROLE_KEY,
   BRANCH_SCOPE_KEY,
+  SUPER_ADMIN_ONLY_KEY,
 } from '../decorators/access-policy.decorator';
 
 type AccessRequest = Request & {
@@ -62,10 +63,17 @@ export class AccessControlGuard implements CanActivate {
     if (!accessContext.role.isActive)
       throw new ForbiddenException('The assigned role is inactive');
 
-    if (!permission && !branchScoped) return true;
-
     const superAdmin =
       accessContext.role.isSystem && accessContext.role.code === 'SUPER_ADMIN';
+    if (
+      this.reflector.getAllAndOverride<boolean>(
+        SUPER_ADMIN_ONLY_KEY,
+        targets,
+      ) &&
+      !superAdmin
+    )
+      throw new ForbiddenException('Only Super Admin can perform this action');
+    if (!permission && !branchScoped) return true;
     if (permission && !superAdmin) {
       if (!accessContext.permissions.includes(permission))
         throw new ForbiddenException('Permission required');

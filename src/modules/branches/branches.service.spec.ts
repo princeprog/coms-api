@@ -17,8 +17,19 @@ describe('BranchesService', () => {
       role: { code: 'MANAGER', isSystem: false },
     } as never;
 
-    await service.list(access, { page: 2, page_size: 15 });
-    expect(repository.list).toHaveBeenCalledWith(2, 15, ['branch-1']);
+    await service.list(access, { page: 2, page_size: 15, search: 'Dining' });
+    expect(repository.list).toHaveBeenCalledWith(
+      2,
+      15,
+      ['branch-1'],
+      'Dining',
+      {
+        status: undefined,
+        service_type: undefined,
+        sort_by: undefined,
+        sort_order: undefined,
+      },
+    );
   });
 
   it('allows only protected Super Admin to list branches globally', async () => {
@@ -33,7 +44,12 @@ describe('BranchesService', () => {
       } as never,
       { page: 1, page_size: 25 },
     );
-    expect(repository.list).toHaveBeenCalledWith(1, 25, undefined);
+    expect(repository.list).toHaveBeenCalledWith(1, 25, undefined, undefined, {
+      status: undefined,
+      service_type: undefined,
+      sort_by: undefined,
+      sort_order: undefined,
+    });
   });
 
   it('rejects empty updates before persistence', async () => {

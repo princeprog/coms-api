@@ -5,13 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  PERMISSION_CATALOG,
+  EDITABLE_PERMISSION_CATALOG,
   type PermissionKey,
 } from '../access-control/permission-catalog';
 import { RolesRepository } from './roles.repository';
 
 const PERMISSION_KEYS = new Set<string>(
-  PERMISSION_CATALOG.map(
+  EDITABLE_PERMISSION_CATALOG.map(
     ({ module_key, action_key }) => `${module_key}.${action_key}`,
   ),
 );
@@ -26,7 +26,7 @@ export class RolesService {
   }
 
   listPermissions() {
-    return PERMISSION_CATALOG.map((permission) => ({
+    return EDITABLE_PERMISSION_CATALOG.map((permission) => ({
       ...permission,
       key: `${permission.module_key}.${permission.action_key}`,
     }));

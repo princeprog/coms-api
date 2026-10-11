@@ -3,6 +3,10 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsIn,
+  IsOptional,
+  IsInt,
+  Min,
   IsString,
   IsUUID,
   Matches,
@@ -14,6 +18,9 @@ import {
 const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 
 export class CreateSaleItemDto {
+  @IsInt()
+  @Min(1)
+  price_revision!: number;
   @IsUUID()
   product_id!: string;
 
@@ -24,6 +31,12 @@ export class CreateSaleItemDto {
 }
 
 export class CreateSaleDto {
+  @IsOptional()
+  @IsUUID()
+  payment_method_id?: string;
+
+  @IsIn(['DINE_IN', 'TAKEAWAY'])
+  service_type!: 'DINE_IN' | 'TAKEAWAY';
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1)

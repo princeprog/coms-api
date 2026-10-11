@@ -294,7 +294,10 @@ describe('daily report routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ product_name: `Daily Report Test Product ${suffix}` })
+      .values({
+        price: '2.0000',
+        product_name: `Daily Report Test Product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;
@@ -946,9 +949,7 @@ describe('daily report routes (e2e)', () => {
       .set('Idempotency-Key', randomUUID())
       .send({
         branch_id: flowBranchId,
-        items: [
-          { stock_item_id: flowStockItemId, quantity_dispatched: '8' },
-        ],
+        items: [{ stock_item_id: flowStockItemId, quantity_dispatched: '8' }],
       })
       .expect(201);
     flowDispatchId = dispatchDraft.body.id as string;
@@ -978,9 +979,7 @@ describe('daily report routes (e2e)', () => {
       .set('Idempotency-Key', randomUUID())
       .send({
         branch_id: flowBranchId,
-        items: [
-          { stock_item_id: flowStockItemId, quantity_dispatched: '1' },
-        ],
+        items: [{ stock_item_id: flowStockItemId, quantity_dispatched: '1' }],
       })
       .expect(403);
     activeActorId = reporterId;

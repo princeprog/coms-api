@@ -1,4 +1,5 @@
 import './config/load-env';
+import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 
 import { Module } from '@nestjs/common';
 import { createObserveModule } from '@nestjs/observe';
@@ -14,7 +15,6 @@ import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { SupplierReceiptsModule } from './modules/supplier-receipts/supplier-receipts.module';
 import { DispatchesModule } from './modules/dispatches/dispatches.module';
-import { RecipesModule } from './modules/recipes/recipes.module';
 import { BranchProductsModule } from './modules/branch-products/branch-products.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { DailyReportsModule } from './modules/daily-reports/daily-reports.module';
@@ -24,6 +24,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
 @Module({
   imports: [
+    PaymentMethodsModule,
     // Distributed tracing, auto-correlated logs, request/job metrics, error
     // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
     ObserveModule.forRoot({
@@ -41,7 +42,6 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     InventoryModule,
     SupplierReceiptsModule,
     DispatchesModule,
-    RecipesModule,
     BranchProductsModule,
     SalesModule,
     DailyReportsModule,

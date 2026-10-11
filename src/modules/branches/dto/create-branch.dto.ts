@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 
 export class CreateBranchDto {
+  @IsOptional() @IsBoolean() has_takeaway?: boolean;
   @IsString()
   @MinLength(2)
   @MaxLength(160)

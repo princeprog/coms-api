@@ -61,13 +61,15 @@ async function main() {
       'vitest.mjs',
     );
     const args = process.argv.slice(2);
+    const unit = args.includes("--unit");
+    if (unit) args.splice(args.indexOf("--unit"),1);
     const run = spawnSync(
       process.execPath,
       [
         cli,
         'run',
         '--config',
-        'vitest.config.e2e.ts',
+        unit ? 'vitest.config.ts' : 'vitest.config.e2e.ts',
         ...(args.length ? args : ['test/dispatches.e2e-spec.ts']),
       ],
       {
@@ -76,6 +78,7 @@ async function main() {
           ...process.env,
           DATABASE_URL: url.toString(),
           COMS_TEST_DATABASE_NAME: name,
+          COMS_RUN_DB_TESTS: '1',
         },
       },
     );

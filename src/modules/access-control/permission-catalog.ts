@@ -270,7 +270,63 @@ export const PERMISSION_CATALOG = [
     action_key: 'approve',
     description: 'Approve daily reports',
   },
+  {
+    module_key: 'branch_products',
+    action_key: 'services_update',
+    description: 'Change assigned branch menu service types',
+  },
+  {
+    module_key: 'menu_requests',
+    action_key: 'read',
+    description: 'View assigned branch menu requests',
+  },
+  {
+    module_key: 'menu_requests',
+    action_key: 'create',
+    description: 'Submit assigned branch menu requests',
+  },
+  {
+    module_key: 'menu_requests',
+    action_key: 'cancel',
+    description: 'Cancel your pending menu requests',
+  },
+  {
+    module_key: 'menu_requests',
+    action_key: 'review',
+    description: 'Review and decide assigned branch menu requests',
+  },
+  {
+    module_key: 'menu_templates',
+    action_key: 'read',
+    description: 'View menu templates',
+  },
+  {
+    module_key: 'menu_templates',
+    action_key: 'manage',
+    description: 'Create and maintain shared menu templates',
+  },
+  {
+    module_key: 'menu_templates',
+    action_key: 'apply',
+    description: 'Apply templates to assigned branch menus',
+  },
 ] as const;
 
 export type PermissionKey =
   `${(typeof PERMISSION_CATALOG)[number]['module_key']}.${(typeof PERMISSION_CATALOG)[number]['action_key']}`;
+
+// Keep the historical catalog for existing migration/role audit records.
+// Product and menu writes are protected Super Admin operations, not editable grants.
+export const EDITABLE_PERMISSION_CATALOG = PERMISSION_CATALOG.filter(
+  ({ module_key, action_key }) =>
+    !['recipes', 'menu_requests', 'menu_templates'].includes(module_key) &&
+    !(
+      ['products', 'branch_products'].includes(module_key) &&
+      action_key !== 'read'
+    ),
+);
+export const EDITABLE_PERMISSION_KEYS = new Set<string>(
+  EDITABLE_PERMISSION_CATALOG.map(
+    ({ module_key, action_key }) => `${module_key}.${action_key}`,
+  ),
+);

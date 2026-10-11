@@ -12,27 +12,54 @@ import { sql } from 'kysely';
 import type { Kysely } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
+import { containsSearchPattern } from '../../common/utils/list-filters';
+import type { BranchQueryDto } from './dto/branch-query.dto';
 
 @Injectable()
 export class BranchesRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
-  async list(page: number, pageSize: number, branchIds?: string[]) {
+  async list(
+    page: number,
+    pageSize: number,
+    branchIds?: string[],
+    search?: string,
+    filters: Pick<
+      BranchQueryDto,
+      'status' | 'service_type' | 'sort_by' | 'sort_order'
+    > = {},
+  ) {
     if (branchIds && branchIds.length === 0)
       return paginatedResult([], 0, { page, page_size: pageSize });
-    let records = this.db
-      .selectFrom('branches')
+    let query = this.db.selectFrom('branches');
+    if (branchIds) {
+      query = query.where('id', 'in', branchIds);
+    }
+    if (search) {
+      const pattern = containsSearchPattern(search);
+      query = query.where('branch_name', 'ilike', pattern);
+    }
+    if (filters.status) query = query.where('status', '=', filters.status);
+    if (filters.service_type) {
+      query = query.where(
+        filters.service_type === 'DINE_IN' ? 'has_dine_in' : 'has_takeaway',
+        '=',
+        true,
+      );
+    }
+    const records = query
       .selectAll()
+      .orderBy(filters.sort_by ?? 'branch_name', (order) =>
+        (filters.sort_order === 'desc'
+          ? order.desc()
+          : order.asc()
+        ).nullsLast(),
+      )
       .orderBy('branch_name')
+      .orderBy('id')
       .limit(pageSize)
       .offset(paginationOffset({ page, page_size: pageSize }));
-    let count = this.db
-      .selectFrom('branches')
-      .select((eb) => eb.fn.countAll<number>().as('total'));
-    if (branchIds) {
-      records = records.where('id', 'in', branchIds);
-      count = count.where('id', 'in', branchIds);
-    }
+    const count = query.select((eb) => eb.fn.countAll<number>().as('total'));
     const [items, result] = await Promise.all([
       records.execute(),
       count.executeTakeFirstOrThrow(),
@@ -57,6 +84,7 @@ export class BranchesRepository {
     address?: string | null;
     date_opened?: string | null;
     has_dine_in?: boolean;
+    has_takeaway?: boolean;
   }) {
     try {
       return await this.db
@@ -67,6 +95,7 @@ export class BranchesRepository {
           address: input.address?.trim() || null,
           date_opened: input.date_opened ?? null,
           has_dine_in: input.has_dine_in ?? false,
+          has_takeaway: input.has_takeaway ?? true,
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -84,6 +113,7 @@ export class BranchesRepository {
       address?: string | null;
       date_opened?: string | null;
       has_dine_in?: boolean;
+      has_takeaway?: boolean;
     },
   ) {
     const values = {

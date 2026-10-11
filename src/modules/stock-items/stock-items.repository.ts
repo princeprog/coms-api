@@ -27,7 +27,15 @@ export class StockItemsRepository {
   async list(input: StockItemListInput) {
     let records = this.db
       .selectFrom('stock_items')
-      .selectAll()
+      .select([
+        'id',
+        'stock_item_name',
+        'category',
+        'unit',
+        'is_active',
+        'created_at',
+        'updated_at',
+      ])
       .orderBy('stock_item_name')
       .orderBy('id')
       .limit(input.page_size)
@@ -56,7 +64,15 @@ export class StockItemsRepository {
   findById(id: string) {
     return this.db
       .selectFrom('stock_items')
-      .selectAll()
+      .select([
+        'id',
+        'stock_item_name',
+        'category',
+        'unit',
+        'is_active',
+        'created_at',
+        'updated_at',
+      ])
       .where('id', '=', id)
       .executeTakeFirst();
   }
@@ -65,19 +81,44 @@ export class StockItemsRepository {
     return this.db
       .insertInto('stock_items')
       .values(input)
-      .returningAll()
+      .returning([
+        'id',
+        'stock_item_name',
+        'category',
+        'unit',
+        'is_active',
+        'created_at',
+        'updated_at',
+      ])
       .executeTakeFirstOrThrow();
   }
 
   async update(id: string, patch: StockItemUpdateInput) {
-    const stockItem = await this.db
-      .updateTable('stock_items')
-      .set({ ...patch, updated_at: sql<Date>`now()` })
-      .where('id', '=', id)
-      .returningAll()
-      .executeTakeFirst();
-    if (!stockItem) throw new NotFoundException('Stock item not found');
-    return stockItem;
+    return this.db.transaction().execute(async (tx) => {
+      const existing = await tx
+        .selectFrom('stock_items')
+        .select('id')
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!existing) throw new NotFoundException('Stock item not found');
+      const stockItem = await tx
+        .updateTable('stock_items')
+        .set({ ...patch, updated_at: sql<Date>`now()` })
+        .where('id', '=', id)
+        .returning([
+          'id',
+          'stock_item_name',
+          'category',
+          'unit',
+          'is_active',
+          'created_at',
+          'updated_at',
+        ])
+        .executeTakeFirst();
+      if (!stockItem) throw new NotFoundException('Stock item not found');
+      return stockItem;
+    });
   }
 
   async deactivate(id: string) {
@@ -85,7 +126,15 @@ export class StockItemsRepository {
       .updateTable('stock_items')
       .set({ is_active: false, updated_at: sql<Date>`now()` })
       .where('id', '=', id)
-      .returningAll()
+      .returning([
+        'id',
+        'stock_item_name',
+        'category',
+        'unit',
+        'is_active',
+        'created_at',
+        'updated_at',
+      ])
       .executeTakeFirst();
     if (!stockItem) throw new NotFoundException('Stock item not found');
     return stockItem;

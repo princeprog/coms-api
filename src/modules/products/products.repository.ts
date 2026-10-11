@@ -8,16 +8,12 @@ import { sql, type Kysely } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import type { ProductQueryDto } from './dto/product-query.dto';
+import { PRODUCT_COLUMNS } from './product-setup.repository';
 
 type ProductListInput = Pick<
   ProductQueryDto,
   'page' | 'page_size' | 'search' | 'is_active'
 >;
-type ProductCreateInput = {
-  product_name: string;
-  description: string | null;
-};
-type ProductUpdateInput = Partial<ProductCreateInput>;
 
 @Injectable()
 export class ProductsRepository {
@@ -26,7 +22,7 @@ export class ProductsRepository {
   async list(input: ProductListInput) {
     let records = this.db
       .selectFrom('products')
-      .selectAll()
+      .select(PRODUCT_COLUMNS)
       .orderBy('product_name')
       .orderBy('id')
       .limit(input.page_size)
@@ -52,39 +48,26 @@ export class ProductsRepository {
     return paginatedResult(items, Number(result.total), input);
   }
 
-  findById(id: string) {
+  async findById(id: string) {
     return this.db
       .selectFrom('products')
-      .selectAll()
+      .select(PRODUCT_COLUMNS)
       .where('id', '=', id)
-      .executeTakeFirst();
-  }
-
-  create(input: ProductCreateInput) {
-    return this.db
-      .insertInto('products')
-      .values(input)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-  }
-
-  async update(id: string, patch: ProductUpdateInput) {
-    const product = await this.db
-      .updateTable('products')
-      .set({ ...patch, updated_at: sql<Date>`now()` })
-      .where('id', '=', id)
-      .returningAll()
-      .executeTakeFirst();
-    if (!product) throw new NotFoundException('Product not found');
-    return product;
+      .executeTakeFirstOrThrow(
+        () => new NotFoundException('Product not found'),
+      );
   }
 
   async deactivate(id: string) {
     const product = await this.db
       .updateTable('products')
-      .set({ is_active: false, updated_at: sql<Date>`now()` })
+      .set({
+        is_active: false,
+        setup_revision: sql`setup_revision+1`,
+        updated_at: sql<Date>`now()`,
+      })
       .where('id', '=', id)
-      .returningAll()
+      .returning(PRODUCT_COLUMNS)
       .executeTakeFirst();
     if (!product) throw new NotFoundException('Product not found');
     return product;

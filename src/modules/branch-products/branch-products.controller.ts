@@ -12,6 +12,7 @@ import {
 import {
   RequireBranchScope,
   RequirePermission,
+  RequireSuperAdmin,
 } from '../../common/decorators/access-policy.decorator';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
@@ -19,8 +20,11 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { BranchProductQueryDto } from './dto/branch-product-query.dto';
 import { CreateBranchProductDto } from './dto/create-branch-product.dto';
 import { UpdateBranchProductAvailabilityDto } from './dto/update-branch-product-availability.dto';
-import { UpdateBranchProductPriceDto } from './dto/update-branch-product-price.dto';
 import { BranchProductsService } from './branch-products.service';
+import { OmitType } from '@nestjs/mapped-types';
+class OfferingServicesDto extends OmitType(CreateBranchProductDto, [
+  'product_id',
+] as const) {}
 
 @Controller('branches/:branchId/products')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
@@ -47,6 +51,7 @@ export class BranchProductsController {
   }
 
   @Post()
+  @RequireSuperAdmin()
   @RequirePermission('branch_products.create')
   create(
     @Param('branchId', ParseUUIDPipe) branchId: string,
@@ -55,17 +60,23 @@ export class BranchProductsController {
     return this.service.create(branchId, input);
   }
 
-  @Patch(':productId')
-  @RequirePermission('branch_products.update')
-  updatePrice(
+  @Patch(':productId/services')
+  @RequireSuperAdmin()
+  @RequirePermission('branch_products.services_update')
+  updateServices(
     @Param('branchId', ParseUUIDPipe) branchId: string,
     @Param('productId', ParseUUIDPipe) productId: string,
-    @Body() input: UpdateBranchProductPriceDto,
+    @Body() input: OfferingServicesDto,
   ) {
-    return this.service.updatePrice(branchId, productId, input);
+    return this.service.updateServices(
+      branchId,
+      productId,
+      input.service_types,
+    );
   }
 
   @Post(':productId/availability')
+  @RequireSuperAdmin()
   @RequirePermission('branch_products.availability_update')
   updateAvailability(
     @Param('branchId', ParseUUIDPipe) branchId: string,

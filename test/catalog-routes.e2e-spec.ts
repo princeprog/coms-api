@@ -38,7 +38,18 @@ describe('catalog routes (e2e)', () => {
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(AccessControlGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: import('@nestjs/common').ExecutionContext) => {
+          context.switchToHttp().getRequest().accessContext = {
+            userId: '00000000-0000-4000-8000-000000000001',
+            accountActive: true,
+            role: { code: 'SUPER_ADMIN', isSystem: true, isActive: true },
+            permissions: [],
+            branchIds: [],
+          };
+          return true;
+        },
+      })
       .compile();
     validationApp = validationModule.createNestApplication();
     validationApp.useGlobalPipes(
@@ -399,6 +410,7 @@ describe('catalog routes (e2e)', () => {
       .post('/products')
       .send({
         product_name: ` ${productName} `,
+        price: '125.001',
         description: ' Fresh product description ',
       });
 
@@ -426,7 +438,11 @@ describe('catalog routes (e2e)', () => {
     const updatedName = `${productName} Updated`;
     const updated = await request(validationApp.getHttpServer())
       .patch(`/products/${productId}`)
-      .send({ product_name: updatedName, description: null });
+      .send({
+        product_name: updatedName,
+        description: null,
+        expected_product_revision: 1,
+      });
     expect(updated.status).toBe(200);
     expect(updated.body).toMatchObject({
       product_name: updatedName,

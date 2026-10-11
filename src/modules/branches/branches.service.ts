@@ -21,6 +21,13 @@ export class BranchesService {
       query.page,
       query.page_size,
       isSuperAdmin ? undefined : access.branchIds,
+      query.search,
+      {
+        status: query.status,
+        service_type: query.service_type,
+        sort_by: query.sort_by,
+        sort_order: query.sort_order,
+      },
     );
   }
 
@@ -34,6 +41,10 @@ export class BranchesService {
     input: Omit<Parameters<BranchesRepository['create']>[0], 'code'>,
   ) {
     const branchName = input.branch_name.trim();
+    if (!(input.has_dine_in ?? false) && !(input.has_takeaway ?? true))
+      throw new BadRequestException(
+        'An active branch must support dine-in or takeout',
+      );
     if (branchName.length < 2)
       throw new BadRequestException(
         'Branch name must contain at least 2 characters',
@@ -58,6 +69,17 @@ export class BranchesService {
   async update(id: string, input: Parameters<BranchesRepository['update']>[1]) {
     if (Object.keys(input).length === 0)
       throw new BadRequestException('At least one branch field is required');
+    if (input.has_dine_in !== undefined || input.has_takeaway !== undefined) {
+      const current = await this.get(id);
+      if (
+        current.status === 'active' &&
+        !(input.has_dine_in ?? current.has_dine_in) &&
+        !(input.has_takeaway ?? current.has_takeaway)
+      )
+        throw new BadRequestException(
+          'An active branch must support dine-in or takeout',
+        );
+    }
     if (input.branch_name !== undefined && input.branch_name.trim().length < 2)
       throw new BadRequestException(
         'Branch name must contain at least 2 characters',

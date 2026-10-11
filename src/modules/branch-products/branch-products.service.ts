@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { CreateBranchProductDto } from './dto/create-branch-product.dto';
 import { BranchProductQueryDto } from './dto/branch-product-query.dto';
 import { UpdateBranchProductAvailabilityDto } from './dto/update-branch-product-availability.dto';
-import { UpdateBranchProductPriceDto } from './dto/update-branch-product-price.dto';
 import { BranchProductsRepository } from './branch-products.repository';
 
 @Injectable()
@@ -12,6 +11,10 @@ export class BranchProductsService {
   list(branchId: string, query: BranchProductQueryDto) {
     const search = query.search?.trim();
     return this.repository.list(branchId, {
+      sort_by: query.sort_by ?? 'product_name',
+      sort_order: query.sort_order ?? 'asc',
+      service_type: query.service_type,
+      eligible_only: query.eligible_only,
       page: query.page,
       page_size: query.page_size,
       ...(search ? { search } : {}),
@@ -25,16 +28,16 @@ export class BranchProductsService {
     return this.repository.findByIds(branchId, productId);
   }
 
-  create(branchId: string, input: CreateBranchProductDto) {
-    return this.repository.create(branchId, input.product_id, input.price);
+  updateServices(branchId: string, productId: string, types: string[]) {
+    return this.repository.updateServices(branchId, productId, types);
   }
 
-  updatePrice(
-    branchId: string,
-    productId: string,
-    input: UpdateBranchProductPriceDto,
-  ) {
-    return this.repository.updatePrice(branchId, productId, input.price);
+  create(branchId: string, input: CreateBranchProductDto) {
+    return this.repository.create(
+      branchId,
+      input.product_id,
+      input.service_types,
+    );
   }
 
   updateAvailability(

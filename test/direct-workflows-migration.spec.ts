@@ -127,7 +127,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     afterAll(async () => {
       if (db) await db.destroy();
       if (admin) {
-        await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+        await admin.query(
+          `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+        );
         await admin.end();
       }
     });
@@ -184,24 +186,39 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .execute();
       const customRole = await db!
         .insertInto('auth.roles')
-        .values({ role_name: 'Workflow Custom', code: `WORKFLOW_${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}` })
+        .values({
+          role_name: 'Workflow Custom',
+          code: `WORKFLOW_${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+        })
         .returning('id')
         .executeTakeFirstOrThrow();
       await db!
         .insertInto('auth.role_permissions')
         .values({ role_id: customRole.id, permission_id: postPermission.id })
         .execute();
-      await expect(supplierFinal.up(db!)).rejects.toThrow(/review supplier_receipts\.post grants/);
-      await db!.deleteFrom('auth.role_permissions').where('role_id', '=', customRole.id).execute();
-      await db!.deleteFrom('auth.roles').where('id', '=', customRole.id).execute();
+      await expect(supplierFinal.up(db!)).rejects.toThrow(
+        /review supplier_receipts\.post grants/,
+      );
+      await db!
+        .deleteFrom('auth.role_permissions')
+        .where('role_id', '=', customRole.id)
+        .execute();
+      await db!
+        .deleteFrom('auth.roles')
+        .where('id', '=', customRole.id)
+        .execute();
 
       await supplierFinal.up(db!);
       const columns = await sql`
         SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'supplier_receipts'
       `.execute(db!);
-      expect(columns.rows.map((row: any) => row.column_name)).toContain('recorded_at');
-      expect(columns.rows.map((row: any) => row.column_name)).not.toContain('status');
+      expect(columns.rows.map((row: any) => row.column_name)).toContain(
+        'recorded_at',
+      );
+      expect(columns.rows.map((row: any) => row.column_name)).not.toContain(
+        'status',
+      );
       expect(
         await db!
           .selectFrom('supplier_receipts')
@@ -293,34 +310,58 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       requestItemId = (
         await db!
           .insertInto('stock_request_items')
-          .values({ stock_request_id: requestId, stock_item_id: stockItemId, quantity_requested: '4.5' })
+          .values({
+            stock_request_id: requestId,
+            stock_item_id: stockItemId,
+            quantity_requested: '4.5',
+          })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
       dispatchId = (
         await db!
           .insertInto('dispatches')
-          .values({ stock_request_id: requestId, branch_id: branchId, created_by_user_id: actorId, idempotency_key: randomUUID() })
+          .values({
+            stock_request_id: requestId,
+            branch_id: branchId,
+            created_by_user_id: actorId,
+            idempotency_key: randomUUID(),
+          })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
       await db!
         .insertInto('dispatch_items')
-        .values({ dispatch_id: dispatchId, stock_request_item_id: requestItemId, quantity_dispatched: '4.5' })
+        .values({
+          dispatch_id: dispatchId,
+          stock_request_item_id: requestItemId,
+          quantity_dispatched: '4.5',
+        })
         .execute();
 
       const customRole = await db!
         .insertInto('auth.roles')
-        .values({ role_name: 'Workflow Request Role', code: `REQUEST_${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}` })
+        .values({
+          role_name: 'Workflow Request Role',
+          code: `REQUEST_${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+        })
         .returning('id')
         .executeTakeFirstOrThrow();
       await db!
         .insertInto('auth.role_permissions')
         .values({ role_id: customRole.id, permission_id: legacyPermission.id })
         .execute();
-      await expect(directDispatch.up(db!)).rejects.toThrow(/review legacy stock-request grants/);
-      await db!.deleteFrom('auth.role_permissions').where('role_id', '=', customRole.id).execute();
-      await db!.deleteFrom('auth.roles').where('id', '=', customRole.id).execute();
+      await expect(directDispatch.up(db!)).rejects.toThrow(
+        /review legacy stock-request grants/,
+      );
+      await db!
+        .deleteFrom('auth.role_permissions')
+        .where('role_id', '=', customRole.id)
+        .execute();
+      await db!
+        .deleteFrom('auth.roles')
+        .where('id', '=', customRole.id)
+        .execute();
       await supplierFinal.up(db!);
       await directDispatch.up(db!);
       const permissions = await db!
@@ -330,11 +371,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .orderBy('action_key')
         .execute();
       expect(permissions).toEqual(
-        [...PERMISSION_CATALOG].sort((left, right) =>
-          `${left.module_key}.${left.action_key}`.localeCompare(
-            `${right.module_key}.${right.action_key}`,
+        [...PERMISSION_CATALOG]
+          .filter(
+            (p) =>
+              !['menu_requests', 'menu_templates'].includes(p.module_key) &&
+              !(
+                p.module_key === 'branch_products' &&
+                p.action_key === 'services_update'
+              ),
+          )
+          .sort((left, right) =>
+            `${left.module_key}.${left.action_key}`.localeCompare(
+              `${right.module_key}.${right.action_key}`,
+            ),
           ),
-        ),
       );
       expect(
         await db!
@@ -342,7 +392,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           .select(['stock_item_id', 'stock_request_item_id'])
           .where('dispatch_id', '=', dispatchId)
           .executeTakeFirstOrThrow(),
-      ).toMatchObject({ stock_item_id: stockItemId, stock_request_item_id: requestItemId });
+      ).toMatchObject({
+        stock_item_id: stockItemId,
+        stock_request_item_id: requestItemId,
+      });
       expect(
         await db!
           .selectFrom('auth.permissions')
@@ -379,15 +432,27 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const directId = (
         await db!
           .insertInto('dispatches')
-          .values({ stock_request_id: null, branch_id: branchId, created_by_user_id: actorId, idempotency_key: randomUUID() })
+          .values({
+            stock_request_id: null,
+            branch_id: branchId,
+            created_by_user_id: actorId,
+            idempotency_key: randomUUID(),
+          })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
       await db!
         .insertInto('dispatch_items')
-        .values({ dispatch_id: directId, stock_item_id: stockItemId, stock_request_item_id: null, quantity_dispatched: '1' })
+        .values({
+          dispatch_id: directId,
+          stock_item_id: stockItemId,
+          stock_request_item_id: null,
+          quantity_dispatched: '1',
+        })
         .execute();
-      await expect(directDispatch.down(db!)).rejects.toThrow(/will not invent request history/);
+      await expect(directDispatch.down(db!)).rejects.toThrow(
+        /will not invent request history/,
+      );
     });
   },
 );

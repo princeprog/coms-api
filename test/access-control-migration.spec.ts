@@ -159,7 +159,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         ORDER BY module_key, action_key
       `.execute(testDb!);
       const catalogBeforeDirectWorkflows = [
-        ...PERMISSION_CATALOG.map((permission) =>
+        ...PERMISSION_CATALOG.filter(
+          (p) =>
+            !['menu_requests', 'menu_templates'].includes(p.module_key) &&
+            !(
+              p.module_key === 'branch_products' &&
+              p.action_key === 'services_update'
+            ),
+        ).map((permission) =>
           permission.module_key === 'supplier_receipts' &&
           permission.action_key === 'create'
             ? { ...permission, description: 'Record supplier receipts' }
@@ -196,10 +203,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           description: 'Cancel own stock requests',
         },
       ].sort((left, right) =>
-          `${left.module_key}.${left.action_key}`.localeCompare(
-            `${right.module_key}.${right.action_key}`,
-          ),
-        );
+        `${left.module_key}.${left.action_key}`.localeCompare(
+          `${right.module_key}.${right.action_key}`,
+        ),
+      );
       expect(permissions.rows).toEqual(catalogBeforeDirectWorkflows);
 
       const tables = await sql<{
@@ -459,9 +466,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         WHERE module_key = 'dashboard' AND action_key = 'global_read'
       `.execute(testDb!);
       await expect(
-        testDb!.transaction().execute((trx) =>
-          roleScopedOperationPermissions.down(trx),
-        ),
+        testDb!
+          .transaction()
+          .execute((trx) => roleScopedOperationPermissions.down(trx)),
       ).rejects.toThrow(/CUSTOM_DASHBOARD.*dashboard.global_read/i);
       const permissionAfterRejectedRollback = await sql<{ count: number }>`
         SELECT count(*)::int AS count FROM auth.permissions

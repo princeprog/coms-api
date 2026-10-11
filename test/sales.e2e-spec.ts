@@ -121,6 +121,7 @@ describe('sales routes (e2e)', () => {
       .insertInto('stock_items')
       .values({
         stock_item_name: `Sales test flour ${suffix}`,
+        usage_types: ['INGREDIENT'],
         category: 'Sales test',
         unit: 'kg',
       })
@@ -132,6 +133,7 @@ describe('sales routes (e2e)', () => {
       .insertInto('stock_items')
       .values({
         stock_item_name: `Sales test oil ${suffix}`,
+        usage_types: ['INGREDIENT'],
         category: 'Sales test',
         unit: 'L',
       })
@@ -142,21 +144,27 @@ describe('sales routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ product_name: `Sales product ${suffix}` })
+      .values({ price: '9.2500', product_name: `Sales product ${suffix}` })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;
     productIds.push(productId);
     const multiIngredientProduct = await db
       .insertInto('products')
-      .values({ product_name: `Multi ingredient sales product ${suffix}` })
+      .values({
+        price: '3.00',
+        product_name: `Multi ingredient sales product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     multiIngredientProductId = multiIngredientProduct.id;
     productIds.push(multiIngredientProductId);
     const noRecipeProduct = await db
       .insertInto('products')
-      .values({ product_name: `No recipe sales product ${suffix}` })
+      .values({
+        price: '5.00',
+        product_name: `No recipe sales product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     noRecipeProductId = noRecipeProduct.id;
@@ -172,6 +180,29 @@ describe('sales routes (e2e)', () => {
           price: '3.00',
         },
         { branch_id: branchId, product_id: noRecipeProductId, price: '5.00' },
+      ])
+      .execute();
+    await db
+      .insertInto('branch_product_prices')
+      .values([
+        {
+          branch_id: branchId,
+          product_id: productId,
+          price: '9.2500',
+          updated_by_user_id: actorUserId,
+        },
+        {
+          branch_id: branchId,
+          product_id: multiIngredientProductId,
+          price: '3.00',
+          updated_by_user_id: actorUserId,
+        },
+        {
+          branch_id: branchId,
+          product_id: noRecipeProductId,
+          price: '5.00',
+          updated_by_user_id: actorUserId,
+        },
       ])
       .execute();
     await db
@@ -250,6 +281,10 @@ describe('sales routes (e2e)', () => {
         .deleteFrom('auth.branch_users')
         .where('user_id', 'in', userIds)
         .execute();
+      await db
+        .deleteFrom('branch_product_prices')
+        .where('product_id', 'in', productIds)
+        .execute();
       await db.deleteFrom('products').where('id', 'in', productIds).execute();
       await db
         .deleteFrom('stock_items')
@@ -277,32 +312,36 @@ describe('sales routes (e2e)', () => {
     const missingKey = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
-        items: [{ product_id: productId, quantity: '1' }],
+        items: [{ product_id: productId, price_revision: 1, quantity: '1' }],
       });
     const invalidQuantity = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
-        items: [{ product_id: productId, quantity: '1e-2' }],
+        items: [{ product_id: productId, price_revision: 1, quantity: '1e-2' }],
       });
     const duplicateProduct = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
         items: [
-          { product_id: productId, quantity: '1' },
-          { product_id: productId, quantity: '2' },
+          { product_id: productId, price_revision: 1, quantity: '1' },
+          { product_id: productId, price_revision: 1, quantity: '2' },
         ],
       });
     const unknownField = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
-        items: [{ product_id: productId, quantity: '1' }],
+        items: [{ product_id: productId, price_revision: 1, quantity: '1' }],
         total_amount: '0.01',
       });
 
@@ -312,11 +351,12 @@ describe('sales routes (e2e)', () => {
     expect(unknownField.status).toBe(400);
   });
 
-  it('posts exact sale snapshots, consumes stock once, and returns the same sale on retry', async () => {
+  it('posts exact sale snapshots, leaves inventory unchanged, and returns the same sale on retry', async () => {
     const idempotencyKey = randomUUID();
     const payload = {
+      service_type: 'TAKEAWAY',
       tender_method: 'cash',
-      items: [{ product_id: productId, quantity: '0.5000' }],
+      items: [{ product_id: productId, price_revision: 1, quantity: '0.5000' }],
     };
     const [first, retry] = await Promise.all([
       request(app.getHttpServer())
@@ -336,6 +376,7 @@ describe('sales routes (e2e)', () => {
       branch_id: branchId,
       cashier_user_id: actorUserId,
       status: 'COMPLETED',
+      service_type: 'TAKEAWAY',
       tender_method: 'cash',
       total_amount: '4.625',
       items: [
@@ -355,7 +396,7 @@ describe('sales routes (e2e)', () => {
         .where('branch_id', '=', branchId)
         .where('stock_item_id', '=', stockItemId)
         .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ quantity_on_hand: '4.9375' });
+    ).resolves.toMatchObject({ quantity_on_hand: '5.0000' });
 
     const movements = await db
       .selectFrom('inventory_movements')
@@ -363,18 +404,15 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE')
       .execute();
-    expect(movements).toHaveLength(1);
-    expect(movements[0]).toMatchObject({
-      quantity_delta: '-0.0625',
-      sale_item_consumption_id: expect.any(String),
-    });
+    expect(movements).toHaveLength(0);
 
     const changedRetry = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', idempotencyKey)
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'card',
-        items: [{ product_id: productId, quantity: '1' }],
+        items: [{ product_id: productId, price_revision: 1, quantity: '1' }],
       });
     expect(changedRetry.status).toBe(409);
 
@@ -392,7 +430,7 @@ describe('sales routes (e2e)', () => {
     expect(detail.body.items).toHaveLength(1);
   });
 
-  it('rolls back unavailable, recipe-less, and insufficient-stock sales', async () => {
+  it('rejects unavailable menus while accepting recipe-less and low-stock products', async () => {
     await db
       .updateTable('branch_products')
       .set({ is_available: false })
@@ -412,19 +450,26 @@ describe('sales routes (e2e)', () => {
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
-        items: [{ product_id: multiIngredientProductId, quantity: '1' }],
+        items: [
+          {
+            product_id: multiIngredientProductId,
+            price_revision: 1,
+            quantity: '1',
+          },
+        ],
       });
 
     expect(unavailable.status).toBe(409);
-    expect(noRecipe.status).toBe(409);
-    expect(insufficient.status).toBe(409);
+    expect(noRecipe.status).toBe(201);
+    expect(insufficient.status).toBe(201);
     const persisted = await db
       .selectFrom('sales')
       .select((eb) => eb.fn.countAll<number>().as('total'))
       .where('cashier_user_id', '=', actorUserId)
       .executeTakeFirstOrThrow();
-    expect(Number(persisted.total)).toBe(0);
+    expect(Number(persisted.total)).toBe(2);
     const movements = await db
       .selectFrom('inventory_movements')
       .select('id')
@@ -445,15 +490,20 @@ describe('sales routes (e2e)', () => {
     );
   });
 
-  it('prices multiple products and aggregates shared recipe stock exactly', async () => {
+  it('prices multiple products exactly without consuming recipe stock', async () => {
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
         items: [
-          { product_id: productId, quantity: '0.5000' },
-          { product_id: multiIngredientProductId, quantity: '2' },
+          { product_id: productId, price_revision: 1, quantity: '0.5000' },
+          {
+            product_id: multiIngredientProductId,
+            price_revision: 1,
+            quantity: '2',
+          },
         ],
       });
 
@@ -463,12 +513,14 @@ describe('sales routes (e2e)', () => {
       expect.arrayContaining([
         expect.objectContaining({
           product_id: productId,
+          price_revision: 1,
           quantity: '0.5',
           unit_price: '9.2500',
           line_total: '4.625',
         }),
         expect.objectContaining({
           product_id: multiIngredientProductId,
+          price_revision: 1,
           quantity: '2',
           unit_price: '3.00',
           line_total: '6',
@@ -484,8 +536,8 @@ describe('sales routes (e2e)', () => {
       .execute();
     expect(balances).toEqual(
       expect.arrayContaining([
-        { stock_item_id: stockItemId, quantity_on_hand: '4.5375' },
-        { stock_item_id: secondStockItemId, quantity_on_hand: '9.0000' },
+        { stock_item_id: stockItemId, quantity_on_hand: '5.0000' },
+        { stock_item_id: secondStockItemId, quantity_on_hand: '10.0000' },
       ]),
     );
 
@@ -495,24 +547,17 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE')
       .execute();
-    expect(movements).toHaveLength(3);
-    expect(movements).toEqual(
-      expect.arrayContaining([
-        { stock_item_id: stockItemId, quantity_delta: '-0.0625' },
-        { stock_item_id: stockItemId, quantity_delta: '-0.4' },
-        { stock_item_id: secondStockItemId, quantity_delta: '-1' },
-      ]),
-    );
+    expect(movements).toHaveLength(0);
   });
 
-  it('serializes competing sales so branch inventory cannot go negative', async () => {
+  it('records concurrent sales without changing branch inventory', async () => {
     await setStock('0.0625');
     const [first, second] = await Promise.all([
       postSale(randomUUID(), productId, '0.5'),
       postSale(randomUUID(), productId, '0.5'),
     ]);
     expect([first.status, second.status].sort((a, b) => a - b)).toEqual([
-      201, 409,
+      201, 201,
     ]);
     await expect(
       db
@@ -521,13 +566,13 @@ describe('sales routes (e2e)', () => {
         .where('branch_id', '=', branchId)
         .where('stock_item_id', '=', stockItemId)
         .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ quantity_on_hand: '0.0000' });
+    ).resolves.toMatchObject({ quantity_on_hand: '0.0625' });
     const sales = await db
       .selectFrom('sales')
       .select('id')
       .where('cashier_user_id', '=', actorUserId)
       .execute();
-    expect(sales).toHaveLength(1);
+    expect(sales).toHaveLength(2);
   });
 
   it('completes concurrent branch adjustments and sales without deadlock', async () => {
@@ -555,10 +600,10 @@ describe('sales routes (e2e)', () => {
       .where('branch_id', '=', branchId)
       .where('stock_item_id', '=', stockItemId)
       .executeTakeFirstOrThrow();
-    expect(balance.quantity_on_hand).toBe('4.5800');
+    expect(balance.quantity_on_hand).toBe('5.0800');
   }, 30000);
 
-  it('voids with a reason and posts one exact reversal, with idempotent retry', async () => {
+  it('voids financial sales without an inventory reversal, with idempotent retry', async () => {
     const saleKey = randomUUID();
     const sale = await postSale(saleKey, productId, '0.5');
     expect(sale.status).toBe(201);
@@ -609,18 +654,7 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .orderBy('created_at')
       .execute();
-    expect(movements).toEqual([
-      expect.objectContaining({
-        movement_type: 'SALE',
-        quantity_delta: '-0.0625',
-      }),
-      expect.objectContaining({
-        movement_type: 'SALE_VOID',
-        quantity_delta: '0.0625',
-        reason: 'Cashier entered the wrong item',
-        reversal_of_movement_id: expect.any(String),
-      }),
-    ]);
+    expect(movements).toEqual([]);
   });
 
   it('refuses to void a sale after its branch and business date report is approved', async () => {
@@ -712,73 +746,6 @@ describe('sales routes (e2e)', () => {
     ).resolves.toMatchObject({ status: 'COMPLETED' });
   });
 
-  it('does not partially void a sale when a consumption movement is missing', async () => {
-    const sale = await postSale(randomUUID(), multiIngredientProductId, '2');
-    expect(sale.status).toBe(201);
-
-    const missingMovementConsumption = db
-      .selectFrom('sale_item_consumptions as sic')
-      .innerJoin('sale_items as si', 'si.id', 'sic.sale_item_id')
-      .select('sic.id')
-      .where('si.sale_id', '=', sale.body.id as string)
-      .where('sic.stock_item_id', '=', secondStockItemId);
-    await db
-      .deleteFrom('inventory_movements')
-      .where('sale_item_consumption_id', 'in', missingMovementConsumption)
-      .execute();
-
-    const response = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/sales/${sale.body.id}/void`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ reason: 'Check the complete movement history first' });
-
-    expect(response.status).toBe(500);
-    await expect(
-      db
-        .selectFrom('sales')
-        .select('status')
-        .where('id', '=', sale.body.id as string)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ status: 'COMPLETED' });
-    await expect(
-      db
-        .selectFrom('inventory_movements')
-        .select('id')
-        .where('movement_type', '=', 'SALE_VOID')
-        .where('reversal_of_movement_id', 'in', (query) =>
-          query
-            .selectFrom('inventory_movements as original')
-            .innerJoin(
-              'sale_item_consumptions as consumption',
-              'consumption.id',
-              'original.sale_item_consumption_id',
-            )
-            .innerJoin(
-              'sale_items as sale_item',
-              'sale_item.id',
-              'consumption.sale_item_id',
-            )
-            .select('original.id')
-            .where('sale_item.sale_id', '=', sale.body.id as string)
-            .where('original.movement_type', '=', 'SALE'),
-        )
-        .execute(),
-    ).resolves.toHaveLength(0);
-    await expect(
-      db
-        .selectFrom('branch_inventory')
-        .select(['stock_item_id', 'quantity_on_hand'])
-        .where('branch_id', '=', branchId)
-        .where('stock_item_id', 'in', [stockItemId, secondStockItemId])
-        .execute(),
-    ).resolves.toEqual(
-      expect.arrayContaining([
-        { stock_item_id: stockItemId, quantity_on_hand: '4.6000' },
-        { stock_item_id: secondStockItemId, quantity_on_hand: '9.0000' },
-      ]),
-    );
-  });
-
   it('rejects a concurrently reused void key for a different sale', async () => {
     const firstSale = await postSale(randomUUID());
     const secondSale = await postSale(randomUUID());
@@ -814,7 +781,7 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE_VOID')
       .execute();
-    expect(reversals).toHaveLength(1);
+    expect(reversals).toHaveLength(0);
   });
 
   async function postSale(
@@ -826,8 +793,9 @@ describe('sales routes (e2e)', () => {
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', idempotencyKey)
       .send({
+        service_type: 'TAKEAWAY',
         tender_method: 'cash',
-        items: [{ product_id: selectedProductId, quantity }],
+        items: [{ product_id: selectedProductId, price_revision: 1, quantity }],
       });
   }
 

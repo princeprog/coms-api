@@ -1,5 +1,9 @@
 import '../src/config/load-env';
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import { sql, type Kysely } from 'kysely';
@@ -186,7 +190,7 @@ describe('dashboard routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ product_name: `Dashboard Product ${suffix}` })
+      .values({ price: '2.0000', product_name: `Dashboard Product ${suffix}` })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;
@@ -283,18 +287,38 @@ describe('dashboard routes (e2e)', () => {
         await sql`DELETE FROM dispatch_discrepancies WHERE dispatch_id = ${dispatchId}`.execute(
           db,
         );
-        await db.deleteFrom('dispatch_items').where('dispatch_id', '=', dispatchId).execute();
-        await db.deleteFrom('dispatches').where('id', '=', dispatchId).execute();
+        await db
+          .deleteFrom('dispatch_items')
+          .where('dispatch_id', '=', dispatchId)
+          .execute();
+        await db
+          .deleteFrom('dispatches')
+          .where('id', '=', dispatchId)
+          .execute();
       }
       if (reportIds.length)
-        await db.deleteFrom('daily_branch_reports').where('id', 'in', reportIds).execute();
+        await db
+          .deleteFrom('daily_branch_reports')
+          .where('id', 'in', reportIds)
+          .execute();
       if (saleIds.length) {
-        await db.deleteFrom('sale_events').where('sale_id', 'in', saleIds).execute();
-        await db.deleteFrom('sale_items').where('sale_id', 'in', saleIds).execute();
+        await db
+          .deleteFrom('sale_events')
+          .where('sale_id', 'in', saleIds)
+          .execute();
+        await db
+          .deleteFrom('sale_items')
+          .where('sale_id', 'in', saleIds)
+          .execute();
         await db.deleteFrom('sales').where('id', 'in', saleIds).execute();
       }
-      if (productId) await db.deleteFrom('products').where('id', '=', productId).execute();
-      if (stockItemId) await db.deleteFrom('stock_items').where('id', '=', stockItemId).execute();
+      if (productId)
+        await db.deleteFrom('products').where('id', '=', productId).execute();
+      if (stockItemId)
+        await db
+          .deleteFrom('stock_items')
+          .where('id', '=', stockItemId)
+          .execute();
       if (branchIds.length)
         await db.deleteFrom('branches').where('id', 'in', branchIds).execute();
       if (userIds.length)
@@ -308,7 +332,9 @@ describe('dashboard routes (e2e)', () => {
   it('serves assigned-branch metrics, Manila trends, and branch comparisons', async () => {
     activeUserId = branchManagerId;
     const branchDashboard = await request(app.getHttpServer())
-      .get(`/branches/${assignedBranchId}/dashboard?from=2026-09-22&to=2026-09-28`)
+      .get(
+        `/branches/${assignedBranchId}/dashboard?from=2026-09-22&to=2026-09-28`,
+      )
       .expect(200);
     expect(branchDashboard.body).toMatchObject({
       period: {
@@ -375,7 +401,9 @@ describe('dashboard routes (e2e)', () => {
 
     activeUserId = cashierId;
     await request(app.getHttpServer())
-      .get(`/branches/${assignedBranchId}/dashboard?from=2026-09-22&to=2026-09-28`)
+      .get(
+        `/branches/${assignedBranchId}/dashboard?from=2026-09-22&to=2026-09-28`,
+      )
       .expect(403);
 
     activeUserId = customUserId;
@@ -387,13 +415,18 @@ describe('dashboard routes (e2e)', () => {
       .values({ role_id: customRoleId, permission_id: globalGrant.id })
       .execute();
     const customGlobalOverview = await request(app.getHttpServer())
-      .get('/dashboard/overview?from=2026-09-22&to=2026-09-28&branch_id=' + assignedBranchId)
+      .get(
+        '/dashboard/overview?from=2026-09-22&to=2026-09-28&branch_id=' +
+          assignedBranchId,
+      )
       .expect(200);
     expect(customGlobalOverview.body.branches).toHaveLength(1);
 
     activeUserId = branchManagerId;
     const emptyPeriod = await request(app.getHttpServer())
-      .get(`/branches/${assignedBranchId}/dashboard?from=2026-09-15&to=2026-09-21`)
+      .get(
+        `/branches/${assignedBranchId}/dashboard?from=2026-09-15&to=2026-09-21`,
+      )
       .expect(200);
     expect(emptyPeriod.body.summary).toMatchObject({
       completed_sales_amount: '0',
@@ -403,12 +436,20 @@ describe('dashboard routes (e2e)', () => {
       submitted_reports_count: 0,
       approved_reports_count: 0,
     });
-    expect(emptyPeriod.body.sales_trend.every((day: { units_sold: string }) => day.units_sold === '0')).toBe(true);
+    expect(
+      emptyPeriod.body.sales_trend.every(
+        (day: { units_sold: string }) => day.units_sold === '0',
+      ),
+    ).toBe(true);
     await request(app.getHttpServer())
-      .get(`/branches/${assignedBranchId}/dashboard?from=2026-09-21&to=2026-09-28`)
+      .get(
+        `/branches/${assignedBranchId}/dashboard?from=2026-09-21&to=2026-09-28`,
+      )
       .expect(400);
     await request(app.getHttpServer())
-      .get(`/branches/${assignedBranchId}/dashboard?from=2026-09-31&to=2026-10-07`)
+      .get(
+        `/branches/${assignedBranchId}/dashboard?from=2026-09-31&to=2026-10-07`,
+      )
       .expect(400);
   });
 });

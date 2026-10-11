@@ -29,6 +29,7 @@ describe('branch product routes (e2e)', () => {
   let branchId: string;
   let otherBranchId: string;
   let productId: string;
+  let ingredientId: string;
   let inactiveProductId: string;
   let app: INestApplication<App>;
   let deniedApp: INestApplication<App>;
@@ -127,14 +128,47 @@ describe('branch product routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ product_name: `Branch Offer Product ${suffix}` })
+      .values({
+        price: '19.125',
+        product_name: `Branch Offer Product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;
     productIds.push(productId);
+    ingredientId = (
+      await db
+        .insertInto('stock_items')
+        .values({
+          stock_item_name: 'Offer ingredient ' + suffix,
+          usage_types: ['INGREDIENT'],
+          category: 'Other',
+          unit: 'pcs',
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await db
+      .insertInto('product_ingredients')
+      .values({
+        product_id: productId,
+        stock_item_id: ingredientId,
+        quantity_required: '1',
+      })
+      .execute();
+    await db
+      .insertInto('branch_product_prices')
+      .values({
+        branch_id: branchId,
+        product_id: productId,
+        price: '149.5',
+        updated_by_user_id: actorUserId,
+      })
+      .execute();
     const inactiveProduct = await db
       .insertInto('products')
       .values({
+        price: '19.125',
         product_name: `Inactive Offer Product ${suffix}`,
         is_active: false,
       })
@@ -155,8 +189,27 @@ describe('branch product routes (e2e)', () => {
         .deleteFrom('branch_products')
         .where('branch_id', 'in', branchIds)
         .execute();
+    if (db && productIds.length) {
+      await db
+        .deleteFrom('branch_product_prices')
+        .where('product_id', 'in', productIds)
+        .execute();
+      await db
+        .deleteFrom('product_ingredients')
+        .where('product_id', 'in', productIds)
+        .execute();
+    }
     if (db && productIds.length)
-      await db.deleteFrom('products').where('id', 'in', productIds).execute();
+      await db
+        .deleteFrom('branch_product_prices')
+        .where('product_id', 'in', productIds)
+        .execute();
+    await db.deleteFrom('products').where('id', 'in', productIds).execute();
+    if (db && ingredientId)
+      await db
+        .deleteFrom('stock_items')
+        .where('id', '=', ingredientId)
+        .execute();
     if (db && branchIds.length)
       await db.deleteFrom('branches').where('id', 'in', branchIds).execute();
     if (db && userIds.length)
@@ -180,111 +233,71 @@ describe('branch product routes (e2e)', () => {
     expect(outOfScope.body.message).toBe('Branch access required');
   });
 
-  it('validates branch and product ids, pagination, exact decimal prices, and availability', async () => {
-    const invalidBranch = await request(app.getHttpServer()).get(
-      '/branches/not-a-uuid/products',
-    );
-    const invalidProduct = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products/not-a-uuid`,
-    );
-    const invalidPage = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products?page=0`,
-    );
-    const invalidAvailabilityFilter = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products?is_available=yes`,
-    );
-    const negativePrice = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: productId, price: '-1' });
-    const exponentPrice = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: productId, price: '1e2' });
-    const unknownField = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: productId, price: '1.25', extra: true });
-    const invalidAvailability = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products/${productId}/availability`)
-      .send({ is_available: 'true' });
-
-    expect(invalidBranch.status).toBe(400);
-    expect(invalidProduct.status).toBe(400);
-    expect(invalidPage.status).toBe(400);
-    expect(invalidAvailabilityFilter.status).toBe(400);
-    expect(negativePrice.status).toBe(400);
-    expect(exponentPrice.status).toBe(400);
-    expect(unknownField.status).toBe(400);
-    expect(invalidAvailability.status).toBe(400);
+  it('validates branch and product ids and pagination on reads', async () => {
+    expect(
+      (await request(app.getHttpServer()).get('/branches/bad-id/products'))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app.getHttpServer()).get(
+          `/branches/${branchId}/products?page=0`,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app.getHttpServer()).get(
+          `/branches/${branchId}/products/bad-id`,
+        )
+      ).status,
+    ).toBe(400);
   });
-
-  it('creates, reads, searches, and updates a branch offering with exact price strings', async () => {
-    const created = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: productId, price: '149.5000' });
-    expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({
-      branch_id: branchId,
-      product_id: productId,
-      price: '149.5000',
-      is_available: true,
-      product_name: `Branch Offer Product ${suffix}`,
-      product_is_active: true,
-    });
-
-    const duplicate = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: productId, price: '150' });
-    expect(duplicate.status).toBe(409);
-
-    const detail = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products/${productId}`,
-    );
-    expect(detail.status).toBe(200);
-    expect(detail.body.price).toBe('149.5000');
-
-    const listed = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products?search=${encodeURIComponent(suffix)}&is_available=true&page=1&page_size=10`,
-    );
-    expect(listed.status).toBe(200);
-    expect(listed.body.total).toBe(1);
-    expect(listed.body.items[0].product_id).toBe(productId);
-
-    const updated = await request(app.getHttpServer())
-      .patch(`/branches/${branchId}/products/${productId}`)
-      .send({ price: '152.75' });
-    expect(updated.status).toBe(200);
-    expect(updated.body.price).toBe('152.75');
+  it('rejects menu mutations from custom staff with legacy grants', async () => {
+    const endpoint = `/branches/${branchId}/products`;
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post(endpoint)
+          .send({ product_id: productId, service_types: ['TAKEAWAY'] })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post(`${endpoint}/${productId}/availability`)
+          .send({ is_available: true })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .patch(`${endpoint}/${productId}/services`)
+          .send({ service_types: ['TAKEAWAY'] })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .patch(`${endpoint}/${productId}`)
+          .send({ price: '1', expected_revision: 1 })
+      ).status,
+    ).toBe(404);
   });
-
-  it('changes availability through its separately permissioned transition', async () => {
-    const unavailable = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products/${productId}/availability`)
-      .send({ is_available: false });
-    expect(unavailable.status).toBe(201);
-    expect(unavailable.body.is_available).toBe(false);
-
-    const availableList = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products?is_available=true`,
+  it('returns a scoped, paginated menu and missing offerings as not found', async () => {
+    const result = await request(app.getHttpServer()).get(
+      `/branches/${branchId}/products?search=missing`,
     );
-    expect(availableList.body.total).toBe(0);
-
-    const available = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products/${productId}/availability`)
-      .send({ is_available: true });
-    expect(available.status).toBe(201);
-    expect(available.body.is_available).toBe(true);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ items: [], total: 0, page: 1 });
+    expect(
+      (
+        await request(app.getHttpServer()).get(
+          `/branches/${branchId}/products/${randomUUID()}`,
+        )
+      ).status,
+    ).toBe(404);
   });
-
-  it('requires active products for new offers and returns missing offers as not found', async () => {
-    const inactiveProduct = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/products`)
-      .send({ product_id: inactiveProductId, price: '10' });
-    const missing = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/products/${randomUUID()}`,
-    );
-    expect(inactiveProduct.status).toBe(409);
-    expect(missing.status).toBe(404);
-  });
-
   async function createUser(roleId: string, label: string): Promise<string> {
     const user = await db
       .insertInto('auth.users')

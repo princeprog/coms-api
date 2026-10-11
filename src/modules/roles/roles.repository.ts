@@ -1,3 +1,4 @@
+import { EDITABLE_PERMISSION_KEYS } from '../access-control/permission-catalog';
 import {
   ConflictException,
   ForbiddenException,
@@ -43,6 +44,10 @@ export class RolesRepository {
     ]);
     const permissionsByRole = new Map<string, string[]>();
     for (const grant of grants) {
+      if (
+        !EDITABLE_PERMISSION_KEYS.has(`${grant.module_key}.${grant.action_key}`)
+      )
+        continue;
       const keys = permissionsByRole.get(grant.role_id) ?? [];
       keys.push(`${grant.module_key}.${grant.action_key}`);
       permissionsByRole.set(grant.role_id, keys);
@@ -200,6 +205,16 @@ export class RolesRepository {
     await trx
       .deleteFrom('auth.role_permissions')
       .where('role_id', '=', roleId)
+      .where(
+        'permission_id',
+        'in',
+        trx
+          .selectFrom('auth.permissions')
+          .select('id')
+          .where(sql<string>`module_key || '.' || action_key`, 'in', [
+            ...EDITABLE_PERMISSION_KEYS,
+          ]),
+      )
       .execute();
     if (selected.length)
       await trx
