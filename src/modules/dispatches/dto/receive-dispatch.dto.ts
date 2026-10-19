@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsOptional,
   IsString,
   IsUUID,
   Matches,
@@ -27,4 +28,9 @@ export class ReceiveDispatchDto {
   @ValidateNested({ each: true })
   @Type(() => ReceiveDispatchItemDto)
   items!: ReceiveDispatchItemDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 }

@@ -1,4 +1,5 @@
 import './config/load-env';
+import { ProductCategoriesModule } from './modules/product-categories/product-categories.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 
 import { Module } from '@nestjs/common';
@@ -25,6 +26,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 @Module({
   imports: [
     PaymentMethodsModule,
+    ProductCategoriesModule,
     // Distributed tracing, auto-correlated logs, request/job metrics, error
     // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
     ObserveModule.forRoot({

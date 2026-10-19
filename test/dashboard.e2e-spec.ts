@@ -1,3 +1,4 @@
+import { testProductCategoryId } from './product-category-fixture';
 import '../src/config/load-env';
 import {
   ExecutionContext,
@@ -190,7 +191,11 @@ describe('dashboard routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ price: '2.0000', product_name: `Dashboard Product ${suffix}` })
+      .values({
+        price: '2.0000',
+        category_id: testProductCategoryId,
+        product_name: `Dashboard Product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;

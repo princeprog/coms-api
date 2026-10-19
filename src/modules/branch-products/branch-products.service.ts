@@ -14,6 +14,7 @@ export class BranchProductsService {
       sort_by: query.sort_by ?? 'product_name',
       sort_order: query.sort_order ?? 'asc',
       service_type: query.service_type,
+      category_id: query.category_id,
       eligible_only: query.eligible_only,
       page: query.page,
       page_size: query.page_size,
@@ -22,6 +23,10 @@ export class BranchProductsService {
         ? {}
         : { is_available: query.is_available }),
     });
+  }
+
+  categories(branchId: string, serviceType?: 'DINE_IN' | 'TAKEAWAY') {
+    return this.repository.categories(branchId, serviceType);
   }
 
   get(branchId: string, productId: string) {

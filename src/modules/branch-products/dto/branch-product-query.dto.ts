@@ -3,6 +3,7 @@ import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsUUID,
   IsIn,
   IsOptional,
   IsString,
@@ -10,6 +11,12 @@ import {
 } from 'class-validator';
 
 export class BranchProductQueryDto extends PaginationQueryDto {
+  override page_size = 10;
+
+  @IsOptional()
+  @IsUUID()
+  category_id?: string;
+
   @IsOptional() @IsIn(['DINE_IN', 'TAKEAWAY']) service_type?:
     'DINE_IN' | 'TAKEAWAY';
   @IsOptional()

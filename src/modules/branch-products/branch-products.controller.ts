@@ -17,6 +17,7 @@ import {
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { BranchProductCategoryQueryDto } from './dto/branch-product-category-query.dto';
 import { BranchProductQueryDto } from './dto/branch-product-query.dto';
 import { CreateBranchProductDto } from './dto/create-branch-product.dto';
 import { UpdateBranchProductAvailabilityDto } from './dto/update-branch-product-availability.dto';
@@ -39,6 +40,15 @@ export class BranchProductsController {
     @Query() query: BranchProductQueryDto,
   ) {
     return this.service.list(branchId, query);
+  }
+
+  @Get('categories')
+  @RequirePermission('branch_products.read')
+  categories(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query() query: BranchProductCategoryQueryDto,
+  ) {
+    return this.service.categories(branchId, query.service_type);
   }
 
   @Get(':productId')

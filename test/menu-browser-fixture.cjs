@@ -230,6 +230,7 @@ async function start() {
         .insertInto('products')
         .values({
           product_name,
+          category_id: db.selectFrom('product_categories').select('id').where('name', '=', 'Rice meals'),
           description: 'Synthetic browser fixture',
           price: label === 'meal' ? '120.001' : '135.005',
           recipe_revision: 1,

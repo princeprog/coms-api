@@ -1,3 +1,4 @@
+import { testProductCategoryId } from './product-category-fixture';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { parse } from 'dotenv';
@@ -58,6 +59,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .values(
           Array.from({ length: 65 }, (_, index) => ({
             price: '1.00',
+            category_id: testProductCategoryId,
             product_name: `Product ${String(index + 1).padStart(2, '0')}`,
             description: null,
           })),
@@ -67,6 +69,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .insertInto('products')
         .values({
           price: '1.00',
+          category_id: testProductCategoryId,
           product_name: 'Special_% product',
           description: null,
         })

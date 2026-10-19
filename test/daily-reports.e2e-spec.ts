@@ -1,3 +1,4 @@
+import { testProductCategoryId } from './product-category-fixture';
 import '../src/config/load-env';
 import {
   ExecutionContext,
@@ -296,6 +297,7 @@ describe('daily report routes (e2e)', () => {
       .insertInto('products')
       .values({
         price: '2.0000',
+        category_id: testProductCategoryId,
         product_name: `Daily Report Test Product ${suffix}`,
       })
       .returning('id')
@@ -982,14 +984,15 @@ describe('daily report routes (e2e)', () => {
         items: [{ stock_item_id: flowStockItemId, quantity_dispatched: '1' }],
       })
       .expect(403);
-    activeActorId = reporterId;
+    activeActorId = reviewerId;
 
     const postedDispatch = await request(app.getHttpServer())
       .post(`/dispatches/${flowDispatchId}/dispatch`)
       .set('Idempotency-Key', randomUUID())
-      .send({})
+      .send({ delivered_by_name: 'Report flow courier' })
       .expect(201);
     expect(postedDispatch.body.status).toBe('IN_TRANSIT');
+    activeActorId = reporterId;
 
     const receivedDispatch = await request(app.getHttpServer())
       .post(`/dispatches/${flowDispatchId}/receive`)

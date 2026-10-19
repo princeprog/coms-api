@@ -19,6 +19,9 @@ const trimText = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 export class UpdateProductDto {
   @ValidateIf((_o, v) => v !== undefined)
+  @IsUUID()
+  category_id?: string;
+  @ValidateIf((_o, v) => v !== undefined)
   @Transform(trimText)
   @IsString()
   @MinLength(2)

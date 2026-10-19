@@ -10,6 +10,10 @@ export type CreateDraftInput = {
   idempotency_key: string;
 };
 
+export type SendDispatchInput = CreateDraftInput & {
+  delivered_by_name: string;
+};
+
 export type ScopedActionInput = {
   id: string;
   actor_user_id: string;
@@ -17,18 +21,30 @@ export type ScopedActionInput = {
   branch_ids: string[] | null;
 };
 
+export type SendDraftInput = ScopedActionInput & { delivered_by_name: string };
+
 export type DispatchItemInput = {
   dispatch_item_id: string;
   quantity: string;
 };
 
-export type ReceiveInput = ScopedActionInput & { items: DispatchItemInput[] };
+export const DISPATCH_RESOLUTION_OUTCOMES = [
+  'LOST',
+  'NOT_LOADED',
+  'SURPLUS',
+] as const;
+export type DispatchResolutionOutcome =
+  (typeof DISPATCH_RESOLUTION_OUTCOMES)[number];
+
+export type ReceiveInput = ScopedActionInput & {
+  items: DispatchItemInput[];
+  note: string | null;
+};
 export type CloseShortageInput = ScopedActionInput & {
+  outcome: DispatchResolutionOutcome;
   reason: string;
   items: DispatchItemInput[];
 };
-export type ReportDiscrepancyInput = ScopedActionInput & { note: string };
-export type RequestRecountInput = ScopedActionInput & { reason: string };
 
 export type DispatchEvent = {
   dispatch_id: string;

@@ -16,14 +16,45 @@ import type { DispatchQueryDto } from './dto/dispatch-query.dto';
 import type {
   DispatchDbExecutor,
   DispatchEvent,
-  DispatchItemInput,
   DispatchStatus,
   ScopedActionInput,
 } from './dispatches.types';
-import { normalizeDecimal } from './dispatches.repository.utils';
+import {
+  compareDecimal,
+  normalizeDecimal,
+} from './dispatches.repository.utils';
 import { containsSearchPattern } from '../../common/utils/list-filters';
 
 type DbExecutor = DispatchDbExecutor;
+
+// Each fragment reads one dispatch line aliased as `di`.
+const RECEIVED_SUM = sql`coalesce((
+  SELECT sum(dri.quantity_received)
+  FROM dispatch_receipt_items AS dri
+  WHERE dri.dispatch_item_id = di.id
+), 0)`;
+const SHORTAGE_SUM = sql`coalesce((
+  SELECT sum(dsci.quantity_closed)
+  FROM dispatch_shortage_closure_items AS dsci
+  JOIN dispatch_shortage_closures AS dsc ON dsc.id = dsci.shortage_closure_id
+  WHERE dsci.dispatch_item_id = di.id AND dsc.outcome <> 'SURPLUS'
+), 0)`;
+const SURPLUS_SUM = sql`coalesce((
+  SELECT sum(dsci.quantity_closed)
+  FROM dispatch_shortage_closure_items AS dsci
+  JOIN dispatch_shortage_closures AS dsc ON dsc.id = dsci.shortage_closure_id
+  WHERE dsci.dispatch_item_id = di.id AND dsc.outcome = 'SURPLUS'
+), 0)`;
+// Positive means stock is still missing; negative means unconfirmed surplus.
+const OUTSTANDING = sql`(di.quantity_dispatched - ${RECEIVED_SUM} - ${SHORTAGE_SUM} + ${SURPLUS_SUM})`;
+
+export type DispatchOutstandingLine = {
+  id: string;
+  stock_item_id: string;
+  stock_item_name: string;
+  unit: string;
+  quantity_outstanding: string;
+};
 
 @Injectable()
 export class DispatchesRepository {
@@ -58,6 +89,7 @@ export class DispatchesRepository {
         'd.dispatched_by_user_id',
         'dispatcher.full_name as dispatched_by_name',
         'd.dispatched_at',
+        'd.counted_at',
         'd.created_at',
         'd.updated_at',
         sql<string | null>`(
@@ -162,6 +194,7 @@ export class DispatchesRepository {
         'dispatcher.id',
         'd.dispatched_by_user_id',
       )
+      .leftJoin('auth.users as counter', 'counter.id', 'd.counted_by_user_id')
       .select([
         'd.id',
         'd.branch_id',
@@ -173,12 +206,18 @@ export class DispatchesRepository {
         'd.dispatched_by_user_id',
         'dispatcher.full_name as dispatched_by_name',
         'd.dispatched_at',
+        'd.delivered_by_name',
+        'd.counted_by_user_id',
+        'counter.full_name as counted_by_name',
+        'd.counted_at',
         'd.created_at',
         'd.updated_at',
       ])
       .where('d.id', '=', id)
       .executeTakeFirst();
     if (!dispatch) return undefined;
+    const draft = sql.lit(dispatch.status === 'DRAFT');
+    const counted = sql.lit(dispatch.counted_at !== null);
 
     const [
       items,
@@ -197,14 +236,17 @@ export class DispatchesRepository {
           'si.stock_item_name',
           'si.unit',
           sql<string>`di.quantity_dispatched::text`.as('quantity_dispatched'),
-          sql<string>`coalesce((select sum(dri.quantity_received) from dispatch_receipt_items as dri where dri.dispatch_item_id = di.id), 0)::text`.as(
-            'quantity_received',
+          sql<string>`${RECEIVED_SUM}::text`.as('quantity_received'),
+          sql<string>`${SHORTAGE_SUM}::text`.as('quantity_shortage_closed'),
+          sql<string>`${SURPLUS_SUM}::text`.as('quantity_surplus_closed'),
+          sql<string>`(CASE WHEN ${draft} THEN 0 ELSE ${OUTSTANDING} END)::text`.as(
+            'quantity_outstanding',
           ),
-          sql<string>`coalesce((select sum(dsci.quantity_closed) from dispatch_shortage_closure_items as dsci where dsci.dispatch_item_id = di.id), 0)::text`.as(
-            'quantity_shortage_closed',
-          ),
-          sql<string>`(CASE WHEN ${dispatch.status} = 'DRAFT' THEN 0 ELSE di.quantity_dispatched - coalesce((select sum(dri.quantity_received) from dispatch_receipt_items as dri where dri.dispatch_item_id = di.id), 0) - coalesce((select sum(dsci.quantity_closed) from dispatch_shortage_closure_items as dsci where dsci.dispatch_item_id = di.id), 0) END)::text`.as(
+          sql<string>`(CASE WHEN ${draft} OR ${counted} THEN 0 ELSE ${OUTSTANDING} END)::text`.as(
             'quantity_in_transit',
+          ),
+          sql<string>`(${RECEIVED_SUM} - di.quantity_dispatched)::text`.as(
+            'quantity_variance',
           ),
         ])
         .where('di.dispatch_id', '=', id)
@@ -284,7 +326,17 @@ export class DispatchesRepository {
         quantity_shortage_closed: normalizeDecimal(
           item.quantity_shortage_closed,
         ),
+        quantity_surplus_closed: normalizeDecimal(item.quantity_surplus_closed),
+        quantity_outstanding: normalizeDecimal(item.quantity_outstanding),
         quantity_in_transit: normalizeDecimal(item.quantity_in_transit),
+        quantity_variance: dispatch.counted_at
+          ? normalizeDecimal(item.quantity_variance)
+          : null,
+        // Stays visible to receivers so they know which lines to count.
+        awaiting_count:
+          dispatch.status !== 'DRAFT' &&
+          dispatch.counted_at === null &&
+          compareDecimal(item.quantity_outstanding, '0') > 0,
       })),
       receipts: receipts.map((receipt) => ({
         ...receipt,
@@ -325,6 +377,7 @@ export class DispatchesRepository {
         'dr.id',
         'dr.received_by_user_id',
         'receiver.full_name as receiver_name',
+        'dr.note',
         'dr.created_at',
         'dri.id as receipt_item_id',
         'di.id as dispatch_item_id',
@@ -345,6 +398,7 @@ export class DispatchesRepository {
         id: string;
         received_by_user_id: string;
         receiver_name: string;
+        note: string | null;
         created_at: Date;
         items: Array<{
           receipt_item_id: string;
@@ -363,6 +417,7 @@ export class DispatchesRepository {
           id: row.id,
           received_by_user_id: row.received_by_user_id,
           receiver_name: row.receiver_name,
+          note: row.note,
           created_at: row.created_at,
           items: [],
         };
@@ -374,7 +429,7 @@ export class DispatchesRepository {
         row.stock_item_id &&
         row.stock_item_name &&
         row.unit &&
-        row.quantity_received
+        row.quantity_received !== null
       )
         receipt.items.push({
           receipt_item_id: row.receipt_item_id,
@@ -403,6 +458,7 @@ export class DispatchesRepository {
         'dsc.id',
         'dsc.closed_by_user_id',
         'closer.full_name as closer_name',
+        'dsc.outcome',
         'dsc.reason',
         'dsc.created_at',
         'dsci.id as closure_item_id',
@@ -424,6 +480,7 @@ export class DispatchesRepository {
         id: string;
         closed_by_user_id: string;
         closer_name: string;
+        outcome: string;
         reason: string;
         created_at: Date;
         items: Array<{
@@ -443,6 +500,7 @@ export class DispatchesRepository {
           id: row.id,
           closed_by_user_id: row.closed_by_user_id,
           closer_name: row.closer_name,
+          outcome: row.outcome,
           reason: row.reason,
           created_at: row.created_at,
           items: [],
@@ -479,28 +537,35 @@ export class DispatchesRepository {
       .execute();
   }
 
-  async hasRemainingQuantity(
+  async loadOutstanding(
     executor: DbExecutor,
-    item: DispatchItemInput,
-  ): Promise<boolean> {
-    const amount = item.quantity;
-    const remaining = await sql<{ allowed: boolean }>`
-      SELECT di.quantity_dispatched
-        - coalesce((
-          SELECT sum(dri.quantity_received)
-          FROM dispatch_receipt_items AS dri
-          WHERE dri.dispatch_item_id = di.id
-        ), 0)
-        - coalesce((
-          SELECT sum(dsci.quantity_closed)
-          FROM dispatch_shortage_closure_items AS dsci
-          WHERE dsci.dispatch_item_id = di.id
-        ), 0)
-        >= ${amount}::numeric AS allowed
+    dispatchId: string,
+  ): Promise<DispatchOutstandingLine[]> {
+    const result = await sql<DispatchOutstandingLine>`
+      SELECT di.id, di.stock_item_id, si.stock_item_name, si.unit,
+             ${OUTSTANDING}::text AS quantity_outstanding
       FROM dispatch_items AS di
-      WHERE di.id = ${item.dispatch_item_id}
+      JOIN stock_items AS si ON si.id = di.stock_item_id
+      WHERE di.dispatch_id = ${dispatchId}
+      ORDER BY di.stock_item_id, di.id
     `.execute(executor);
-    return remaining.rows[0]?.allowed === true;
+    return result.rows.map((row) => ({
+      ...row,
+      quantity_outstanding: normalizeDecimal(row.quantity_outstanding),
+    }));
+  }
+
+  async hasOutstanding(
+    executor: DbExecutor,
+    dispatchId: string,
+  ): Promise<boolean> {
+    const result = await sql<{ has_outstanding: boolean }>`
+      SELECT EXISTS (
+        SELECT 1 FROM dispatch_items AS di
+        WHERE di.dispatch_id = ${dispatchId} AND ${OUTSTANDING} <> 0
+      ) AS has_outstanding
+    `.execute(executor);
+    return result.rows[0]?.has_outstanding === true;
   }
 
   async refreshStatus(
@@ -508,43 +573,30 @@ export class DispatchesRepository {
     dispatchId: string,
   ): Promise<void> {
     const summary = await sql<{
-      all_resolved: boolean;
+      all_settled: boolean;
       has_receipts: boolean;
-      has_shortages: boolean;
+      has_closures: boolean;
+      counted: boolean;
     }>`
       SELECT
-        bool_and(
-          di.quantity_dispatched =
-            coalesce((
-              SELECT sum(dri.quantity_received)
-              FROM dispatch_receipt_items AS dri
-              WHERE dri.dispatch_item_id = di.id
-            ), 0)
-            + coalesce((
-              SELECT sum(dsci.quantity_closed)
-              FROM dispatch_shortage_closure_items AS dsci
-              WHERE dsci.dispatch_item_id = di.id
-            ), 0)
-        ) AS all_resolved,
-        bool_or(coalesce((
-          SELECT sum(dri.quantity_received)
-          FROM dispatch_receipt_items AS dri
-          WHERE dri.dispatch_item_id = di.id
-        ), 0) > 0) AS has_receipts,
-        bool_or(coalesce((
-          SELECT sum(dsci.quantity_closed)
-          FROM dispatch_shortage_closure_items AS dsci
-          WHERE dsci.dispatch_item_id = di.id
-        ), 0) > 0) AS has_shortages
+        bool_and(${OUTSTANDING} = 0) AS all_settled,
+        bool_or(${RECEIVED_SUM} > 0) AS has_receipts,
+        bool_or(${SHORTAGE_SUM} + ${SURPLUS_SUM} > 0) AS has_closures,
+        bool_or(d.counted_at IS NOT NULL) AS counted
       FROM dispatch_items AS di
+      JOIN dispatches AS d ON d.id = di.dispatch_id
       WHERE di.dispatch_id = ${dispatchId}
     `.execute(transaction);
     const state = summary.rows[0];
     if (!state) throw new BadRequestException('Dispatch has no items');
     let status: DispatchStatus;
-    if (state.all_resolved)
-      status = state.has_shortages ? 'CLOSED_WITH_SHORTAGE' : 'RECEIVED';
-    else status = state.has_receipts ? 'PARTIALLY_RECEIVED' : 'IN_TRANSIT';
+    if (state.all_settled)
+      status = state.has_closures ? 'CLOSED_WITH_SHORTAGE' : 'RECEIVED';
+    else
+      status =
+        state.counted || state.has_receipts
+          ? 'PARTIALLY_RECEIVED'
+          : 'IN_TRANSIT';
     await transaction
       .updateTable('dispatches')
       .set({ status, updated_at: sql<Date>`now()` })
@@ -559,7 +611,14 @@ export class DispatchesRepository {
   ) {
     let query = transaction
       .selectFrom('dispatches')
-      .select(['id', 'branch_id', 'status'])
+      .select([
+        'id',
+        'branch_id',
+        'status',
+        'dispatched_by_user_id',
+        'counted_at',
+        'counted_by_user_id',
+      ])
       .where('id', '=', id);
     if (branchIds !== null) query = query.where('branch_id', 'in', branchIds);
     return query.forUpdate().executeTakeFirst();

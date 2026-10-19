@@ -4,6 +4,8 @@ import { parseBooleanFilter } from '../../../common/utils/list-filters';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class InventoryQueryDto extends PaginationQueryDto {
+  override page_size = 10;
+
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()

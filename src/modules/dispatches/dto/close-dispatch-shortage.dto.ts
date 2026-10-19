@@ -3,12 +3,15 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsString,
   IsUUID,
   Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
+import { DISPATCH_RESOLUTION_OUTCOMES } from '../dispatches.types';
+import type { DispatchResolutionOutcome } from '../dispatches.types';
 
 export class CloseDispatchShortageItemDto {
   @IsUUID()
@@ -21,6 +24,9 @@ export class CloseDispatchShortageItemDto {
 }
 
 export class CloseDispatchShortageDto {
+  @IsIn(DISPATCH_RESOLUTION_OUTCOMES)
+  outcome!: DispatchResolutionOutcome;
+
   @IsString()
   @MaxLength(500)
   @Matches(/\S/)

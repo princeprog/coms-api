@@ -19,11 +19,13 @@ import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import type { AccessContext } from '../access-control/access-control.types';
 import { CloseDispatchShortageDto } from './dto/close-dispatch-shortage.dto';
-import { CreateDispatchDto } from './dto/create-dispatch.dto';
+import {
+  CreateDispatchDto,
+  SendDispatchDraftDto,
+  SendDispatchDto,
+} from './dto/create-dispatch.dto';
 import { DispatchQueryDto } from './dto/dispatch-query.dto';
 import { ReceiveDispatchDto } from './dto/receive-dispatch.dto';
-import { ReportDispatchDiscrepancyDto } from './dto/report-dispatch-discrepancy.dto';
-import { RequestDispatchRecountDto } from './dto/request-dispatch-recount.dto';
 import { DispatchesService } from './dispatches.service';
 
 @Controller('dispatches')
@@ -63,7 +65,7 @@ export class DispatchesController {
   @RequirePermission('dispatches.dispatch')
   @RequireBranchScope()
   send(
-    @Body() dto: CreateDispatchDto,
+    @Body() dto: SendDispatchDto,
     @CurrentAccessContext() access: AccessContext,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
@@ -74,10 +76,11 @@ export class DispatchesController {
   @RequirePermission('dispatches.dispatch')
   dispatch(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendDispatchDraftDto,
     @CurrentAccessContext() access: AccessContext,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
-    return this.service.dispatch(id, access, idempotencyKey);
+    return this.service.dispatch(id, dto, access, idempotencyKey);
   }
 
   @Post(':id/receive')
@@ -89,28 +92,6 @@ export class DispatchesController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.service.receive(id, dto, access, idempotencyKey);
-  }
-
-  @Post(':id/discrepancies')
-  @RequirePermission('dispatches.receive')
-  reportDiscrepancy(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReportDispatchDiscrepancyDto,
-    @CurrentAccessContext() access: AccessContext,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-  ) {
-    return this.service.reportDiscrepancy(id, dto, access, idempotencyKey);
-  }
-
-  @Post(':id/discrepancies/recount')
-  @RequirePermission('dispatches.reconcile')
-  requestRecount(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RequestDispatchRecountDto,
-    @CurrentAccessContext() access: AccessContext,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-  ) {
-    return this.service.requestRecount(id, dto, access, idempotencyKey);
   }
 
   @Post(':id/shortage-closures')

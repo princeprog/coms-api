@@ -33,6 +33,7 @@ describe('dispatch routes (e2e)', () => {
   let otherBranchId: string;
   let actorUserId: string;
   let deniedUserId: string;
+  let receiverUserId: string;
   let currentUserId: string;
   let branchIds: string[] = [];
   let sendPermissions: AccessContext['permissions'] = [
@@ -132,6 +133,20 @@ describe('dispatch routes (e2e)', () => {
         .executeTakeFirstOrThrow()
     ).id;
     userIdsToDelete.push(deniedUserId);
+    receiverUserId = (
+      await db
+        .insertInto('auth.users')
+        .values({
+          email: `dispatch-receiver-${suffix}@example.com`,
+          full_name: 'Dispatch receiver test',
+          contact_number: `DR-${suffix.slice(0, 16)}`,
+          hashed_password: 'test-only-hash',
+          role_id: cashierRole.id,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    userIdsToDelete.push(receiverUserId);
     branchId = await createBranch(`Dispatch ${suffix}`);
     otherBranchId = await createBranch(`Other Dispatch ${suffix}`);
     branchIds = [branchId];
@@ -305,7 +320,7 @@ describe('dispatch routes (e2e)', () => {
     expect(response.body.message).toBe('Permission required');
   });
 
-  it('validates idempotency keys, positive unique receipt lines, and shortage reasons', async () => {
+  it('validates idempotency keys, delivery names, unique count lines, and resolution input', async () => {
     const validPayload = dispatchPayload([
       { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
     ]);
@@ -337,12 +352,22 @@ describe('dispatch routes (e2e)', () => {
     expect(invalidCreateKey.status).toBe(400);
     expect(duplicateStockItem.status).toBe(400);
     expect(zeroDispatchQuantity.status).toBe(400);
+    const blankDeliveryName = await request(app.getHttpServer())
+      .post('/dispatches/send')
+      .set('Idempotency-Key', randomUUID())
+      .send({ ...validPayload, delivered_by_name: '   ' });
+    const missingDeliveryName = await request(app.getHttpServer())
+      .post('/dispatches/send')
+      .set('Idempotency-Key', randomUUID())
+      .send(validPayload);
+    expect(blankDeliveryName.status).toBe(400);
+    expect(missingDeliveryName.status).toBe(400);
 
     const invalidReceipt = await request(app.getHttpServer())
       .post(`/dispatches/${randomUUID()}/receive`)
       .set('Idempotency-Key', randomUUID())
       .send({
-        items: [{ dispatch_item_id: randomUUID(), quantity_received: '0' }],
+        items: [{ dispatch_item_id: randomUUID(), quantity_received: '-1' }],
       });
     const duplicateItemId = randomUUID();
     const duplicateReceiptLines = await request(app.getHttpServer())
@@ -358,12 +383,21 @@ describe('dispatch routes (e2e)', () => {
       .post(`/dispatches/${randomUUID()}/shortage-closures`)
       .set('Idempotency-Key', randomUUID())
       .send({
+        outcome: 'LOST',
         reason: '   ',
+        items: [{ dispatch_item_id: randomUUID(), quantity_closed: '1' }],
+      });
+    const missingOutcome = await request(app.getHttpServer())
+      .post(`/dispatches/${randomUUID()}/shortage-closures`)
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        reason: 'Outcome is required.',
         items: [{ dispatch_item_id: randomUUID(), quantity_closed: '1' }],
       });
     expect(invalidReceipt.status).toBe(400);
     expect(duplicateReceiptLines.status).toBe(400);
     expect(blankReason.status).toBe(400);
+    expect(missingOutcome.status).toBe(400);
   });
 
   it('returns the same draft for concurrent retries with one idempotency key', async () => {
@@ -391,203 +425,165 @@ describe('dispatch routes (e2e)', () => {
     expect(responses[0].body.items[0].quantity_in_transit).toBe('0');
   });
 
-  it('dispatches approved quantities atomically, supports concurrent retries and partial receipts, then closes a shortage', async () => {
-    const firstItemId = stockItemIds[0];
-    const secondItemId = stockItemIds[1];
-    await setCommissaryBalance(firstItemId, '20');
-    await setCommissaryBalance(secondItemId, '4.25');
-    const createPayload = dispatchPayload([
-      { stock_item_id: firstItemId, quantity_dispatched: '10.5' },
-      { stock_item_id: secondItemId, quantity_dispatched: '2.25' },
-    ]);
-    const createKey = randomUUID();
+  it('sends a draft with a delivery name, takes one blind count, and returns unloaded stock to the commissary', async () => {
+    const [flourId, oilId] = stockItemIds;
+    await setCommissaryBalance(flourId, '20');
+    await setCommissaryBalance(oilId, '4.25');
     const created = await request(app.getHttpServer())
       .post('/dispatches')
-      .set('Idempotency-Key', createKey)
-      .send(createPayload);
+      .set('Idempotency-Key', randomUUID())
+      .send(
+        dispatchPayload([
+          { stock_item_id: flourId, quantity_dispatched: '10.5' },
+          { stock_item_id: oilId, quantity_dispatched: '2.25' },
+        ]),
+      );
     expect(created.status).toBe(201);
     dispatchIds.push(created.body.id);
-    expect(created.body).toMatchObject({
-      branch_id: branchId,
-      status: 'DRAFT',
-      created_by_user_id: actorUserId,
-    });
-    expect(
-      created.body.items.map(
-        (item: { quantity_dispatched: string }) => item.quantity_dispatched,
-      ),
-    ).toEqual(['10.5', '2.25']);
-    const retryCreate = await request(app.getHttpServer())
-      .post('/dispatches')
-      .set('Idempotency-Key', createKey)
-      .send(createPayload);
-    expect(retryCreate.status).toBe(201);
-    expect(retryCreate.body.id).toBe(created.body.id);
 
-    const beforeDispatchMovements = await movementCount(stockItemIds);
-    expect(beforeDispatchMovements).toBe(0);
+    const unnamed = await request(app.getHttpServer())
+      .post(`/dispatches/${created.body.id}/dispatch`)
+      .set('Idempotency-Key', randomUUID())
+      .send({});
+    expect(unnamed.status).toBe(400);
     const dispatchKey = randomUUID();
     const postDispatch = () =>
       request(app.getHttpServer())
         .post(`/dispatches/${created.body.id}/dispatch`)
         .set('Idempotency-Key', dispatchKey)
-        .send({});
+        .send({ delivered_by_name: 'Juan Dela Cruz' });
     const [dispatched, retryDispatch] = await Promise.all([
       postDispatch(),
       postDispatch(),
     ]);
     expect(dispatched.status).toBe(201);
     expect(retryDispatch.status).toBe(201);
-    expect(dispatched.body.status).toBe('IN_TRANSIT');
     expect(retryDispatch.body.id).toBe(dispatched.body.id);
-    expect(String(await commissaryBalance(firstItemId))).toBe('9.5');
-    expect(String(await commissaryBalance(secondItemId))).toBe('2');
-    expect(await movementCount(stockItemIds)).toBe(2);
+    expect(dispatched.body).toMatchObject({
+      status: 'IN_TRANSIT',
+      delivered_by_name: 'Juan Dela Cruz',
+      counted_at: null,
+    });
+    expect(await commissaryBalance(flourId)).toBe('9.5');
+    expect(await commissaryBalance(oilId)).toBe('2');
 
-    const [firstDispatchItem, secondDispatchItem] = dispatched.body
-      .items as Array<{
+    const lines = dispatched.body.items as Array<{
       id: string;
+      stock_item_id: string;
     }>;
-    const firstReceiptKey = randomUUID();
-    const firstReceiptPayload = {
-      items: [
-        {
-          dispatch_item_id: firstDispatchItem.id,
-          quantity_received: '4.2500',
-        },
-        {
-          dispatch_item_id: secondDispatchItem.id,
-          quantity_received: '1.0000',
-        },
-      ],
-    };
-    const postReceipt = () =>
+    const flour = lines.find((line) => line.stock_item_id === flourId)!;
+    const oil = lines.find((line) => line.stock_item_id === oilId)!;
+    const count = (key: string, body: object) =>
       request(app.getHttpServer())
         .post(`/dispatches/${created.body.id}/receive`)
-        .set('Idempotency-Key', firstReceiptKey)
-        .send(firstReceiptPayload);
-    const [received, retryReceipt] = await Promise.all([
-      postReceipt(),
-      postReceipt(),
-    ]);
-    expect(received.status).toBe(201);
-    expect(retryReceipt.status).toBe(201);
-    expect(received.body.status).toBe('PARTIALLY_RECEIVED');
-    expect(String(await branchBalance(branchId, firstItemId))).toBe('4.25');
-    expect(String(await branchBalance(branchId, secondItemId))).toBe('1');
-    expect(received.body.items[0].quantity_in_transit).toBe('6.25');
-    expect(received.body.items[1].quantity_in_transit).toBe('1.25');
-    expect(await movementCount(stockItemIds)).toBe(4);
+        .set('Idempotency-Key', key)
+        .send(body);
+    const exactBody = {
+      items: [
+        { dispatch_item_id: flour.id, quantity_received: '10.5' },
+        { dispatch_item_id: oil.id, quantity_received: '2.25' },
+      ],
+    };
+    expect((await count(randomUUID(), exactBody)).status).toBe(403);
 
-    const conflictingReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/receive`)
-      .set('Idempotency-Key', firstReceiptKey)
-      .send({
+    currentUserId = receiverUserId;
+    try {
+      const missingLine = await count(randomUUID(), {
+        items: [{ dispatch_item_id: flour.id, quantity_received: '10.5' }],
+      });
+      expect(missingLine.status).toBe(400);
+      const countKey = randomUUID();
+      const countBody = {
         items: [
-          { ...firstReceiptPayload.items[0], quantity_received: '4.5' },
-          firstReceiptPayload.items[1],
+          { dispatch_item_id: flour.id, quantity_received: '10.5000' },
+          { dispatch_item_id: oil.id, quantity_received: '2' },
         ],
+        note: 'One oil container was missing.',
+      };
+      const [counted, retryCount] = await Promise.all([
+        count(countKey, countBody),
+        count(countKey, countBody),
+      ]);
+      expect(counted.status).toBe(201);
+      expect(retryCount.status).toBe(201);
+      expect(counted.body).toMatchObject({
+        status: 'PARTIALLY_RECEIVED',
+        counted_by_user_id: receiverUserId,
+        discrepancy: { status: 'OPEN' },
       });
-    const overReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [
-          { dispatch_item_id: firstDispatchItem.id, quantity_received: '6.26' },
-        ],
-      });
-    expect(conflictingReceipt.status).toBe(409);
-    expect(overReceipt.status).toBe(400);
+      const byStock = (body: {
+        items: Array<Record<string, string> & { stock_item_id: string }>;
+      }) =>
+        [flourId, oilId].map((stockId) => {
+          const item = body.items.find((line) => line.stock_item_id === stockId)!;
+          return [
+            item.quantity_received,
+            item.quantity_variance,
+            item.quantity_in_transit,
+            item.quantity_outstanding,
+          ];
+        });
+      expect(byStock(counted.body)).toEqual([
+        ['10.5', '0', '0', '0'],
+        ['2', '-0.25', '0', '0.25'],
+      ]);
+      expect(counted.body.discrepancy_events[0].note).toBe(
+        'One oil container was missing.',
+      );
+      expect(await branchBalance(branchId, flourId)).toBe('10.5');
+      expect(await branchBalance(branchId, oilId)).toBe('2');
+      expect(
+        (await count(countKey, { ...countBody, note: 'Changed' })).status,
+      ).toBe(409);
+      expect((await count(randomUUID(), exactBody)).status).toBe(409);
+      const counterResolves = await request(app.getHttpServer())
+        .post(`/dispatches/${created.body.id}/shortage-closures`)
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          outcome: 'LOST',
+          reason: 'Counter cannot resolve their own count.',
+          items: [{ dispatch_item_id: oil.id, quantity_closed: '0.25' }],
+        });
+      expect(counterResolves.status).toBe(403);
+    } finally {
+      currentUserId = actorUserId;
+    }
 
-    const finalReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [
-          { dispatch_item_id: firstDispatchItem.id, quantity_received: '6.25' },
-          {
-            dispatch_item_id: secondDispatchItem.id,
-            quantity_received: '1.25',
-          },
-        ],
-      });
-    expect(finalReceipt.status).toBe(201);
-    expect(finalReceipt.body.status).toBe('RECEIVED');
-    expect(String(await branchBalance(branchId, firstItemId))).toBe('10.5');
-    expect(String(await branchBalance(branchId, secondItemId))).toBe('2.25');
+    const resolve = (outcome: string, quantity: string) =>
+      request(app.getHttpServer())
+        .post(`/dispatches/${created.body.id}/shortage-closures`)
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          outcome,
+          reason: 'Container was left at the commissary.',
+          items: [{ dispatch_item_id: oil.id, quantity_closed: quantity }],
+        });
+    expect((await resolve('SURPLUS', '0.25')).status).toBe(400);
+    expect((await resolve('NOT_LOADED', '0.5')).status).toBe(400);
+    const resolved = await resolve('NOT_LOADED', '0.25');
+    expect(resolved.status).toBe(201);
+    expect(resolved.body).toMatchObject({
+      status: 'CLOSED_WITH_SHORTAGE',
+      discrepancy: { status: 'RESOLVED' },
+      shortage_closures: [{ outcome: 'NOT_LOADED' }],
+    });
+    expect(await commissaryBalance(oilId)).toBe('2.25');
+    expect(await branchBalance(branchId, oilId)).toBe('2');
+    const returned = await db
+      .selectFrom('inventory_movements')
+      .select(['movement_type', 'quantity_delta'])
+      .where('stock_item_id', '=', oilId)
+      .where('dispatch_shortage_closure_item_id', 'is not', null)
+      .execute();
     expect(
-      finalReceipt.body.items.every(
-        (item: { quantity_in_transit: string }) =>
-          item.quantity_in_transit === '0',
-      ),
-    ).toBe(true);
-
-    const shortagePayload = dispatchPayload([
-      { stock_item_id: firstItemId, quantity_dispatched: '5' },
-    ]);
-    const shortageDispatch = await request(app.getHttpServer())
-      .post('/dispatches')
-      .set('Idempotency-Key', randomUUID())
-      .send(shortagePayload);
-    expect(shortageDispatch.status).toBe(201);
-    dispatchIds.push(shortageDispatch.body.id);
-    const postedShortageDispatch = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDispatch.body.id}/dispatch`)
-      .set('Idempotency-Key', randomUUID())
-      .send({});
-    expect(postedShortageDispatch.status).toBe(201);
-    const shortageItemId = postedShortageDispatch.body.items[0].id as string;
-    const beforeShortageMovementCount = await movementCount(stockItemIds);
-    const closedShortage = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDispatch.body.id}/shortage-closures`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        reason: 'Branch count confirmed the package was missing',
-        items: [{ dispatch_item_id: shortageItemId, quantity_closed: '1.5' }],
-      });
-    expect(closedShortage.status).toBe(201);
-    expect(closedShortage.body.status).toBe('IN_TRANSIT');
-    expect(closedShortage.body.items[0].quantity_in_transit).toBe('3.5');
-    expect(closedShortage.body.shortage_closures[0].reason).toBe(
-      'Branch count confirmed the package was missing',
-    );
-    expect(await movementCount(stockItemIds)).toBe(beforeShortageMovementCount);
-    expect(String(await branchBalance(branchId, firstItemId))).toBe('10.5');
-
-    const lastReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDispatch.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: shortageItemId, quantity_received: '3.5' }],
-      });
-    expect(lastReceipt.status).toBe(201);
-    expect(lastReceipt.body.status).toBe('CLOSED_WITH_SHORTAGE');
-    expect(lastReceipt.body.items[0].quantity_in_transit).toBe('0');
-    expect(String(await branchBalance(branchId, firstItemId))).toBe('14');
-
-    const listed = await request(app.getHttpServer()).get(
-      `/dispatches?branch_id=${branchId}&status=RECEIVED&page=1&page_size=10`,
-    );
-    const detail = await request(app.getHttpServer()).get(
-      `/dispatches/${created.body.id}`,
-    );
-    expect(listed.status).toBe(200);
+      returned.map((row) => [row.movement_type, normalizeDecimal(String(row.quantity_delta))]),
+    ).toEqual([['DISPATCH_RETURN', '0.25']]);
+    expect((await resolve('LOST', '0.25')).status).toBe(409);
     expect(
-      listed.body.items.some(
-        (item: { id: string }) => item.id === created.body.id,
-      ),
-    ).toBe(true);
-    expect(detail.status).toBe(200);
-    expect(
-      detail.body.events.map(
+      resolved.body.events.map(
         (event: { event_type: string }) => event.event_type,
       ),
-    ).toEqual([
-      'CREATED',
-      'DISPATCHED',
-      'RECEIPT_RECORDED',
-      'RECEIPT_RECORDED',
-    ]);
+    ).toEqual(['CREATED', 'DISPATCHED', 'RECEIPT_RECORDED', 'SHORTAGE_CLOSED']);
   });
 
   it('keeps a draft intact when stock is insufficient and enforces branch scope', async () => {
@@ -604,7 +600,7 @@ describe('dispatch routes (e2e)', () => {
     const insufficient = await request(app.getHttpServer())
       .post(`/dispatches/${created.body.id}/dispatch`)
       .set('Idempotency-Key', randomUUID())
-      .send({});
+      .send({ delivered_by_name: 'Test courier' });
     const stillDraft = await db
       .selectFrom('dispatches')
       .select('status')
@@ -632,204 +628,131 @@ describe('dispatch routes (e2e)', () => {
     branchIds = [branchId];
   });
 
-  it('keeps partial receipts immutable and resolves discrepancies through receipt or shortage events', async () => {
-    const stockItemId = stockItemIds[0];
-    await setCommissaryBalance(stockItemId, '200');
+  it('hides expected quantities until counted, records zero and surplus lines, and confirms surplus against commissary stock', async () => {
+    const [flourId, oilId] = stockItemIds;
+    await setCommissaryBalance(flourId, '50');
+    await setCommissaryBalance(oilId, '50');
+    const sent = await request(app.getHttpServer())
+      .post('/dispatches/send')
+      .set('Idempotency-Key', randomUUID())
+      .send(
+        sendPayload([
+          { stock_item_id: flourId, quantity_dispatched: '5' },
+          { stock_item_id: oilId, quantity_dispatched: '3' },
+        ]),
+      );
+    expect(sent.status).toBe(201);
+    dispatchIds.push(sent.body.id);
+    const lines = sent.body.items as Array<{ id: string; stock_item_id: string }>;
+    const flour = lines.find((line) => line.stock_item_id === flourId)!;
+    const oil = lines.find((line) => line.stock_item_id === oilId)!;
+    const flourBefore = await optionalBranchBalance(branchId, flourId);
 
-    const payload = dispatchPayload([
-      { stock_item_id: stockItemId, quantity_dispatched: '100' },
-    ]);
-    const created = await request(app.getHttpServer())
-      .post('/dispatches')
-      .set('Idempotency-Key', randomUUID())
-      .send(payload);
-    expect(created.status).toBe(201);
-    dispatchIds.push(created.body.id);
-    const dispatchItemId = created.body.items[0].id as string;
-    const posted = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/dispatch`)
-      .set('Idempotency-Key', randomUUID())
-      .send({});
-    expect(posted.status).toBe(201);
-
-    const firstReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: dispatchItemId, quantity_received: '80' }],
-      });
-    expect(firstReceipt.status).toBe(201);
-    const reportKey = randomUUID();
-    const reportPayload = {
-      note: 'Only 80 of 100 units were present at receiving.',
-    };
-    const reported = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/discrepancies`)
-      .set('Idempotency-Key', reportKey)
-      .send(reportPayload);
-    expect(reported.status).toBe(201);
-    expect(reported.body).toMatchObject({
-      status: 'PARTIALLY_RECEIVED',
-      discrepancy: { status: 'OPEN' },
-      items: [
-        {
-          quantity_dispatched: '100',
-          quantity_received: '80',
-          quantity_in_transit: '20',
-        },
-      ],
-    });
-    const reportRetry = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/discrepancies`)
-      .set('Idempotency-Key', reportKey)
-      .send(reportPayload);
-    expect(reportRetry.status).toBe(201);
-    expect(reportRetry.body.discrepancy_events).toHaveLength(1);
-    const openQueue = await request(app.getHttpServer()).get(
-      '/dispatches?discrepancy_status=OPEN',
+    const originalPermissions = sendPermissions;
+    currentUserId = receiverUserId;
+    sendPermissions = ['dispatches.read', 'dispatches.receive'];
+    try {
+      const hidden = await request(app.getHttpServer()).get(
+        `/dispatches/${sent.body.id}`,
+      );
+      expect(hidden.status).toBe(200);
+      expect(
+        hidden.body.items.every(
+          (item: Record<string, unknown>) =>
+            item.quantity_dispatched === null &&
+            item.quantity_in_transit === null &&
+            item.quantity_outstanding === null &&
+            item.awaiting_count === true,
+        ),
+      ).toBe(true);
+      const counted = await request(app.getHttpServer())
+        .post(`/dispatches/${sent.body.id}/receive`)
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          items: [
+            { dispatch_item_id: flour.id, quantity_received: '6' },
+            { dispatch_item_id: oil.id, quantity_received: '0' },
+          ],
+        });
+      expect(counted.status).toBe(201);
+      expect(counted.body.status).toBe('PARTIALLY_RECEIVED');
+      expect(counted.body.discrepancy.status).toBe('OPEN');
+      expect(counted.body.discrepancy_events[0].note).toBe(
+        'The branch count differs from the dispatched quantities.',
+      );
+      const visible = await request(app.getHttpServer()).get(
+        `/dispatches/${sent.body.id}`,
+      );
+      expect(
+        visible.body.items.find(
+          (item: { stock_item_id: string }) => item.stock_item_id === flourId,
+        ),
+      ).toMatchObject({ quantity_dispatched: '5', quantity_variance: '1' });
+    } finally {
+      sendPermissions = originalPermissions;
+      currentUserId = actorUserId;
+    }
+    expect(await branchBalance(branchId, flourId)).toBe(
+      String(Number(flourBefore) + 6),
     );
-    expect(openQueue.status).toBe(200);
+    const zeroMovements = await db
+      .selectFrom('inventory_movements as im')
+      .innerJoin(
+        'dispatch_receipt_items as dri',
+        'dri.id',
+        'im.dispatch_receipt_item_id',
+      )
+      .select('im.id')
+      .where('dri.dispatch_item_id', '=', oil.id)
+      .execute();
+    expect(zeroMovements).toHaveLength(0);
+
+    const resolve = (outcome: string, itemId: string, quantity: string) =>
+      request(app.getHttpServer())
+        .post(`/dispatches/${sent.body.id}/shortage-closures`)
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          outcome,
+          reason: 'Reviewed with the branch and the courier.',
+          items: [{ dispatch_item_id: itemId, quantity_closed: quantity }],
+        });
+    expect((await resolve('NOT_LOADED', flour.id, '1')).status).toBe(400);
+    await setCommissaryBalance(flourId, '0.5');
+    expect((await resolve('SURPLUS', flour.id, '1')).status).toBe(409);
+    await setCommissaryBalance(flourId, '45');
+    const surplus = await resolve('SURPLUS', flour.id, '1');
+    expect(surplus.status).toBe(201);
+    expect(surplus.body.status).toBe('PARTIALLY_RECEIVED');
+    expect(await commissaryBalance(flourId)).toBe('44');
+    const lost = await resolve('LOST', oil.id, '3');
+    expect(lost.status).toBe(201);
+    expect(lost.body).toMatchObject({
+      status: 'CLOSED_WITH_SHORTAGE',
+      discrepancy: { status: 'RESOLVED' },
+    });
     expect(
-      openQueue.body.items.map((item: { id: string }) => item.id),
-    ).toContain(created.body.id);
-
-    branchIds = [otherBranchId];
-    const crossBranch = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/discrepancies/recount`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ reason: 'Unauthorized cross-branch recount.' });
-    expect(crossBranch.status).toBe(404);
-    branchIds = [branchId];
-
-    const recountKey = randomUUID();
-    const recount = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/discrepancies/recount`)
-      .set('Idempotency-Key', recountKey)
-      .send({ reason: 'Please recount the receiving area.' });
-    expect(recount.status).toBe(201);
-    expect(recount.body.discrepancy.status).toBe('RECOUNT_REQUESTED');
-    const recountRetry = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/discrepancies/recount`)
-      .set('Idempotency-Key', recountKey)
-      .send({ reason: 'Please recount the receiving area.' });
-    expect(recountRetry.status).toBe(201);
-    expect(recountRetry.body.discrepancy_events).toHaveLength(2);
-    const finalReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${created.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: dispatchItemId, quantity_received: '20' }],
-      });
-    expect(finalReceipt.status).toBe(201);
-    expect(finalReceipt.body.discrepancy.status).toBe('RESOLVED');
-    expect(finalReceipt.body.items[0].quantity_received).toBe('100');
-    expect(finalReceipt.body.receipts).toHaveLength(2);
-
-    const shortagePayload = dispatchPayload([
-      { stock_item_id: stockItemId, quantity_dispatched: '100' },
-    ]);
-    const shortageDraft = await request(app.getHttpServer())
-      .post('/dispatches')
-      .set('Idempotency-Key', randomUUID())
-      .send(shortagePayload);
-    expect(shortageDraft.status).toBe(201);
-    dispatchIds.push(shortageDraft.body.id);
-    const shortageItemId = shortageDraft.body.items[0].id as string;
-    await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDraft.body.id}/dispatch`)
-      .set('Idempotency-Key', randomUUID())
-      .send({});
-    await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDraft.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: shortageItemId, quantity_received: '80' }],
-      });
-    const shortageReport = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDraft.body.id}/discrepancies`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ note: 'The remaining 20 units could not be located.' });
-    expect(shortageReport.status).toBe(201);
-    const shortageRecount = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDraft.body.id}/discrepancies/recount`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ reason: 'Branch confirmed the stock is missing.' });
-    expect(shortageRecount.status).toBe(201);
-    const closed = await request(app.getHttpServer())
-      .post(`/dispatches/${shortageDraft.body.id}/shortage-closures`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        reason: 'Confirmed missing after branch recount.',
-        items: [{ dispatch_item_id: shortageItemId, quantity_closed: '20' }],
-      });
-    expect(closed.status).toBe(201);
-    expect(closed.body.status).toBe('CLOSED_WITH_SHORTAGE');
-    expect(closed.body.discrepancy.status).toBe('RESOLVED');
-    expect(
-      closed.body.discrepancy_events.map(
+      lost.body.discrepancy_events.map(
         (event: { event_type: string }) => event.event_type,
       ),
-    ).toEqual(['REPORTED', 'RECOUNT_REQUESTED', 'RESOLVED_SHORTAGE']);
+    ).toEqual(['REPORTED', 'RESOLVED_SHORTAGE']);
+    expect(await commissaryBalance(oilId)).toBe('47');
 
-    await db
-      .updateTable('commissary_inventory')
-      .set({ quantity_on_hand: '100' })
-      .where('stock_item_id', '=', stockItemId)
-      .execute();
-    const mixedPayload = dispatchPayload([
-      { stock_item_id: stockItemId, quantity_dispatched: '100' },
-    ]);
-    const mixedDraft = await request(app.getHttpServer())
-      .post('/dispatches')
-      .set('Idempotency-Key', randomUUID())
-      .send(mixedPayload);
-    expect(mixedDraft.status).toBe(201);
-    dispatchIds.push(mixedDraft.body.id);
-    const mixedItemId = mixedDraft.body.items[0].id as string;
-    const mixedDispatch = await request(app.getHttpServer())
-      .post(`/dispatches/${mixedDraft.body.id}/dispatch`)
-      .set('Idempotency-Key', randomUUID())
-      .send({});
-    expect(mixedDispatch.status).toBe(201);
-    const partialMixedReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${mixedDraft.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: mixedItemId, quantity_received: '60' }],
-      });
-    expect(partialMixedReceipt.status).toBe(201);
-    await request(app.getHttpServer())
-      .post(`/dispatches/${mixedDraft.body.id}/discrepancies`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ note: 'A portion of the dispatched quantity is missing.' });
-    const laterReceipt = await request(app.getHttpServer())
-      .post(`/dispatches/${mixedDraft.body.id}/receive`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [{ dispatch_item_id: mixedItemId, quantity_received: '20' }],
-      });
-    expect(laterReceipt.status).toBe(201);
-    const mixedShortage = await request(app.getHttpServer())
-      .post(`/dispatches/${mixedDraft.body.id}/shortage-closures`)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        reason: 'Remaining quantity confirmed missing after review.',
-        items: [{ dispatch_item_id: mixedItemId, quantity_closed: '20' }],
-      });
-    expect(mixedShortage.status).toBe(201);
-    expect(mixedShortage.body.discrepancy.status).toBe('RESOLVED');
-    expect(mixedShortage.body.items[0]).toMatchObject({
-      quantity_received: '80',
-      quantity_shortage_closed: '20',
-      quantity_in_transit: '0',
-    });
+    for (const path of ['discrepancies', 'discrepancies/recount'])
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post(`/dispatches/${sent.body.id}/${path}`)
+            .set('Idempotency-Key', randomUUID())
+            .send({ note: 'Retired route', reason: 'Retired route' })
+        ).status,
+      ).toBe(404);
   });
 
   it('sends multiple exact decimal lines atomically and replays concurrent requests after receipt', async () => {
     await setCommissaryBalance(stockItemIds[0], '10');
     await setCommissaryBalance(stockItemIds[1], '5');
     const key = randomUUID();
-    const payload = dispatchPayload([
+    const payload = sendPayload([
       { stock_item_id: stockItemIds[0], quantity_dispatched: '002.5000' },
       { stock_item_id: stockItemIds[1], quantity_dispatched: '1.125' },
     ]);
@@ -846,6 +769,7 @@ describe('dispatch routes (e2e)', () => {
     expect(dispatched.status).toBe('IN_TRANSIT');
     expect(dispatched.created_by_user_id).toBe(actorUserId);
     expect(dispatched.dispatched_by_user_id).toBe(actorUserId);
+    expect(dispatched.delivered_by_name).toBe('Test courier');
     expect(dispatched.dispatched_at).toBeTruthy();
     expect(
       dispatched.events.filter(
@@ -868,36 +792,24 @@ describe('dispatch routes (e2e)', () => {
       '-1.125',
       '-2.5',
     ]);
-    const item = dispatched.items.find(
-      (line: { stock_item_id: string }) =>
-        line.stock_item_id === stockItemIds[0],
-    );
-    expect(
-      (
-        await request(app.getHttpServer())
-          .post(`/dispatches/${dispatched.id}/receive`)
-          .set('Idempotency-Key', randomUUID())
-          .send({
-            items: [{ dispatch_item_id: item.id, quantity_received: '1' }],
-          })
-      ).status,
-    ).toBe(201);
-    expect((await send()).body.status).toBe('PARTIALLY_RECEIVED');
-    const rest = dispatched.items.map(
-      (line: { id: string; stock_item_id: string }) => ({
+    const exact = dispatched.items.map(
+      (line: { id: string; quantity_dispatched: string }) => ({
         dispatch_item_id: line.id,
-        quantity_received:
-          line.stock_item_id === stockItemIds[0] ? '1.5' : '1.125',
+        quantity_received: line.quantity_dispatched,
       }),
     );
-    expect(
-      (
-        await request(app.getHttpServer())
-          .post(`/dispatches/${dispatched.id}/receive`)
-          .set('Idempotency-Key', randomUUID())
-          .send({ items: rest })
-      ).status,
-    ).toBe(201);
+    currentUserId = receiverUserId;
+    try {
+      const counted = await request(app.getHttpServer())
+        .post(`/dispatches/${dispatched.id}/receive`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ items: exact });
+      expect(counted.status).toBe(201);
+      expect(counted.body.status).toBe('RECEIVED');
+      expect(counted.body.discrepancy).toBeNull();
+    } finally {
+      currentUserId = actorUserId;
+    }
     expect((await send()).body.status).toBe('RECEIVED');
     expect(await commissaryBalance(stockItemIds[0])).toBe('7.5');
     expect(await commissaryBalance(stockItemIds[1])).toBe('3.875');
@@ -914,6 +826,14 @@ describe('dispatch routes (e2e)', () => {
           })
       ).status,
     ).toBe(409);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/dispatches/send')
+          .set('Idempotency-Key', key)
+          .send({ ...payload, delivered_by_name: 'Someone else' })
+      ).status,
+    ).toBe(409);
     currentUserId = deniedUserId;
     expect((await send()).status).toBe(409);
     currentUserId = actorUserId;
@@ -922,7 +842,7 @@ describe('dispatch routes (e2e)', () => {
         await request(app.getHttpServer())
           .post('/dispatches')
           .set('Idempotency-Key', key)
-          .send(payload)
+          .send({ branch_id: payload.branch_id, items: payload.items })
       ).status,
     ).toBe(409);
     expect(
@@ -930,7 +850,7 @@ describe('dispatch routes (e2e)', () => {
         await request(app.getHttpServer())
           .post(`/dispatches/${dispatched.id}/dispatch`)
           .set('Idempotency-Key', key)
-          .send({})
+          .send({ delivered_by_name: 'Test courier' })
       ).status,
     ).toBe(409);
   });
@@ -944,7 +864,7 @@ describe('dispatch routes (e2e)', () => {
       .post('/dispatches/send')
       .set('Idempotency-Key', key)
       .send(
-        dispatchPayload(
+        sendPayload(
           stockItemIds.map((stock_item_id) => ({
             stock_item_id,
             quantity_dispatched: '1',
@@ -975,7 +895,7 @@ describe('dispatch routes (e2e)', () => {
   it('rejects inactive branches/items and unassigned branches without saved dispatches', async () => {
     const before = await db.selectFrom('dispatches').select('id').execute();
     const beforeMovements = await movementCount(stockItemIds);
-    const payload = dispatchPayload([
+    const payload = sendPayload([
       { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
     ]);
     const send = (body = payload) =>
@@ -1045,7 +965,7 @@ describe('dispatch routes (e2e)', () => {
               .post('/dispatches/send')
               .set('Idempotency-Key', key)
               .send(
-                dispatchPayload([
+                sendPayload([
                   { stock_item_id: stockItemIds[0], quantity_dispatched: '1' },
                 ]),
               )
@@ -1073,7 +993,7 @@ describe('dispatch routes (e2e)', () => {
           .post('/dispatches/send')
           .set('Idempotency-Key', randomUUID())
           .send(
-            dispatchPayload([
+            sendPayload([
               { stock_item_id: stockItemIds[0], quantity_dispatched: '2' },
             ]),
           ),
@@ -1105,7 +1025,7 @@ describe('dispatch routes (e2e)', () => {
     `.execute(db);
     await sql`CREATE TRIGGER zz_dispatch_test_pause AFTER INSERT ON dispatch_items
       FOR EACH ROW EXECUTE FUNCTION dispatch_test_pause()`.execute(db);
-    const payload = dispatchPayload([
+    const payload = sendPayload([
       { stock_item_id: second, quantity_dispatched: '2' },
       { stock_item_id: first, quantity_dispatched: '2' },
     ]);
@@ -1130,7 +1050,7 @@ describe('dispatch routes (e2e)', () => {
       const drafting = request(app.getHttpServer())
         .post('/dispatches')
         .set('Idempotency-Key', randomUUID())
-        .send({ ...payload, branch_id: otherBranchId });
+        .send({ branch_id: otherBranchId, items: payload.items });
       const responses = await Promise.all([sending, drafting]);
       dispatchIds.push(
         ...responses.filter((r) => r.status === 201).map((r) => r.body.id),
@@ -1166,7 +1086,7 @@ describe('dispatch routes (e2e)', () => {
       END $$`.execute(db);
     await sql`CREATE TRIGGER zz_dispatch_test_key_pause AFTER INSERT ON dispatches
       FOR EACH ROW EXECUTE FUNCTION dispatch_test_key_pause()`.execute(db);
-    const payload = dispatchPayload([
+    const payload = sendPayload([
       { stock_item_id: stockItemIds[0], quantity_dispatched: '2' },
     ]);
     try {
@@ -1189,7 +1109,7 @@ describe('dispatch routes (e2e)', () => {
       const drafting = request(app.getHttpServer())
         .post('/dispatches')
         .set('Idempotency-Key', key)
-        .send({ ...payload, branch_id: otherBranchId });
+        .send({ branch_id: otherBranchId, items: payload.items });
       const responses = await Promise.all([sending, drafting]);
       dispatchIds.push(
         ...responses.filter((r) => r.status === 201).map((r) => r.body.id),
@@ -1249,6 +1169,70 @@ describe('dispatch routes (e2e)', () => {
     }
   });
 
+  it('paginates dispatches in SQL with a default of 10 and configurable sizes', async () => {
+    const originalBranches = branchIds;
+    const branch = await createBranch(`Pagination ${suffix}`);
+    const excluded = await createBranch(`Pagination excluded ${suffix}`);
+    const rows = await db
+      .insertInto('dispatches')
+      .values(
+        Array.from({ length: 66 }, (_, index) => ({
+          branch_id: index === 65 ? excluded : branch,
+          created_by_user_id: actorUserId,
+          status: 'DRAFT' as const,
+          idempotency_key: randomUUID(),
+        })),
+      )
+      .returning('id')
+      .execute();
+    dispatchIds.push(...rows.map((row) => row.id));
+    branchIds = [branch];
+    try {
+      const query = { search: 'Pagination', status: 'DRAFT', sort: 'oldest' };
+      const first = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query(query);
+      expect(first.status).toBe(200);
+      expect(first.body).toMatchObject({ total: 65, page: 1, page_size: 10 });
+      expect(first.body.items).toHaveLength(10);
+      for (const size of [10, 20, 30, 50]) {
+        const result = await request(app.getHttpServer())
+          .get('/dispatches')
+          .query({ ...query, page_size: size });
+        expect(result.status).toBe(200);
+        expect(result.body.items).toHaveLength(size);
+        expect(result.body.total).toBe(65);
+        expect(
+          result.body.items.every(
+            (row: { branch_id: string }) => row.branch_id === branch,
+          ),
+        ).toBe(true);
+      }
+      const second = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({ ...query, page: 2 });
+      expect(second.body.items).toHaveLength(10);
+      const firstIds = new Set(
+        first.body.items.map((row: { id: string }) => row.id),
+      );
+      expect(
+        second.body.items.every((row: { id: string }) => !firstIds.has(row.id)),
+      ).toBe(true);
+      const last = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({ ...query, page_size: 30, page: 3 });
+      expect(last.body.items).toHaveLength(5);
+      expect(last.body).toMatchObject({ total: 65, page: 3, page_size: 30 });
+      const empty = await request(app.getHttpServer())
+        .get('/dispatches')
+        .query({ ...query, page: 100 });
+      expect(empty.body.items).toHaveLength(0);
+      expect(empty.body.total).toBe(65);
+    } finally {
+      branchIds = originalBranches;
+    }
+  });
+
   async function createBranch(name: string): Promise<string> {
     const branch = await db
       .insertInto('branches')
@@ -1276,6 +1260,16 @@ describe('dispatch routes (e2e)', () => {
     targetBranchId = branchId,
   ) {
     return { branch_id: targetBranchId, items };
+  }
+
+  function sendPayload(
+    items: Array<{ stock_item_id: string; quantity_dispatched: string }>,
+    targetBranchId = branchId,
+  ) {
+    return {
+      ...dispatchPayload(items, targetBranchId),
+      delivered_by_name: 'Test courier',
+    };
   }
 
   async function setCommissaryBalance(stockItemId: string, quantity: string) {
@@ -1310,6 +1304,19 @@ describe('dispatch routes (e2e)', () => {
       .where('stock_item_id', '=', stockItemId)
       .executeTakeFirstOrThrow();
     return normalizeDecimal(String(balance.quantity_on_hand));
+  }
+
+  async function optionalBranchBalance(
+    targetBranchId: string,
+    stockItemId: string,
+  ): Promise<string> {
+    const balance = await db
+      .selectFrom('branch_inventory')
+      .select('quantity_on_hand')
+      .where('branch_id', '=', targetBranchId)
+      .where('stock_item_id', '=', stockItemId)
+      .executeTakeFirst();
+    return balance ? normalizeDecimal(String(balance.quantity_on_hand)) : '0';
   }
 
   async function movementCount(targetStockItemIds: string[]): Promise<number> {

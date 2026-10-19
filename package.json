@@ -26,6 +26,7 @@
     "migrate:latest": "kysely migrate latest",
     "migrate:list": "kysely migrate list",
     "account:create": "ts-node scripts/create-account.ts",
+    "seed:philippines": "ts-node scripts/seed-philippine-sample-data.ts",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",

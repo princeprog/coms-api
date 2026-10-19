@@ -27,7 +27,8 @@ export class BranchProductsRepository {
     return this.db
       .selectFrom('branch_products as bp')
       .innerJoin('products as p', 'p.id', 'bp.product_id')
-      .innerJoin('branches as b', 'b.id', 'bp.branch_id');
+      .innerJoin('branches as b', 'b.id', 'bp.branch_id')
+      .innerJoin('product_categories as c', 'c.id', 'p.category_id');
   }
   private columns() {
     return [
@@ -35,6 +36,9 @@ export class BranchProductsRepository {
       'b.branch_name',
       'bp.product_id',
       'p.product_name',
+      'p.category_id',
+      'c.name as category_name',
+      'c.is_active as category_is_active',
       'p.description',
       'p.is_active as product_is_active',
       sql<string>`trim_scale(p.price)::text`.as('price'),
@@ -61,6 +65,8 @@ export class BranchProductsRepository {
       .executeTakeFirst();
     if (!branch) throw new NotFoundException('Branch not found');
     let base = this.query().where('bp.branch_id', '=', branchId);
+    if (query.category_id)
+      base = base.where('p.category_id', '=', query.category_id);
     if (query.search)
       base = base.where(
         'p.product_name',
@@ -94,6 +100,27 @@ export class BranchProductsRepository {
         .executeTakeFirstOrThrow(),
     ]);
     return paginatedResult(items, Number(count.total), query);
+  }
+  async categories(branchId: string, serviceType?: 'DINE_IN' | 'TAKEAWAY') {
+    const branch = await this.db
+      .selectFrom('branches')
+      .select('id')
+      .where('id', '=', branchId)
+      .executeTakeFirst();
+    if (!branch) throw new NotFoundException('Branch not found');
+    let query = this.query()
+      .where('bp.branch_id', '=', branchId)
+      .where('bp.is_available', '=', true)
+      .where('c.is_active', '=', true)
+      .where(sql<boolean>`cardinality(${available})>0`);
+    if (serviceType)
+      query = query.where(sql<boolean>`${serviceType}=ANY(${available})`);
+    return query
+      .select(['c.id', 'c.name'])
+      .distinct()
+      .orderBy('c.name')
+      .orderBy('c.id')
+      .execute();
   }
   async findByIds(branchId: string, productId: string) {
     const row = await this.query()

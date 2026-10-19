@@ -9,9 +9,9 @@ import { sql, type Kysely, type SqlBool } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import type {
-  ScopedActionInput,
-  CreateDraftInput,
   DispatchDbExecutor,
+  SendDispatchInput,
+  SendDraftInput,
 } from './dispatches.types';
 import { DispatchesRepository } from './dispatches.repository';
 import {
@@ -27,7 +27,7 @@ export class DispatchPostingRepository {
     private readonly queries: DispatchesRepository,
   ) {}
 
-  async createAndSend(input: CreateDraftInput) {
+  async createAndSend(input: SendDispatchInput) {
     try {
       return await this.db.transaction().execute(async (transaction) => {
         const retry = await this.findSendRetry(transaction, input);
@@ -47,6 +47,7 @@ export class DispatchPostingRepository {
             created_by_user_id: input.created_by_user_id,
             dispatched_by_user_id: input.created_by_user_id,
             dispatched_at: sql<Date>`now()`,
+            delivered_by_name: input.delivered_by_name,
             status: 'IN_TRANSIT',
           })
           .returning('id')
@@ -96,7 +97,7 @@ export class DispatchPostingRepository {
 
   private async findSendRetry(
     executor: DispatchDbExecutor,
-    input: CreateDraftInput,
+    input: SendDispatchInput,
   ) {
     // Read the header and key claim in one snapshot during concurrent retries.
     const existing = await executor
@@ -110,6 +111,7 @@ export class DispatchPostingRepository {
         'dispatch.id',
         'dispatch.branch_id',
         'dispatch.created_by_user_id',
+        'dispatch.delivered_by_name',
         'event.event_type',
         'event.dispatch_id',
       ])
@@ -121,7 +123,8 @@ export class DispatchPostingRepository {
       existing.dispatch_id !== existing.id ||
       existing.event_type !== 'DISPATCHED' ||
       existing.branch_id !== input.branch_id ||
-      existing.created_by_user_id !== input.created_by_user_id
+      existing.created_by_user_id !== input.created_by_user_id ||
+      existing.delivered_by_name !== input.delivered_by_name
     )
       throw new ConflictException(
         'Idempotency key was already used for another dispatch or action',
@@ -160,7 +163,7 @@ export class DispatchPostingRepository {
       );
   }
 
-  async dispatch(input: ScopedActionInput) {
+  async dispatch(input: SendDraftInput) {
     try {
       return await this.db.transaction().execute(async (transaction) => {
         await this.requirePostingKey(transaction, input.idempotency_key);
@@ -205,6 +208,7 @@ export class DispatchPostingRepository {
             status: 'IN_TRANSIT',
             dispatched_by_user_id: input.actor_user_id,
             dispatched_at: sql<Date>`now()`,
+            delivered_by_name: input.delivered_by_name,
             updated_at: sql<Date>`now()`,
           })
           .where('id', '=', input.id)

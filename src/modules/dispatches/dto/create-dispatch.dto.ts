@@ -31,3 +31,17 @@ export class CreateDispatchDto {
   @Type(() => CreateDispatchItemDto)
   items!: CreateDispatchItemDto[];
 }
+
+export class SendDispatchDto extends CreateDispatchDto {
+  @IsString()
+  @MaxLength(120)
+  @Matches(/\S/)
+  delivered_by_name!: string;
+}
+
+export class SendDispatchDraftDto {
+  @IsString()
+  @MaxLength(120)
+  @Matches(/\S/)
+  delivered_by_name!: string;
+}

@@ -14,6 +14,7 @@ import type { UpdateProductDto } from './dto/update-product.dto';
 export const PRODUCT_COLUMNS = [
   'id',
   'product_name',
+  'category_id',
   'description',
   'price',
   'price_revision',
@@ -22,6 +23,12 @@ export const PRODUCT_COLUMNS = [
   'setup_revision',
   'created_at',
   'updated_at',
+  sql<string>`(SELECT name FROM product_categories WHERE id = products.category_id)`.as(
+    'category_name',
+  ),
+  sql<boolean>`(SELECT is_active FROM product_categories WHERE id = products.category_id)`.as(
+    'category_is_active',
+  ),
 ] as const;
 type Executor = Kysely<DB> | Transaction<DB>;
 @Injectable()
@@ -88,9 +95,29 @@ export class ProductSetupRepository {
             throw new ConflictException(
               'This retry key belongs to a different product save.',
             );
-          return prior.result as unknown as Awaited<
+          const saved = prior.result as unknown as Awaited<
             ReturnType<ProductSetupRepository['get']>
           >;
+          // Old successful retries retain their original result and receive only the
+          // newly required category fields; never replay the mutation.
+          if (
+            !saved.product.category_id ||
+            saved.product.category_name === undefined ||
+            saved.product.category_is_active === undefined
+          ) {
+            const category = await tx
+              .selectFrom('products as p')
+              .innerJoin('product_categories as c', 'c.id', 'p.category_id')
+              .select([
+                'p.category_id',
+                'c.name as category_name',
+                'c.is_active as category_is_active',
+              ])
+              .where('p.id', '=', prior.product_id)
+              .executeTakeFirstOrThrow();
+            return { ...saved, product: { ...saved.product, ...category } };
+          }
+          return saved;
         }
       }
       // Every menu/sale mutation locks branches before products, then offerings.
@@ -113,6 +140,23 @@ export class ProductSetupRepository {
         throw new ConflictException(
           'Product changed. Reload and review the current values before saving.',
         );
+      const categoryId = metadata.category_id ?? current?.category_id;
+      if (!categoryId)
+        throw new ConflictException('Select an active product category.');
+      const category = await tx
+        .selectFrom('product_categories')
+        .select(['id', 'is_active'])
+        .where('id', '=', categoryId)
+        .forShare()
+        .executeTakeFirst();
+      if (!category) throw new NotFoundException('Product category not found');
+      // An inactive legacy product may keep its archived category during an unrelated
+      // partial edit; any explicit assignment must select an active category.
+      if (
+        !category.is_active &&
+        (metadata.category_id !== undefined || !current || current.is_active)
+      )
+        throw new ConflictException('Select an active product category.');
       const selected = metadata.branch_ids;
       const types =
         metadata.service_types ??
@@ -145,6 +189,7 @@ export class ProductSetupRepository {
             .updateTable('products')
             .set({
               product_name: name,
+              category_id: categoryId,
               description:
                 metadata.description === undefined
                   ? current.description
@@ -162,6 +207,7 @@ export class ProductSetupRepository {
             .insertInto('products')
             .values({
               product_name: name,
+              category_id: categoryId,
               description: metadata.description?.trim() || null,
               service_types: types,
               price,

@@ -6,18 +6,29 @@ import {
 } from '@nestjs/common';
 import { isUUID } from 'class-validator';
 import type { AccessContext } from '../access-control/access-control.types';
+import type { PermissionKey } from '../access-control/permission-catalog';
 import type { CloseDispatchShortageDto } from './dto/close-dispatch-shortage.dto';
-import type { CreateDispatchDto } from './dto/create-dispatch.dto';
+import type {
+  CreateDispatchDto,
+  SendDispatchDraftDto,
+  SendDispatchDto,
+} from './dto/create-dispatch.dto';
 import type { DispatchQueryDto } from './dto/dispatch-query.dto';
 import type { ReceiveDispatchDto } from './dto/receive-dispatch.dto';
-import type { ReportDispatchDiscrepancyDto } from './dto/report-dispatch-discrepancy.dto';
-import type { RequestDispatchRecountDto } from './dto/request-dispatch-recount.dto';
 import { DispatchDraftsRepository } from './dispatch-drafts.repository';
 import { DispatchPostingRepository } from './dispatch-posting.repository';
 import { DispatchReceivingRepository } from './dispatch-receiving.repository';
 import { DispatchesRepository } from './dispatches.repository';
 
 const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
+// Users who prepare or reconcile dispatches may see expected quantities
+// before the branch has submitted its blind count.
+const EXPECTED_QUANTITY_PERMISSIONS: PermissionKey[] = [
+  'dispatches.create',
+  'dispatches.dispatch',
+  'dispatches.reconcile',
+  'dispatches.shortage_close',
+];
 
 @Injectable()
 export class DispatchesService {
@@ -46,7 +57,18 @@ export class DispatchesService {
     const dispatch = await this.repository.findById(id);
     if (!dispatch || !this.canAccessBranch(dispatch.branch_id, access))
       throw new NotFoundException('Dispatch not found');
-    return dispatch;
+    if (dispatch.counted_at || this.canSeeExpectedQuantities(access))
+      return dispatch;
+    return {
+      ...dispatch,
+      items: dispatch.items.map((item) => ({
+        ...item,
+        quantity_dispatched: null,
+        quantity_in_transit: null,
+        quantity_outstanding: null,
+        quantity_variance: null,
+      })),
+    };
   }
 
   async create(
@@ -77,7 +99,7 @@ export class DispatchesService {
   }
 
   async send(
-    input: CreateDispatchDto,
+    input: SendDispatchDto,
     access: AccessContext,
     idempotencyKey: string | undefined,
   ) {
@@ -94,6 +116,7 @@ export class DispatchesService {
     return this.postingRepository.createAndSend({
       branch_id: input.branch_id,
       items: this.normalizeDispatchItems(input),
+      delivered_by_name: this.requireDeliveredByName(input.delivered_by_name),
       created_by_user_id: access.userId,
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
     });
@@ -126,11 +149,13 @@ export class DispatchesService {
 
   dispatch(
     id: string,
+    input: SendDispatchDraftDto,
     access: AccessContext,
     idempotencyKey: string | undefined,
   ) {
     return this.postingRepository.dispatch({
       id,
+      delivered_by_name: this.requireDeliveredByName(input.delivered_by_name),
       actor_user_id: access.userId,
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
       branch_ids: this.branchScope(access),
@@ -147,49 +172,18 @@ export class DispatchesService {
       input.items,
       'quantity_received',
       'Received quantity',
+      true,
     );
+    const note = input.note?.trim() || null;
+    if (note && note.length > 500)
+      throw new BadRequestException('A count note must not exceed 500 characters');
     return this.receivingRepository.receive({
       id,
       actor_user_id: access.userId,
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
       branch_ids: this.branchScope(access),
       items,
-    });
-  }
-
-  reportDiscrepancy(
-    id: string,
-    input: ReportDispatchDiscrepancyDto,
-    access: AccessContext,
-    idempotencyKey: string | undefined,
-  ) {
-    const note = input.note.trim();
-    if (!note || note.length > 500)
-      throw new BadRequestException('A discrepancy note is required');
-    return this.receivingRepository.reportDiscrepancy({
-      id,
-      actor_user_id: access.userId,
-      idempotency_key: this.requireIdempotencyKey(idempotencyKey),
-      branch_ids: this.branchScope(access),
       note,
-    });
-  }
-
-  requestRecount(
-    id: string,
-    input: RequestDispatchRecountDto,
-    access: AccessContext,
-    idempotencyKey: string | undefined,
-  ) {
-    const reason = input.reason.trim();
-    if (!reason || reason.length > 500)
-      throw new BadRequestException('A recount reason is required');
-    return this.receivingRepository.requestRecount({
-      id,
-      actor_user_id: access.userId,
-      idempotency_key: this.requireIdempotencyKey(idempotencyKey),
-      branch_ids: this.branchScope(access),
-      reason,
     });
   }
 
@@ -214,6 +208,7 @@ export class DispatchesService {
       actor_user_id: access.userId,
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
       branch_ids: this.branchScope(access),
+      outcome: input.outcome,
       reason,
       items,
     });
@@ -227,6 +222,7 @@ export class DispatchesService {
     }>,
     field: 'quantity_received' | 'quantity_closed',
     label: string,
+    allowZero = false,
   ) {
     if (!Array.isArray(items) || items.length < 1 || items.length > 100)
       throw new BadRequestException(
@@ -249,7 +245,7 @@ export class DispatchesService {
       const [wholePart, fractionPart = ''] = value.split('.');
       const whole = wholePart.replace(/^0+(?=\d)/, '');
       const fraction = fractionPart.replace(/0+$/, '');
-      if (whole === '0' && fraction.length === 0)
+      if (!allowZero && whole === '0' && fraction.length === 0)
         throw new BadRequestException(`${label} must be greater than zero`);
       return {
         dispatch_item_id: item.dispatch_item_id,
@@ -265,6 +261,24 @@ export class DispatchesService {
         'A valid Idempotency-Key header is required',
       );
     return key;
+  }
+
+  private requireDeliveredByName(value: string | undefined): string {
+    const name = typeof value === 'string' ? value.trim() : '';
+    if (!name || name.length > 120)
+      throw new BadRequestException(
+        'Enter who is delivering this dispatch (120 characters or fewer)',
+      );
+    return name;
+  }
+
+  private canSeeExpectedQuantities(access: AccessContext): boolean {
+    return (
+      this.isSuperAdmin(access) ||
+      EXPECTED_QUANTITY_PERMISSIONS.some((permission) =>
+        access.permissions.includes(permission),
+      )
+    );
   }
 
   private normalizeDispatchQuantity(value: string): string {

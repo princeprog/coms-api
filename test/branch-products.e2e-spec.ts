@@ -1,3 +1,4 @@
+import { testProductCategoryId } from './product-category-fixture';
 import '../src/config/load-env';
 import {
   ExecutionContext,
@@ -130,6 +131,7 @@ describe('branch product routes (e2e)', () => {
       .insertInto('products')
       .values({
         price: '19.125',
+        category_id: testProductCategoryId,
         product_name: `Branch Offer Product ${suffix}`,
       })
       .returning('id')
@@ -169,6 +171,7 @@ describe('branch product routes (e2e)', () => {
       .insertInto('products')
       .values({
         price: '19.125',
+        category_id: testProductCategoryId,
         product_name: `Inactive Offer Product ${suffix}`,
         is_active: false,
       })

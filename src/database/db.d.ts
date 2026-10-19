@@ -226,8 +226,11 @@ export interface DispatchDiscrepancyEvents {
 
 export interface Dispatches {
   branch_id: string;
+  counted_at: Timestamp | null;
+  counted_by_user_id: string | null;
   created_at: Generated<Timestamp>;
   created_by_user_id: string;
+  delivered_by_name: string | null;
   dispatched_at: Timestamp | null;
   dispatched_by_user_id: string | null;
   id: Generated<string>;
@@ -270,6 +273,7 @@ export interface DispatchReceipts {
   dispatch_id: string;
   id: Generated<string>;
   idempotency_key: string;
+  note: string | null;
   received_by_user_id: string;
 }
 
@@ -287,6 +291,7 @@ export interface DispatchShortageClosures {
   dispatch_id: string;
   id: Generated<string>;
   idempotency_key: string;
+  outcome: Generated<string>;
   reason: string;
 }
 
@@ -297,6 +302,7 @@ export interface InventoryMovements {
   daily_branch_report_item_id: string | null;
   dispatch_item_id: string | null;
   dispatch_receipt_item_id: string | null;
+  dispatch_shortage_closure_item_id: string | null;
   id: Generated<string>;
   idempotency_key: string | null;
   inventory_scope: string;
@@ -404,6 +410,14 @@ export interface PaymentMethods {
   updated_at: Generated<Timestamp>;
 }
 
+export interface ProductCategories {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  name: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface ProductIngredients {
   component_type: Generated<string>;
   created_at: Generated<Timestamp>;
@@ -415,6 +429,7 @@ export interface ProductIngredients {
 }
 
 export interface Products {
+  category_id: string;
   created_at: Generated<Timestamp>;
   description: string | null;
   id: Generated<string>;
@@ -591,6 +606,7 @@ export interface DB {
   migration_supplier_receipt_create_description_backup: MigrationSupplierReceiptCreateDescriptionBackup;
   migration_supplier_receipt_post_grant_backup: MigrationSupplierReceiptPostGrantBackup;
   payment_methods: PaymentMethods;
+  product_categories: ProductCategories;
   product_ingredients: ProductIngredients;
   product_setup_operations: ProductSetupOperations;
   products: Products;

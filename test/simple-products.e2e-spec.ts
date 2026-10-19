@@ -33,7 +33,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       manager: string,
       branch: string,
       other: string,
-      stock: string;
+      stock: string,
+      categoryId: string;
     const client = (actor = superAdmin) => ({
       post: (path: string) =>
         request(app.getHttpServer()).post(path).set('x-test-actor', actor),
@@ -46,6 +47,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     });
     const details = (branches = [branch, other], price = '125.005') => ({
       product_name: 'Simple ' + randomUUID(),
+      category_id: categoryId,
       price,
       description: 'Shared product',
       branch_ids: branches,
@@ -101,6 +103,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         provider: { getMigrations: async () => migrations as never },
       }).migrateToLatest();
       if (result.error) throw result.error;
+      categoryId = (
+        await db
+          .selectFrom('product_categories')
+          .select('id')
+          .where('name', '=', 'Rice meals')
+          .executeTakeFirstOrThrow()
+      ).id;
       async function user(code: string, index: number) {
         const role = await db
           .selectFrom('auth.roles')

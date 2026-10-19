@@ -15,6 +15,8 @@ import {
 const trimText = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 export class CreateProductDto {
+  @IsUUID()
+  category_id!: string;
   @Transform(trimText)
   @IsString()
   @MinLength(2)

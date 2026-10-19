@@ -406,9 +406,13 @@ describe('catalog routes (e2e)', () => {
   });
 
   it('creates, searches, updates, and deactivates a product', async () => {
+    const category = await request(validationApp.getHttpServer()).get(
+      '/product-categories/available',
+    );
     const created = await request(validationApp.getHttpServer())
       .post('/products')
       .send({
+        category_id: category.body.items[0].id,
         product_name: ` ${productName} `,
         price: '125.001',
         description: ' Fresh product description ',

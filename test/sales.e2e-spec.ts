@@ -1,3 +1,4 @@
+import { testProductCategoryId } from './product-category-fixture';
 import '../src/config/load-env';
 import {
   ExecutionContext,
@@ -144,7 +145,11 @@ describe('sales routes (e2e)', () => {
 
     const product = await db
       .insertInto('products')
-      .values({ price: '9.2500', product_name: `Sales product ${suffix}` })
+      .values({
+        price: '9.2500',
+        category_id: testProductCategoryId,
+        product_name: `Sales product ${suffix}`,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     productId = product.id;
@@ -153,6 +158,7 @@ describe('sales routes (e2e)', () => {
       .insertInto('products')
       .values({
         price: '3.00',
+        category_id: testProductCategoryId,
         product_name: `Multi ingredient sales product ${suffix}`,
       })
       .returning('id')
@@ -163,6 +169,7 @@ describe('sales routes (e2e)', () => {
       .insertInto('products')
       .values({
         price: '5.00',
+        category_id: testProductCategoryId,
         product_name: `No recipe sales product ${suffix}`,
       })
       .returning('id')

@@ -44,6 +44,7 @@ describe('DispatchesService direct creation', () => {
           {
             branch_id: branchId,
             items: [{ stock_item_id: randomUUID(), quantity_dispatched: '1' }],
+            delivered_by_name: 'Juan Dela Cruz',
           },
           access,
           randomUUID(),
@@ -51,6 +52,74 @@ describe('DispatchesService direct creation', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     },
   );
+
+  it('requires a delivered-by name when sending', async () => {
+    const branchId = randomUUID();
+    const access = accessContext([branchId]);
+    access.permissions = ['dispatches.create', 'dispatches.dispatch'];
+    const posting = { createAndSend: vi.fn() };
+    const service = new DispatchesService(
+      {} as never,
+      {} as never,
+      posting as never,
+      {} as never,
+    );
+    await expect(
+      service.send(
+        {
+          branch_id: branchId,
+          items: [{ stock_item_id: randomUUID(), quantity_dispatched: '1' }],
+          delivered_by_name: '   ',
+        },
+        access,
+        randomUUID(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(posting.createAndSend).not.toHaveBeenCalled();
+  });
+
+  it('hides expected quantities from branch receivers until the delivery is counted', async () => {
+    const branchId = randomUUID();
+    const item = {
+      id: randomUUID(),
+      quantity_dispatched: '10',
+      quantity_received: '0',
+      quantity_in_transit: '10',
+      quantity_outstanding: '10',
+      quantity_variance: null,
+    };
+    const dispatch = { id: randomUUID(), branch_id: branchId, items: [item] };
+    const repository = { findById: vi.fn() };
+    const service = new DispatchesService(
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const receiver = accessContext([branchId]);
+    receiver.permissions = ['dispatches.read', 'dispatches.receive'];
+    const sender = accessContext([branchId]);
+    sender.permissions = ['dispatches.read', 'dispatches.dispatch'];
+
+    repository.findById.mockResolvedValue({ ...dispatch, counted_at: null });
+    const hidden = await service.get(dispatch.id, receiver);
+    expect(hidden.items[0]).toMatchObject({
+      quantity_dispatched: null,
+      quantity_in_transit: null,
+      quantity_outstanding: null,
+    });
+    expect((await service.get(dispatch.id, sender)).items[0]).toMatchObject({
+      quantity_dispatched: '10',
+    });
+
+    repository.findById.mockResolvedValue({
+      ...dispatch,
+      counted_at: new Date(),
+    });
+    expect((await service.get(dispatch.id, receiver)).items[0]).toMatchObject({
+      quantity_dispatched: '10',
+    });
+  });
   it('creates a draft from the selected branch and normalized stock lines', async () => {
     const branchId = randomUUID();
     const stockItemId = randomUUID();

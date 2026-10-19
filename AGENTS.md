@@ -16,6 +16,10 @@ For Kysely migration work, also read:
 
 When a conversation is compacted, resumed from a summary, or prior context is uncertain, reread this file and the complete applicable skills from `../.agents/skills/` before continuing. Recheck the current repository state afterward; summaries describe prior work but do not replace these instructions or live source files.
 
+## Running locally
+
+Run `pnpm run start:dev` from this directory. The API listens on http://localhost:3006 (set by `PORT` in `.env`) and reloads on file changes.
+
 ## Repository expectations
 
 - Inspect the existing module structure and conventions before making changes.
