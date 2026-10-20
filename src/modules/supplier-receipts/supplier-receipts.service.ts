@@ -8,7 +8,7 @@ import type { CreateSupplierReceiptDto } from './dto/create-supplier-receipt.dto
 import type { SupplierReceiptQueryDto } from './dto/supplier-receipt-query.dto';
 import { SupplierReceiptsRepository } from './supplier-receipts.repository';
 
-const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
+import { normalizeReceiptDecimal, isReceiptDate } from './receipt-validation';
 
 @Injectable()
 export class SupplierReceiptsService {
@@ -17,7 +17,7 @@ export class SupplierReceiptsService {
   list(query: SupplierReceiptQueryDto) {
     const search = query.search?.trim();
     for (const date of [query.received_from, query.received_to]) {
-      if (date && !this.isDateOnly(date))
+      if (date && !isReceiptDate(date))
         throw new BadRequestException(
           'Delivery dates must be valid YYYY-MM-DD dates',
         );
@@ -72,7 +72,7 @@ export class SupplierReceiptsService {
         'A valid Idempotency-Key header is required',
       );
 
-    if (!this.isDateOnly(input.received_at))
+    if (!isReceiptDate(input.received_at))
       throw new BadRequestException(
         'Received date must be a valid YYYY-MM-DD date',
       );
@@ -94,8 +94,8 @@ export class SupplierReceiptsService {
 
     const items = input.items.map((item) => ({
       stock_item_id: item.stock_item_id,
-      quantity_received: this.normalizeDecimal(item.quantity_received, true),
-      unit_cost: this.normalizeDecimal(item.unit_cost, false),
+      quantity_received: normalizeReceiptDecimal(item.quantity_received, true),
+      unit_cost: normalizeReceiptDecimal(item.unit_cost, false),
     }));
 
     return this.repository.create({
@@ -105,47 +105,5 @@ export class SupplierReceiptsService {
       recorded_by_user_id: actorUserId,
       idempotency_key: key,
     });
-  }
-
-  private normalizeDecimal(value: string, mustBePositive: boolean): string {
-    if (
-      typeof value !== 'string' ||
-      value.length > 80 ||
-      !DECIMAL_PATTERN.test(value)
-    )
-      throw new BadRequestException(
-        'Receipt quantities and costs must be decimal strings',
-      );
-
-    const [wholePart, fractionPart = ''] = value.split('.');
-    const whole = wholePart.replace(/^0+(?=\d)/, '');
-    const fraction = fractionPart.replace(/0+$/, '');
-    const isZero = whole === '0' && fraction.length === 0;
-    if (mustBePositive && isZero)
-      throw new BadRequestException(
-        'Received quantity must be greater than zero',
-      );
-
-    return `${whole}${fraction ? `.${fraction}` : ''}`;
-  }
-
-  private isDateOnly(value: unknown): value is string {
-    if (typeof value !== 'string') return false;
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) return false;
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31)
-      return false;
-
-    const date = new Date(0);
-    date.setUTCFullYear(year, month - 1, day);
-    return (
-      date.getUTCFullYear() === year &&
-      date.getUTCMonth() === month - 1 &&
-      date.getUTCDate() === day
-    );
   }
 }

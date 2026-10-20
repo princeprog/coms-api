@@ -185,9 +185,21 @@ export class InventoryRepository {
   ) {
     let records = this.db
       .selectFrom('inventory_movements as im')
+      .leftJoin(
+        'supplier_receipt_items as receipt_line',
+        'receipt_line.id',
+        'im.supplier_receipt_item_id',
+      )
+      .leftJoin(
+        'supplier_receipts as receipt',
+        'receipt.id',
+        'receipt_line.supplier_receipt_id',
+      )
       .innerJoin('stock_items as si', 'si.id', 'im.stock_item_id')
       .select([
         'im.id',
+        'receipt.id as receipt_id',
+        'receipt.receipt_kind',
         'im.inventory_scope',
         'im.branch_id',
         'im.stock_item_id',

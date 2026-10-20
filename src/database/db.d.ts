@@ -611,10 +611,14 @@ export interface SupplierReceipts {
   created_by_user_id: string;
   id: Generated<string>;
   idempotency_key: string;
+  notes: string | null;
+  receipt_kind: Generated<string>;
+  receipt_number: string | null;
   received_at: Timestamp;
   recorded_at: Timestamp;
   recorded_by_user_id: string;
-  supplier_id: string;
+  store_name: string | null;
+  supplier_id: string | null;
   updated_at: Generated<Timestamp>;
 }
 
