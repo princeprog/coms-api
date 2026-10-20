@@ -37,3 +37,11 @@ For new protected controllers, apply `AuthGatewayGuard`, `AuthGuard`, and `Acces
 ## COMS Obsidian project knowledge
 
 For COMS work, read `C:\Users\Al Prince\Documents\Obsidian Vault\Projects\COMS\Home.md` first. Then read the linked architecture or workflow notes relevant to the change, plus `Delivery/Progress.md` and `Decisions/Architecture Decisions.md` when planning or changing implementation. Update the Obsidian progress notes as implementation milestones are completed. Never put credentials, tokens, or database backups in the vault.
+
+## Date and time storage
+
+- Persist instants (creation, update, expiry, posting, receipt audit, notification and review times) as PostgreSQL `timestamptz` in every schema. Keep date-only business fields as `date`.
+- Preserve applied migrations; use a forward migration for legacy column conversions and an explicit, audited source time zone in `USING ... AT TIME ZONE`.
+- API datetime inputs must include `Z` or a UTC offset; responses serialize instants as ISO 8601. Display operational times in Asia/Manila.
+- `timestamp AT TIME ZONE 'Asia/Manila'` in report boundary expressions intentionally produces `timestamptz`; do not replace intermediate casts blindly. The generated Kysely `Timestamp` alias also represents PostgreSQL `timestamptz`; never hand-edit generated types.
+- Run the opt-in `test/timestamptz-migration.spec.ts` schema regression after time-related migrations.

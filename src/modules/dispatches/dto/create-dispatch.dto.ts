@@ -37,6 +37,9 @@ export class CreateDispatchDto {
 export class SendDispatchDto extends CreateDispatchDto {
   @IsOptional()
   @IsISO8601({ strict: true })
+  @Matches(/(?:Z|[+-]\d{2}:?\d{2})$/i, {
+    message: 'Estimated arrival must include a time zone (Z or UTC offset).',
+  })
   receive_by?: string;
   @IsString()
   @MaxLength(120)
@@ -47,6 +50,9 @@ export class SendDispatchDto extends CreateDispatchDto {
 export class SendDispatchDraftDto {
   @IsOptional()
   @IsISO8601({ strict: true })
+  @Matches(/(?:Z|[+-]\d{2}:?\d{2})$/i, {
+    message: 'Estimated arrival must include a time zone (Z or UTC offset).',
+  })
   receive_by?: string;
   @IsString()
   @MaxLength(120)
