@@ -384,7 +384,7 @@ describe('sales routes (e2e)', () => {
       cashier_user_id: actorUserId,
       status: 'COMPLETED',
       service_type: 'TAKEAWAY',
-      tender_method: 'cash',
+      tender_method: 'Cash',
       total_amount: '4.625',
       items: [
         {
@@ -631,6 +631,18 @@ describe('sales routes (e2e)', () => {
     expect(retry.status).toBe(201);
     expect(voided.body.id).toBe(saleId);
     expect(voided.body.status).toBe('VOIDED');
+    expect(voided.body.cashier_name).toMatch(/^Sales /);
+    expect(voided.body.events).toEqual([
+      expect.objectContaining({
+        event_type: 'COMPLETED',
+        actor_name: voided.body.cashier_name,
+      }),
+      expect.objectContaining({
+        event_type: 'VOIDED',
+        actor_name: voided.body.cashier_name,
+        reason: 'Cashier entered the wrong item',
+      }),
+    ]);
 
     const emptyReason = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales/${saleId}/void`)

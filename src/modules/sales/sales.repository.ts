@@ -598,10 +598,12 @@ export class SalesRepository {
     saleId: string,
   ) {
     const sale = await executor
-      .selectFrom('sales')
-      .selectAll()
-      .where('branch_id', '=', branchId)
-      .where('id', '=', saleId)
+      .selectFrom('sales as s')
+      .leftJoin('auth.users as u', 'u.id', 's.cashier_user_id')
+      .selectAll('s')
+      .select('u.full_name as cashier_name')
+      .where('s.branch_id', '=', branchId)
+      .where('s.id', '=', saleId)
       .executeTakeFirst();
     if (!sale) throw new NotFoundException('Sale not found');
     const [items, events] = await Promise.all([
@@ -621,11 +623,19 @@ export class SalesRepository {
         .orderBy('product_id')
         .execute(),
       executor
-        .selectFrom('sale_events')
-        .select(['id', 'event_type', 'actor_user_id', 'reason', 'created_at'])
-        .where('sale_id', '=', saleId)
-        .orderBy('created_at')
-        .orderBy('id')
+        .selectFrom('sale_events as e')
+        .leftJoin('auth.users as u', 'u.id', 'e.actor_user_id')
+        .select([
+          'e.id',
+          'e.event_type',
+          'e.actor_user_id',
+          'u.full_name as actor_name',
+          'e.reason',
+          'e.created_at',
+        ])
+        .where('e.sale_id', '=', saleId)
+        .orderBy('e.created_at')
+        .orderBy('e.id')
         .execute(),
     ]);
     return { ...sale, items, events };
