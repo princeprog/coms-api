@@ -1003,6 +1003,11 @@ describe('daily report routes (e2e)', () => {
       .expect(201);
     expect(receivedDispatch.body.status).toBe('RECEIVED');
 
+    await db
+      .updateTable('dispatch_receipts')
+      .set({ delivery_date: businessDate })
+      .where('dispatch_id', '=', flowDispatchId)
+      .execute();
     const transferIn = await db
       .selectFrom('inventory_movements')
       .innerJoin(

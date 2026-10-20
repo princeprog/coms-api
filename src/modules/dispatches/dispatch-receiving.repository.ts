@@ -1,4 +1,7 @@
+import { storedBusinessDate } from './receiving-policy';
 import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
+import { DispatchLateCountRepository } from './dispatch-late-count.repository';
+import { deliveryBusinessDate } from './receiving-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -35,11 +38,18 @@ export class DispatchReceivingRepository {
     @Inject(DATABASE) private readonly db: Kysely<DB>,
     private readonly queries: DispatchesRepository,
     private readonly notifications: NotificationWriterRepository,
+    private readonly lateCounts: DispatchLateCountRepository,
   ) {}
 
-  async receive(input: ReceiveInput) {
+  async receive(input: ReceiveInput, existingTransaction?: Transaction<DB>) {
     try {
-      return await this.db.transaction().execute(async (transaction) => {
+      const run = async (transaction: Transaction<DB>) => {
+        const dispatch = await this.queries.findDispatchForUpdate(
+          transaction,
+          input.id,
+          input.branch_ids,
+        );
+        if (!dispatch) throw new NotFoundException('Dispatch not found');
         const previous = await this.findReceiptByIdempotencyKey(
           transaction,
           input.idempotency_key,
@@ -58,12 +68,6 @@ export class DispatchReceivingRepository {
             'RECEIPT_RECORDED',
           );
 
-        const dispatch = await this.queries.findDispatchForUpdate(
-          transaction,
-          input.id,
-          input.branch_ids,
-        );
-        if (!dispatch) throw new NotFoundException('Dispatch not found');
         const afterLock = await this.findReceiptByIdempotencyKey(
           transaction,
           input.idempotency_key,
@@ -99,6 +103,13 @@ export class DispatchReceivingRepository {
             'The person who sent this dispatch cannot count it',
           );
         await this.queries.requireActiveBranch(transaction, dispatch.branch_id);
+        const deliveryDate = deliveryBusinessDate(
+          input.delivery_date,
+          dispatch.dispatched_at!,
+          new Date(),
+          input.late_reason,
+          dispatch.receive_by,
+        );
 
         const lines = await this.queries.loadOutstanding(transaction, input.id);
         const inTransit = new Map(
@@ -116,6 +127,17 @@ export class DispatchReceivingRepository {
             'Count every item in this delivery exactly once',
           );
 
+        const held = await this.lateCounts.prepare(
+          transaction,
+          input,
+          dispatch.branch_id,
+          deliveryDate,
+        );
+        if (held) {
+          const details = await this.queries.findDetails(transaction, input.id);
+          if (!details) throw new NotFoundException('Dispatch not found');
+          return { ...details, receiving_outcome: 'REVIEW_REQUIRED' as const };
+        }
         const receipt = await transaction
           .insertInto('dispatch_receipts')
           .values({
@@ -123,6 +145,8 @@ export class DispatchReceivingRepository {
             received_by_user_id: input.actor_user_id,
             idempotency_key: input.idempotency_key,
             note: input.note,
+            delivery_date: deliveryDate,
+            late_reason: input.late_reason ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
@@ -185,7 +209,9 @@ export class DispatchReceivingRepository {
         await transaction
           .updateTable('dispatches')
           .set({
-            counted_at: sql<Date>`now()`,
+            counted_at: input.review_case_id
+              ? sql<Date>`(SELECT created_at FROM dispatch_late_counts WHERE id = ${input.review_case_id})`
+              : sql<Date>`now()`,
             counted_by_user_id: input.actor_user_id,
             updated_at: sql<Date>`now()`,
           })
@@ -204,10 +230,23 @@ export class DispatchReceivingRepository {
             'All dispatched quantities were received.',
           );
 
+        if (input.review_case_id)
+          await transaction
+            .updateTable('dispatch_late_counts')
+            .set({
+              status: 'POSTED',
+              reviewed_by_user_id: input.reviewer_id,
+              reviewed_at: sql<Date>`now()`,
+            })
+            .where('id', '=', input.review_case_id)
+            .execute();
         const details = await this.queries.findDetails(transaction, input.id);
         if (!details) throw new NotFoundException('Dispatch not found');
         return details;
-      });
+      };
+      return await (existingTransaction
+        ? run(existingTransaction)
+        : this.db.transaction().execute(run));
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       const existing = await this.findReceiptByIdempotencyKey(
@@ -228,6 +267,76 @@ export class DispatchReceivingRepository {
         );
       throw new ConflictException('Idempotency key was already used');
     }
+  }
+
+  async reviewLateCount(
+    dispatchId: string,
+    caseId: string,
+    reviewerId: string,
+    branchIds: string[] | null,
+    action: 'POST' | 'RETURN',
+    reason?: string,
+  ) {
+    return this.db.transaction().execute(async (tx) => {
+      const dispatch = await this.queries.findDispatchForUpdate(
+        tx,
+        dispatchId,
+        branchIds,
+      );
+      if (!dispatch) throw new NotFoundException('Dispatch not found');
+      await this.queries.requireActiveBranch(tx, dispatch.branch_id);
+      const count = await tx
+        .selectFrom('dispatch_late_counts')
+        .selectAll()
+        .where('id', '=', caseId)
+        .where('dispatch_id', '=', dispatchId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!count) throw new NotFoundException('Late count not found');
+      if (count.counted_by_user_id === reviewerId)
+        throw new ForbiddenException(
+          'The counter cannot review their own count',
+        );
+      if (
+        (action === 'POST' && count.status === 'POSTED') ||
+        (action === 'RETURN' && count.status === 'RETURNED')
+      )
+        return this.queries.findDetails(tx, dispatchId);
+      if (count.status !== 'PENDING')
+        throw new ConflictException('This count has already been reviewed');
+      if (action === 'RETURN') {
+        if (!reason?.trim())
+          throw new BadRequestException(
+            'Enter a reason for returning this count',
+          );
+        await tx
+          .updateTable('dispatch_late_counts')
+          .set({
+            status: 'RETURNED',
+            reviewed_by_user_id: reviewerId,
+            review_reason: reason.trim(),
+            reviewed_at: sql<Date>`now()`,
+          })
+          .where('id', '=', caseId)
+          .execute();
+        return this.queries.findDetails(tx, dispatchId);
+      }
+      return this.receive(
+        {
+          id: dispatchId,
+          actor_user_id: count.counted_by_user_id,
+          branch_ids: branchIds,
+          idempotency_key: count.idempotency_key,
+          delivery_date: storedBusinessDate(count.delivery_date),
+          late_reason: count.late_reason,
+          note: count.note,
+          items: count.items as unknown as ReceiveInput['items'],
+          review_case_id: caseId,
+          reviewer_id: reviewerId,
+        },
+        tx,
+      );
+    });
   }
 
   async closeShortage(input: CloseShortageInput) {
@@ -561,7 +670,14 @@ export class DispatchReceivingRepository {
   ) {
     return executor
       .selectFrom('dispatch_receipts')
-      .select(['id', 'dispatch_id', 'received_by_user_id', 'note'])
+      .select([
+        'id',
+        'dispatch_id',
+        'received_by_user_id',
+        'note',
+        'delivery_date',
+        'late_reason',
+      ])
       .where('idempotency_key', '=', key)
       .executeTakeFirst();
   }
@@ -573,6 +689,8 @@ export class DispatchReceivingRepository {
       dispatch_id: string;
       received_by_user_id: string;
       note: string | null;
+      delivery_date: Date | string;
+      late_reason: string | null;
     },
     input: ReceiveInput,
   ) {
@@ -588,6 +706,9 @@ export class DispatchReceivingRepository {
       existing.dispatch_id !== input.id ||
       existing.received_by_user_id !== input.actor_user_id ||
       existing.note !== input.note ||
+      (input.delivery_date !== undefined &&
+        storedBusinessDate(existing.delivery_date) !== input.delivery_date) ||
+      existing.late_reason !== (input.late_reason ?? null) ||
       !sameItems
     )
       throw new ConflictException(

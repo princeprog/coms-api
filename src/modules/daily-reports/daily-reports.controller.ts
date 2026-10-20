@@ -25,6 +25,7 @@ import { DailyReportQueryDto } from './dto/daily-report-query.dto';
 import { ReturnDailyReportDto } from './dto/return-daily-report.dto';
 import { UpdateDailyReportDto } from './dto/update-daily-report.dto';
 import { DailyReportsService } from './daily-reports.service';
+import { SubmitDailyReportDto } from './dto/submit-daily-report.dto';
 
 @Controller('branches/:branchId/daily-reports')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
@@ -79,8 +80,14 @@ export class DailyReportsController {
     @Param('branchId', ParseUUIDPipe) branchId: string,
     @Param('reportId', ParseUUIDPipe) reportId: string,
     @CurrentAccessContext() access: AccessContext,
+    @Body() input: SubmitDailyReportDto,
   ) {
-    return this.service.submit(branchId, reportId, access.userId);
+    return this.service.submit(
+      branchId,
+      reportId,
+      access.userId,
+      input.delivery_exceptions ?? [],
+    );
   }
 
   @Post(':reportId/return')

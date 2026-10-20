@@ -3,6 +3,9 @@ import { IsIn, IsOptional, IsUUID, IsString, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class DispatchQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @IsIn(['pending', 'AWAITING_COUNT', 'OVERDUE', 'REVIEW'])
+  receiving_status?: 'pending' | 'AWAITING_COUNT' | 'OVERDUE' | 'REVIEW';
   override page_size = 10;
 
   @IsOptional()

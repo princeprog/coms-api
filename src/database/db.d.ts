@@ -3,13 +3,18 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from "kysely";
+import type { ColumnType } from 'kysely';
 
-export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
-  ? ColumnType<S, I | undefined, U>
-  : ColumnType<T, T | undefined, T>;
+export type Generated<T> =
+  T extends ColumnType<infer S, infer I, infer U>
+    ? ColumnType<S, I | undefined, U>
+    : ColumnType<T, T | undefined, T>;
 
-export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+export type Int8 = ColumnType<
+  string,
+  bigint | number | string,
+  bigint | number | string
+>;
 
 export type Json = JsonValue;
 
@@ -201,6 +206,13 @@ export interface DailyBranchReports {
   voided_sales_count: Generated<number>;
 }
 
+export interface DailyReportDeliveryExceptions {
+  dispatch_id: string;
+  id: Generated<string>;
+  reason: string;
+  report_event_id: string;
+}
+
 export interface DispatchDiscrepancies {
   dispatch_id: string;
   id: Generated<string>;
@@ -235,6 +247,7 @@ export interface Dispatches {
   dispatched_by_user_id: string | null;
   id: Generated<string>;
   idempotency_key: string;
+  receive_by: Timestamp | null;
   status: Generated<string>;
   stock_request_id: string | null;
   updated_at: Generated<Timestamp>;
@@ -260,6 +273,22 @@ export interface DispatchItems {
   stock_request_item_id: string | null;
 }
 
+export interface DispatchLateCounts {
+  counted_by_user_id: string;
+  created_at: Generated<Timestamp>;
+  delivery_date: Timestamp;
+  dispatch_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  items: Json;
+  late_reason: string;
+  note: string | null;
+  review_reason: string | null;
+  reviewed_at: Timestamp | null;
+  reviewed_by_user_id: string | null;
+  status: Generated<string>;
+}
+
 export interface DispatchReceiptItems {
   created_at: Generated<Timestamp>;
   dispatch_item_id: string;
@@ -270,9 +299,11 @@ export interface DispatchReceiptItems {
 
 export interface DispatchReceipts {
   created_at: Generated<Timestamp>;
+  delivery_date: Generated<Timestamp>;
   dispatch_id: string;
   id: Generated<string>;
   idempotency_key: string;
+  late_reason: string | null;
   note: string | null;
   received_by_user_id: string;
 }
@@ -410,6 +441,7 @@ export interface NotificationEvents {
   dispatch_id: string | null;
   id: Generated<string>;
   kind: string;
+  receiving_source_id: string | null;
   report_event_id: string | null;
   report_id: string | null;
 }
@@ -472,6 +504,15 @@ export interface ProductSetupOperations {
   idempotency_key: string;
   product_id: string;
   result: Json;
+}
+
+export interface ReceivingNotificationSources {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  late_count_id: string | null;
+  overdue_count: number | null;
+  reminder_date: Timestamp | null;
 }
 
 export interface SaleEvents {
@@ -590,15 +631,15 @@ export interface Suppliers {
 }
 
 export interface DB {
-  "auth.branch_users": AuthBranchUsers;
-  "auth.permissions": AuthPermissions;
-  "auth.rate_limit_buckets": AuthRateLimitBuckets;
-  "auth.refresh_tokens": AuthRefreshTokens;
-  "auth.role_permissions": AuthRolePermissions;
-  "auth.roles": AuthRoles;
-  "auth.sessions": AuthSessions;
-  "auth.token_families": AuthTokenFamilies;
-  "auth.users": AuthUsers;
+  'auth.branch_users': AuthBranchUsers;
+  'auth.permissions': AuthPermissions;
+  'auth.rate_limit_buckets': AuthRateLimitBuckets;
+  'auth.refresh_tokens': AuthRefreshTokens;
+  'auth.role_permissions': AuthRolePermissions;
+  'auth.roles': AuthRoles;
+  'auth.sessions': AuthSessions;
+  'auth.token_families': AuthTokenFamilies;
+  'auth.users': AuthUsers;
   branch_inventory: BranchInventory;
   branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
@@ -607,10 +648,12 @@ export interface DB {
   daily_branch_report_events: DailyBranchReportEvents;
   daily_branch_report_items: DailyBranchReportItems;
   daily_branch_reports: DailyBranchReports;
+  daily_report_delivery_exceptions: DailyReportDeliveryExceptions;
   dispatch_discrepancies: DispatchDiscrepancies;
   dispatch_discrepancy_events: DispatchDiscrepancyEvents;
   dispatch_events: DispatchEvents;
   dispatch_items: DispatchItems;
+  dispatch_late_counts: DispatchLateCounts;
   dispatch_receipt_items: DispatchReceiptItems;
   dispatch_receipts: DispatchReceipts;
   dispatch_shortage_closure_items: DispatchShortageClosureItems;
@@ -634,6 +677,7 @@ export interface DB {
   product_ingredients: ProductIngredients;
   product_setup_operations: ProductSetupOperations;
   products: Products;
+  receiving_notification_sources: ReceivingNotificationSources;
   sale_events: SaleEvents;
   sale_item_consumptions: SaleItemConsumptions;
   sale_items: SaleItems;

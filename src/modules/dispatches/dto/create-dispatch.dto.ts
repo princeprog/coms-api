@@ -3,6 +3,8 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsOptional,
+  IsISO8601,
   IsString,
   IsUUID,
   Matches,
@@ -33,6 +35,9 @@ export class CreateDispatchDto {
 }
 
 export class SendDispatchDto extends CreateDispatchDto {
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  receive_by?: string;
   @IsString()
   @MaxLength(120)
   @Matches(/\S/)
@@ -40,6 +45,9 @@ export class SendDispatchDto extends CreateDispatchDto {
 }
 
 export class SendDispatchDraftDto {
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  receive_by?: string;
   @IsString()
   @MaxLength(120)
   @Matches(/\S/)

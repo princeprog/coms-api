@@ -7,11 +7,13 @@ import { DispatchPostingRepository } from './dispatch-posting.repository';
 import { DispatchReceivingRepository } from './dispatch-receiving.repository';
 import { DispatchesRepository } from './dispatches.repository';
 import { DispatchesService } from './dispatches.service';
+import { DispatchLateCountRepository } from './dispatch-late-count.repository';
 
 @Module({
   imports: [AuthModule, NotificationsModule],
   controllers: [DispatchesController],
   providers: [
+    DispatchLateCountRepository,
     DispatchesRepository,
     DispatchDraftsRepository,
     DispatchPostingRepository,

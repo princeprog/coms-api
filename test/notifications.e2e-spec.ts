@@ -1,3 +1,7 @@
+import {
+  up as followupUp,
+  down as followupDown,
+} from '../src/database/migrations/20261020202353_dispatch_receiving_followup';
 import '../src/config/load-env';
 import {
   ExecutionContext,
@@ -675,12 +679,14 @@ describe('notifications (disposable database)', () => {
       .select(sql<number>`count(*)::int`.as('total'))
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
+      await followupDown(tx);
       await down(tx);
       const removed = await sql<{
         name: string | null;
       }>`SELECT to_regclass('notification_events')::text AS name`.execute(tx);
       expect(removed.rows[0].name).toBeNull();
       await up(tx);
+      await followupUp(tx);
     });
     expect(
       await db

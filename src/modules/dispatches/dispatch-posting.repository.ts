@@ -1,4 +1,5 @@
 import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
+import { lockReceivingBranch, receivingDeadline } from './receiving-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -32,8 +33,10 @@ export class DispatchPostingRepository {
   async createAndSend(input: SendDispatchInput) {
     try {
       return await this.db.transaction().execute(async (transaction) => {
+        await lockReceivingBranch(transaction, input.branch_id);
         const retry = await this.findSendRetry(transaction, input);
         if (retry) return retry;
+        const deadline = receivingDeadline(input.receive_by);
         await this.queries.requireActiveBranch(transaction, input.branch_id);
         const activeStockItems = await this.lockActiveStock(
           transaction,
@@ -50,6 +53,7 @@ export class DispatchPostingRepository {
             dispatched_by_user_id: input.created_by_user_id,
             dispatched_at: sql<Date>`now()`,
             delivered_by_name: input.delivered_by_name,
+            receive_by: deadline,
             status: 'IN_TRANSIT',
           })
           .returning('id')
@@ -122,6 +126,7 @@ export class DispatchPostingRepository {
         'dispatch.branch_id',
         'dispatch.created_by_user_id',
         'dispatch.delivered_by_name',
+        'dispatch.receive_by',
         'event.event_type',
         'event.dispatch_id',
       ])
@@ -134,7 +139,9 @@ export class DispatchPostingRepository {
       existing.event_type !== 'DISPATCHED' ||
       existing.branch_id !== input.branch_id ||
       existing.created_by_user_id !== input.created_by_user_id ||
-      existing.delivered_by_name !== input.delivered_by_name
+      existing.delivered_by_name !== input.delivered_by_name ||
+      (input.receive_by &&
+        existing.receive_by?.getTime() !== new Date(input.receive_by).getTime())
     )
       throw new ConflictException(
         'Idempotency key was already used for another dispatch or action',
@@ -208,6 +215,7 @@ export class DispatchPostingRepository {
           );
         if (dispatch.status !== 'DRAFT')
           throw new ConflictException('Dispatch is not in draft state');
+        const deadline = receivingDeadline(input.receive_by);
         await this.queries.requireActiveBranch(transaction, dispatch.branch_id);
 
         await this.deductStock(transaction, input.id, input.actor_user_id);
@@ -220,6 +228,7 @@ export class DispatchPostingRepository {
             dispatched_at: sql<Date>`now()`,
             delivered_by_name: input.delivered_by_name,
             updated_at: sql<Date>`now()`,
+            receive_by: deadline,
           })
           .where('id', '=', input.id)
           .executeTakeFirstOrThrow();

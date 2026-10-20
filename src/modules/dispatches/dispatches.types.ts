@@ -11,6 +11,7 @@ export type CreateDraftInput = {
 };
 
 export type SendDispatchInput = CreateDraftInput & {
+  receive_by?: string;
   delivered_by_name: string;
 };
 
@@ -21,7 +22,10 @@ export type ScopedActionInput = {
   branch_ids: string[] | null;
 };
 
-export type SendDraftInput = ScopedActionInput & { delivered_by_name: string };
+export type SendDraftInput = ScopedActionInput & {
+  delivered_by_name: string;
+  receive_by?: string;
+};
 
 export type DispatchItemInput = {
   dispatch_item_id: string;
@@ -37,6 +41,10 @@ export type DispatchResolutionOutcome =
   (typeof DISPATCH_RESOLUTION_OUTCOMES)[number];
 
 export type ReceiveInput = ScopedActionInput & {
+  delivery_date?: string;
+  late_reason?: string | null;
+  review_case_id?: string;
+  reviewer_id?: string;
   items: DispatchItemInput[];
   note: string | null;
 };

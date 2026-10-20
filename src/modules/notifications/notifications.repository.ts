@@ -24,6 +24,11 @@ export class NotificationsRepository {
       .innerJoin('notification_events as ne', 'ne.id', 'nr.event_id')
       .innerJoin('branches as b', 'b.id', 'ne.branch_id')
       .leftJoin('daily_branch_reports as report', 'report.id', 'ne.report_id')
+      .leftJoin(
+        'receiving_notification_sources as rs',
+        'rs.id',
+        'ne.receiving_source_id',
+      )
       .where('nr.user_id', '=', access.userId);
     if (!superAdmin) {
       query = query
@@ -36,7 +41,7 @@ export class NotificationsRepository {
         .where((eb) =>
           eb.or([
             ...(access.permissions.includes('dispatches.read')
-              ? [eb('ne.dispatch_id', 'is not', null)]
+              ? [eb('ne.kind', 'like', 'DISPATCH_%')]
               : []),
             ...(access.permissions.includes('daily_reports.read')
               ? [eb('ne.report_id', 'is not', null)]
@@ -56,7 +61,7 @@ export class NotificationsRepository {
         if (query.status === 'unread')
           records = records.where('nr.read_at', 'is', null);
         if (query.type === 'dispatches')
-          records = records.where('ne.dispatch_id', 'is not', null);
+          records = records.where('ne.kind', 'like', 'DISPATCH_%');
         if (query.type === 'reports')
           records = records.where('ne.report_id', 'is not', null);
         const total = await records
@@ -70,6 +75,7 @@ export class NotificationsRepository {
             'b.branch_name',
             'ne.dispatch_id',
             'ne.report_id',
+            'rs.overdue_count',
             sql<string | null>`report.business_date::text`.as('business_date'),
             'nr.created_at',
             'nr.read_at',

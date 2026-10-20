@@ -24,6 +24,11 @@ import {
   normalizeDecimal,
 } from './dispatches.repository.utils';
 import { containsSearchPattern } from '../../common/utils/list-filters';
+import {
+  lockReceivingBranch,
+  receivingStatus,
+  storedBusinessDate,
+} from './receiving-policy';
 
 type DbExecutor = DispatchDbExecutor;
 
@@ -90,6 +95,8 @@ export class DispatchesRepository {
         'dispatcher.full_name as dispatched_by_name',
         'd.dispatched_at',
         'd.counted_at',
+        'd.receive_by',
+        receivingStatus.as('receiving_status'),
         'd.created_at',
         'd.updated_at',
         sql<string | null>`(
@@ -110,6 +117,14 @@ export class DispatchesRepository {
       .innerJoin('branches as b', 'b.id', 'd.branch_id')
       .select((eb) => eb.fn.countAll<number>().as('total'));
 
+    if (query.receiving_status) {
+      const states =
+        query.receiving_status === 'pending'
+          ? ['AWAITING_COUNT', 'OVERDUE', 'REVIEW']
+          : [query.receiving_status];
+      records = records.where(receivingStatus, 'in', states);
+      count = count.where(receivingStatus, 'in', states);
+    }
     if (query.search) {
       const pattern = containsSearchPattern(query.search);
       records = records.where('b.branch_name', 'ilike', pattern);
@@ -209,7 +224,19 @@ export class DispatchesRepository {
         'd.delivered_by_name',
         'd.counted_by_user_id',
         'counter.full_name as counted_by_name',
+        sql<
+          string | null
+        >`(SELECT delivery_date::text FROM dispatch_receipts WHERE dispatch_id = d.id ORDER BY created_at DESC LIMIT 1)`.as(
+          'delivery_date',
+        ),
+        sql<
+          string | null
+        >`(SELECT late_reason FROM dispatch_receipts WHERE dispatch_id = d.id ORDER BY created_at DESC LIMIT 1)`.as(
+          'late_reason',
+        ),
         'd.counted_at',
+        'd.receive_by',
+        receivingStatus.as('receiving_status'),
         'd.created_at',
         'd.updated_at',
       ])
@@ -319,6 +346,34 @@ export class DispatchesRepository {
 
     return {
       ...dispatch,
+      receiving_outcome: dispatch.counted_at ? ('POSTED' as const) : undefined,
+      late_counts: (
+        await executor
+          .selectFrom('dispatch_late_counts')
+          .selectAll()
+          .where('dispatch_id', '=', id)
+          .orderBy('created_at', 'desc')
+          .execute()
+      ).map((count) => ({
+        ...count,
+        delivery_date: storedBusinessDate(count.delivery_date),
+      })),
+      late_count_blockers: await executor
+        .selectFrom('daily_branch_reports as r')
+        .select([
+          'r.id',
+          sql<string>`r.business_date::text`.as('business_date'),
+          'r.status',
+        ])
+        .where('r.branch_id', '=', dispatch.branch_id)
+        .where('r.status', 'in', ['SUBMITTED', 'APPROVED'])
+        .where(
+          'r.business_date',
+          '>=',
+          sql<Date>`(SELECT min(delivery_date) FROM dispatch_late_counts WHERE dispatch_id = ${id} AND status = 'PENDING')`,
+        )
+        .orderBy('r.business_date')
+        .execute(),
       items: items.map((item) => ({
         ...item,
         quantity_dispatched: normalizeDecimal(item.quantity_dispatched),
@@ -609,6 +664,14 @@ export class DispatchesRepository {
     id: string,
     branchIds: string[] | null,
   ) {
+    const scope = await transaction
+      .selectFrom('dispatches')
+      .select('branch_id')
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!scope || (branchIds !== null && !branchIds.includes(scope.branch_id)))
+      return undefined;
+    await lockReceivingBranch(transaction, scope.branch_id);
     let query = transaction
       .selectFrom('dispatches')
       .select([
@@ -618,6 +681,8 @@ export class DispatchesRepository {
         'dispatched_by_user_id',
         'counted_at',
         'counted_by_user_id',
+        'dispatched_at',
+        'receive_by',
       ])
       .where('id', '=', id);
     if (branchIds !== null) query = query.where('branch_id', 'in', branchIds);
@@ -666,6 +731,15 @@ export class DispatchesRepository {
       throw new ConflictException('Idempotency key was already used');
     const details = await this.findDetails(executor, input.id);
     if (!details) throw new NotFoundException('Dispatch not found');
+    if (
+      expectedType === 'DISPATCHED' &&
+      'receive_by' in input &&
+      typeof input.receive_by === 'string' &&
+      details.receive_by?.getTime() !== new Date(input.receive_by).getTime()
+    )
+      throw new ConflictException(
+        'Idempotency key was already used with a different receiving deadline',
+      );
     return details;
   }
 }

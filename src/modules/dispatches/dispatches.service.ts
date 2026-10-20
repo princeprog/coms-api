@@ -114,6 +114,7 @@ export class DispatchesService {
     if (!this.canAccessBranch(input.branch_id, access))
       throw new ForbiddenException('Branch access required');
     return this.postingRepository.createAndSend({
+      receive_by: input.receive_by,
       branch_id: input.branch_id,
       items: this.normalizeDispatchItems(input),
       delivered_by_name: this.requireDeliveredByName(input.delivered_by_name),
@@ -154,6 +155,7 @@ export class DispatchesService {
     idempotencyKey: string | undefined,
   ) {
     return this.postingRepository.dispatch({
+      receive_by: input.receive_by,
       id,
       delivered_by_name: this.requireDeliveredByName(input.delivered_by_name),
       actor_user_id: access.userId,
@@ -176,8 +178,12 @@ export class DispatchesService {
     );
     const note = input.note?.trim() || null;
     if (note && note.length > 500)
-      throw new BadRequestException('A count note must not exceed 500 characters');
+      throw new BadRequestException(
+        'A count note must not exceed 500 characters',
+      );
     return this.receivingRepository.receive({
+      delivery_date: input.delivery_date,
+      late_reason: input.late_reason?.trim() || null,
       id,
       actor_user_id: access.userId,
       idempotency_key: this.requireIdempotencyKey(idempotencyKey),
@@ -185,6 +191,23 @@ export class DispatchesService {
       items,
       note,
     });
+  }
+
+  reviewLateCount(
+    id: string,
+    caseId: string,
+    action: 'POST' | 'RETURN',
+    reason: string | undefined,
+    access: AccessContext,
+  ) {
+    return this.receivingRepository.reviewLateCount(
+      id,
+      caseId,
+      access.userId,
+      this.branchScope(access),
+      action,
+      reason,
+    );
   }
 
   closeShortage(

@@ -27,6 +27,7 @@ import {
 import { DispatchQueryDto } from './dto/dispatch-query.dto';
 import { ReceiveDispatchDto } from './dto/receive-dispatch.dto';
 import { DispatchesService } from './dispatches.service';
+import { ReviewLateCountDto } from './dto/review-late-count.dto';
 
 @Controller('dispatches')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
@@ -103,5 +104,22 @@ export class DispatchesController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.service.closeShortage(id, dto, access, idempotencyKey);
+  }
+
+  @Post(':id/late-counts/:caseId/review')
+  @RequirePermission('dispatches.shortage_close')
+  reviewLateCount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Body() dto: ReviewLateCountDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.service.reviewLateCount(
+      id,
+      caseId,
+      dto.action,
+      dto.reason,
+      access,
+    );
   }
 }

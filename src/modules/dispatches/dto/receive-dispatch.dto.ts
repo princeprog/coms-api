@@ -22,6 +22,15 @@ export class ReceiveDispatchItemDto {
 }
 
 export class ReceiveDispatchDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  delivery_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  late_reason?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)

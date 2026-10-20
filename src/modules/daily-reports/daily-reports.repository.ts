@@ -1,4 +1,10 @@
 import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
+import { lockReceivingBranch } from '../dispatches/receiving-policy';
+import {
+  pendingReportDeliveries,
+  validateReportDeliveries,
+} from './report-deliveries';
+import type { DeliveryExceptionDto } from './dto/submit-daily-report.dto';
 import {
   paginatedResult,
   paginationOffset,
@@ -346,13 +352,24 @@ export class DailyReportsRepository {
     });
   }
 
-  async submit(branchId: string, reportId: string, actorUserId: string) {
+  async submit(
+    branchId: string,
+    reportId: string,
+    actorUserId: string,
+    exceptions: DeliveryExceptionDto[] = [],
+  ) {
     return this.db.transaction().execute(async (transaction) => {
       const report = await this.lockReport(transaction, branchId, reportId);
       if (report.status === 'SUBMITTED' || report.status === 'APPROVED')
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'DRAFT' && report.status !== 'RETURNED')
         throw new ConflictException('This report cannot be submitted');
+      const deliveryExceptions = await validateReportDeliveries(
+        transaction,
+        branchId,
+        report.business_date,
+        exceptions,
+      );
       await this.requireActiveBranch(transaction, branchId);
       const { today } = await this.manilaToday(transaction);
       if (report.business_date >= today)
@@ -414,6 +431,17 @@ export class DailyReportsRepository {
         branch_id: branchId,
         actor_user_id: actorUserId,
       });
+      if (deliveryExceptions.length)
+        await transaction
+          .insertInto('daily_report_delivery_exceptions')
+          .values(
+            deliveryExceptions.map((item) => ({
+              report_event_id: notificationSource.id,
+              dispatch_id: item.dispatch_id,
+              reason: item.reason.trim(),
+            })),
+          )
+          .execute();
       return this.findDetails(transaction, branchId, reportId);
     });
   }
@@ -480,6 +508,22 @@ export class DailyReportsRepository {
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'SUBMITTED')
         throw new ConflictException('Only submitted reports can be approved');
+      const held = await transaction
+        .selectFrom('dispatch_late_counts as lc')
+        .innerJoin('dispatches as d', 'd.id', 'lc.dispatch_id')
+        .select('lc.id')
+        .where('d.branch_id', '=', branchId)
+        .where('lc.status', '=', 'PENDING')
+        .where(
+          'lc.delivery_date',
+          '<=',
+          sql<Date>`${report.business_date}::date`,
+        )
+        .executeTakeFirst();
+      if (held)
+        throw new ConflictException(
+          'Return this report and resolve its late delivery count before approval',
+        );
       await this.requireActiveBranch(
         transaction,
         branchId,
@@ -741,28 +785,30 @@ export class DailyReportsRepository {
               (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date < bounds.business_date)
               OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-                AND movement.created_at < bounds.day_start)), 0)::text
+                AND coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) < bounds.day_start)), 0)::text
             AS opening_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE movement.created_at >= bounds.day_start
+            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
               AND movement.movement_type IN ('TRANSFER_IN', 'RECEIPT')), 0)::text
             AS receipt_quantity,
           COALESCE(SUM(-movement.quantity_delta)
-            FILTER (WHERE movement.created_at >= bounds.day_start
+            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'SALE'), 0)::text
             AS sale_consumption_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE movement.created_at >= bounds.day_start
+            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'SALE_VOID'), 0)::text
             AS sale_void_reversal_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE movement.created_at >= bounds.day_start
+            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'ADJUSTMENT'
               OR (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date = bounds.business_date)), 0)::text
             AS ledger_adjustment_quantity,
           COALESCE(SUM(movement.quantity_delta), 0)::text AS ledger_closing_quantity
         FROM inventory_movements AS movement
+        LEFT JOIN dispatch_receipt_items AS receipt_item ON receipt_item.id = movement.dispatch_receipt_item_id
+        LEFT JOIN dispatch_receipts AS receipt ON receipt.id = receipt_item.dispatch_receipt_id
         CROSS JOIN day_bounds AS bounds
         LEFT JOIN daily_branch_report_items AS source_item
           ON source_item.id = movement.daily_branch_report_item_id
@@ -774,7 +820,7 @@ export class DailyReportsRepository {
             (movement.movement_type = 'REPORT_ADJUSTMENT'
               AND source_report.business_date < bounds.business_date + 1)
             OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-              AND movement.created_at < bounds.day_end)
+              AND coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) < bounds.day_end)
           )
         GROUP BY movement.stock_item_id
       )
@@ -878,7 +924,33 @@ export class DailyReportsRepository {
         .orderBy('event.id')
         .execute(),
     ]);
-    return { ...report, items, events };
+    const pending_deliveries = await pendingReportDeliveries(
+      executor,
+      branchId,
+      report.business_date,
+    );
+    const delivery_exceptions = await executor
+      .selectFrom('daily_report_delivery_exceptions as x')
+      .innerJoin('daily_branch_report_events as e', 'e.id', 'x.report_event_id')
+      .innerJoin('dispatches as d', 'd.id', 'x.dispatch_id')
+      .select([
+        'x.dispatch_id',
+        'x.reason',
+        'e.actor_user_id',
+        'e.created_at',
+        'd.counted_at',
+        'x.report_event_id',
+      ])
+      .where('e.daily_branch_report_id', '=', reportId)
+      .orderBy('e.created_at', 'desc')
+      .execute();
+    return {
+      ...report,
+      items,
+      events,
+      pending_deliveries,
+      delivery_exceptions,
+    };
   }
 
   private async lockReport(
@@ -886,6 +958,7 @@ export class DailyReportsRepository {
     branchId: string,
     reportId: string,
   ) {
+    await lockReceivingBranch(transaction, branchId);
     const report = await transaction
       .selectFrom('daily_branch_reports')
       .select([

@@ -79,8 +79,13 @@ export class DailyReportsService {
     return this.repository.update(branchId, reportId, entries, actorUserId);
   }
 
-  submit(branchId: string, reportId: string, actorUserId: string) {
-    return this.repository.submit(branchId, reportId, actorUserId);
+  submit(
+    branchId: string,
+    reportId: string,
+    actorUserId: string,
+    exceptions: Array<{ dispatch_id: string; reason: string }> = [],
+  ) {
+    return this.repository.submit(branchId, reportId, actorUserId, exceptions);
   }
 
   returnForCorrection(

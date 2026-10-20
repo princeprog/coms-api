@@ -5,6 +5,8 @@ export const notificationKinds = [
   'REPORT_SUBMITTED',
   'REPORT_RETURNED',
   'REPORT_APPROVED',
+  'DISPATCH_OVERDUE',
+  'DISPATCH_LATE_COUNT',
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
@@ -16,6 +18,16 @@ export const notificationPolicy: Record<
     review: boolean;
   }
 > = {
+  DISPATCH_OVERDUE: {
+    module: 'dispatches',
+    actions: ['receive', 'shortage_close'],
+    review: false,
+  },
+  DISPATCH_LATE_COUNT: {
+    module: 'dispatches',
+    actions: ['shortage_close'],
+    review: false,
+  },
   DISPATCH_SENT: { module: 'dispatches', actions: ['receive'], review: false },
   DISPATCH_DISCREPANCY: {
     module: 'dispatches',

@@ -26,7 +26,7 @@ export class NotificationWriterRepository {
     await sql`INSERT INTO notification_recipients (event_id, user_id)
       SELECT ${event.id}::uuid, u.id
       FROM auth.users u JOIN auth.roles r ON r.id = u.role_id
-      WHERE u.is_active AND r.is_active AND u.id <> ${input.actor_user_id}::uuid
+      WHERE u.is_active AND r.is_active AND u.id IS DISTINCT FROM ${input.actor_user_id ?? null}::uuid
       AND (
         (r.is_system AND r.code = 'SUPER_ADMIN' AND ${policy.review})
         OR (
