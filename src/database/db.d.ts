@@ -491,6 +491,7 @@ export interface Sales {
   idempotency_key: string;
   inventory_deducted: Generated<boolean>;
   payment_method_id: string | null;
+  sale_number: Generated<Int8>;
   service_type: string | null;
   status: string;
   tender_method: string;

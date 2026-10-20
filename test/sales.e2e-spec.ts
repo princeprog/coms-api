@@ -16,6 +16,10 @@ import { AuthGuard } from '../src/common/guards/auth.guard';
 import { AppModule } from '../src/app.module';
 import { DATABASE } from '../src/database/database.module';
 import type { DB } from '../src/database/db';
+import {
+  up as addReferences,
+  down as removeReferences,
+} from '../src/database/migrations/20261020185858_sale_references';
 
 type TestRequest = { user?: { id: string } };
 
@@ -313,6 +317,211 @@ describe('sales routes (e2e)', () => {
     );
     expect(denied.status).toBe(403);
     expect(outsideScope.status).toBe(403);
+  });
+
+  it('filters history before pagination and sums exact amounts within Manila dates', async () => {
+    const rows = await db
+      .insertInto('sales')
+      .values([
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '10.125',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-19T16:00:00Z'),
+        },
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '2.375',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-20T15:59:59.999Z'),
+        },
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'GCash',
+          total_amount: '50',
+          status: 'VOIDED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-20T10:00:00Z'),
+        },
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '100',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-20T16:00:00Z'),
+        },
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '200',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-19T15:59:59.999Z'),
+        },
+        {
+          branch_id: otherBranchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Other branch tender',
+          total_amount: '999',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-20T10:00:00Z'),
+        },
+      ])
+      .returning(['id', 'sale_number'])
+      .execute();
+    const url = `/branches/${branchId}/sales`;
+    const filters = {
+      date_from: '2026-10-20',
+      date_to: '2026-10-20',
+      page_size: 1,
+    };
+    const first = await request(app.getHttpServer())
+      .get(url)
+      .query(filters)
+      .expect(200);
+    expect(first.body.total).toBe(3);
+    expect(first.body.items).toHaveLength(1);
+    expect(first.body.items[0].id).toBe(rows[1].id);
+    expect(Number(first.body.summary.net_sales)).toBe(12.5);
+    expect(first.body.summary).toMatchObject({
+      completed_sales: 2,
+      voided_sales: 1,
+    });
+    expect(first.body.payment_methods).toEqual(['Cash', 'GCash']);
+    const second = await request(app.getHttpServer())
+      .get(url)
+      .query({ ...filters, page: 2 })
+      .expect(200);
+    expect(second.body.items[0].id).toBe(rows[2].id);
+    expect(second.body.summary).toEqual(first.body.summary);
+    const cash = await request(app.getHttpServer())
+      .get(url)
+      .query({ ...filters, tender_method: 'Cash' })
+      .expect(200);
+    expect(cash.body.total).toBe(2);
+    const voided = await request(app.getHttpServer())
+      .get(url)
+      .query({ ...filters, status: 'VOIDED' })
+      .expect(200);
+    expect(voided.body.total).toBe(1);
+    expect(Number(voided.body.summary.net_sales)).toBe(0);
+    const reference = first.body.items[0].sale_reference;
+    expect(reference).toMatch(/^S-\d{6,}$/);
+    const found = await request(app.getHttpServer())
+      .get(url)
+      .query({ search: reference.toLowerCase() })
+      .expect(200);
+    expect(found.body.items.map((sale: { id: string }) => sale.id)).toEqual([
+      rows[1].id,
+    ]);
+    const detail = await request(app.getHttpServer())
+      .get(`${url}/${rows[1].id}`)
+      .expect(200);
+    expect(detail.body.sale_reference).toBe(reference);
+    const empty = await request(app.getHttpServer())
+      .get(url)
+      .query({ search: 'no matching cashier' })
+      .expect(200);
+    expect(empty.body.summary).toEqual({
+      net_sales: '0',
+      completed_sales: 0,
+      voided_sales: 0,
+    });
+    expect((await request(app.getHttpServer()).get(url)).body.page_size).toBe(
+      10,
+    );
+    for (const page_size of [10, 30, 50]) {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .get(url)
+            .query({ page_size })
+            .expect(200)
+        ).body.page_size,
+      ).toBe(page_size);
+    }
+  });
+
+  it('rejects invalid history dates, ranges, statuses and pagination', async () => {
+    for (const query of [
+      { date_from: '2026-02-30' },
+      { date_from: '2026-10-21', date_to: '2026-10-20' },
+      { status: 'PAID' },
+      { page_size: 101 },
+      { date_to: '2026-10-20T00:00:00Z' },
+    ]) {
+      await request(app.getHttpServer())
+        .get(`/branches/${branchId}/sales`)
+        .query(query)
+        .expect(400);
+    }
+  });
+
+  it('backfills references chronologically and preserves sales through a migration round trip', async () => {
+    expect(process.env.COMS_TEST_DATABASE_NAME).toMatch(/^coms_dispatch_test_/);
+    const original = await db
+      .insertInto('sales')
+      .values([
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '12.50',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-20T01:00:00Z'),
+        },
+        {
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '2.50',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+          created_at: new Date('2026-10-19T01:00:00Z'),
+        },
+      ])
+      .returningAll()
+      .execute();
+    await db.transaction().execute(async (tx) => {
+      await removeReferences(tx);
+      await addReferences(tx);
+      const rows = await tx
+        .selectFrom('sales')
+        .selectAll()
+        .orderBy('created_at')
+        .execute();
+      expect(rows.map((r) => r.id)).toEqual([original[1].id, original[0].id]);
+      expect(rows.map((r) => String(r.sale_number))).toEqual(['1', '2']);
+      expect(rows.map((r) => r.total_amount)).toEqual([
+        original[1].total_amount,
+        original[0].total_amount,
+      ]);
+      const next = await tx
+        .insertInto('sales')
+        .values({
+          branch_id: branchId,
+          cashier_user_id: actorUserId,
+          tender_method: 'Cash',
+          total_amount: '3.00',
+          status: 'COMPLETED' as const,
+          idempotency_key: randomUUID(),
+        })
+        .returning('sale_number')
+        .executeTakeFirstOrThrow();
+      expect(String(next.sale_number)).toBe('3');
+    });
   });
 
   it('validates sale input and requires a UUID idempotency key', async () => {

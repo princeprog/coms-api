@@ -40,25 +40,101 @@ export class SalesRepository {
 
   async list(branchId: string, query: SaleQueryDto) {
     await this.requireBranch(this.db, branchId);
-    const records = this.db
-      .selectFrom('sales as s')
-      .innerJoin('auth.users as u', 'u.id', 's.cashier_user_id')
-      .selectAll('s')
-      .select('u.full_name as cashier_name')
-      .where('s.branch_id', '=', branchId)
-      .orderBy('s.created_at', 'desc')
-      .orderBy('s.id', 'desc')
-      .limit(query.page_size)
-      .offset(paginationOffset(query));
-    const count = this.db
-      .selectFrom('sales')
-      .select((eb) => eb.fn.countAll<number>().as('total'))
-      .where('branch_id', '=', branchId);
-    const [items, total] = await Promise.all([
-      records.execute(),
-      count.executeTakeFirstOrThrow(),
-    ]);
-    return paginatedResult(items, Number(total.total), query);
+    // One snapshot keeps rows and totals consistent during checkout/voids.
+    return this.db
+      .transaction()
+      .setIsolationLevel('repeatable read')
+      .execute(async (tx) => {
+        let filtered = tx
+          .selectFrom('sales as s')
+          .leftJoin('auth.users as u', 'u.id', 's.cashier_user_id')
+          .where('s.branch_id', '=', branchId);
+        if (query.status)
+          filtered = filtered.where('s.status', '=', query.status);
+        if (query.tender_method)
+          filtered = filtered.where(
+            's.tender_method',
+            '=',
+            query.tender_method,
+          );
+        if (query.date_from)
+          filtered = filtered.where(
+            's.created_at',
+            '>=',
+            sql<Date>`${query.date_from}::date AT TIME ZONE 'Asia/Manila'`,
+          );
+        if (query.date_to)
+          filtered = filtered.where(
+            's.created_at',
+            '<',
+            sql<Date>`(${query.date_to}::date + interval '1 day') AT TIME ZONE 'Asia/Manila'`,
+          );
+        if (query.search) {
+          const reference = /^S-0*([0-9]{1,19})$/i.exec(query.search);
+          if (reference) {
+            const number = BigInt(reference[1]);
+            filtered =
+              number <= 9223372036854775807n
+                ? filtered.where('s.sale_number', '=', number.toString())
+                : filtered.where(sql<boolean>`false`);
+          } else
+            filtered = filtered.where(
+              'u.full_name',
+              'ilike',
+              `%${query.search.replace(/[\\%_]/g, '\\$&')}%`,
+            );
+        }
+        const records = filtered
+          .selectAll('s')
+          .select(
+            sql<string>`COALESCE(u.full_name, 'Staff member')`.as(
+              'cashier_name',
+            ),
+          )
+          .orderBy('s.created_at', 'desc')
+          .orderBy('s.id', 'desc')
+          .limit(query.page_size)
+          .offset(paginationOffset(query));
+        const aggregate = filtered.select([
+          sql<string>`count(*)`.as('total'),
+          sql<string>`COALESCE(sum(s.total_amount) FILTER (WHERE s.status = 'COMPLETED'), 0)::text`.as(
+            'net_sales',
+          ),
+          sql<string>`count(*) FILTER (WHERE s.status = 'COMPLETED')`.as(
+            'completed_sales',
+          ),
+          sql<string>`count(*) FILTER (WHERE s.status = 'VOIDED')`.as(
+            'voided_sales',
+          ),
+        ]);
+        const [items, totals, methods] = await Promise.all([
+          records.execute(),
+          aggregate.executeTakeFirstOrThrow(),
+          tx
+            .selectFrom('sales')
+            .select('tender_method')
+            .distinct()
+            .where('branch_id', '=', branchId)
+            .orderBy('tender_method')
+            .execute(),
+        ]);
+        return {
+          ...paginatedResult(
+            items.map((sale) => ({
+              ...sale,
+              sale_reference: saleReference(sale.sale_number),
+            })),
+            Number(totals.total),
+            query,
+          ),
+          summary: {
+            net_sales: totals.net_sales,
+            completed_sales: Number(totals.completed_sales),
+            voided_sales: Number(totals.voided_sales),
+          },
+          payment_methods: methods.map((method) => method.tender_method),
+        };
+      });
   }
 
   findById(branchId: string, saleId: string) {
@@ -638,7 +714,12 @@ export class SalesRepository {
         .orderBy('e.id')
         .execute(),
     ]);
-    return { ...sale, items, events };
+    return {
+      ...sale,
+      sale_reference: saleReference(sale.sale_number),
+      items,
+      events,
+    };
   }
 
   private async requireBranch(executor: DbExecutor, branchId: string) {
@@ -682,4 +763,8 @@ export class SalesRepository {
       error.constraint === 'sale_events_idempotency_key_unique'
     );
   }
+}
+
+function saleReference(number: string) {
+  return 'S-' + number.padStart(6, '0');
 }

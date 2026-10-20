@@ -12,6 +12,8 @@ export class SalesService {
   constructor(private readonly repository: SalesRepository) {}
 
   list(branchId: string, query: SaleQueryDto) {
+    if (query.date_from && query.date_to && query.date_from > query.date_to)
+      throw new BadRequestException('Start date must be on or before end date');
     return this.repository.list(branchId, query);
   }
 
