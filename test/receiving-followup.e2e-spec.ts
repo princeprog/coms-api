@@ -5,6 +5,10 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import {
+  down as shiftsDown,
+  up as shiftsUp,
+} from '../src/database/migrations/20261020234124_register_shifts_and_business_day';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import request from 'supertest';
@@ -504,17 +508,37 @@ describe('receiving follow-up (disposable database)', () => {
   it('serializes approval racing with a late count without posting stock twice', async () => {
     const date = await yesterday();
     const sent = await send();
-    await db.updateTable('dispatches').set({dispatched_at: sql<Date>`${date}::date::timestamp AT TIME ZONE 'Asia/Manila'`}).where('id','=',sent.body.id).execute();
+    await db
+      .updateTable('dispatches')
+      .set({
+        dispatched_at: sql<Date>`${date}::date::timestamp AT TIME ZONE 'Asia/Manila'`,
+      })
+      .where('id', '=', sent.body.id)
+      .execute();
     const reportId = await report(date, 'SUBMITTED');
-    const before = await db.selectFrom('branch_inventory').select('quantity_on_hand').where('branch_id','=',branchId).where('stock_item_id','=',stockId).executeTakeFirst();
+    const before = await db
+      .selectFrom('branch_inventory')
+      .select('quantity_on_hand')
+      .where('branch_id', '=', branchId)
+      .where('stock_item_id', '=', stockId)
+      .executeTakeFirst();
     const [receipt, approval] = await Promise.all([
       count(sent.body.id, randomUUID(), date),
-      api().post(`/branches/${branchId}/daily-reports/${reportId}/approve`).set('x-test-user',reviewerId),
+      api()
+        .post(`/branches/${branchId}/daily-reports/${reportId}/approve`)
+        .set('x-test-user', reviewerId),
     ]);
     expect(receipt.status).toBe(201);
     expect(receipt.body.receiving_outcome).toBe('REVIEW_REQUIRED');
-    expect([200,409]).toContain(approval.status);
-    expect(await db.selectFrom('branch_inventory').select('quantity_on_hand').where('branch_id','=',branchId).where('stock_item_id','=',stockId).executeTakeFirst()).toEqual(before);
+    expect([200, 409]).toContain(approval.status);
+    expect(
+      await db
+        .selectFrom('branch_inventory')
+        .select('quantity_on_hand')
+        .where('branch_id', '=', branchId)
+        .where('stock_item_id', '=', stockId)
+        .executeTakeFirst(),
+    ).toEqual(before);
     await removeReport(reportId);
   });
   it('round-trips the additive migration without removing dispatches', async () => {
@@ -523,8 +547,10 @@ describe('receiving follow-up (disposable database)', () => {
       .select(sql<number>`count(*)::int`.as('total'))
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
+      await shiftsDown(tx);
       await down(tx);
       await up(tx);
+      await shiftsUp(tx);
     });
     expect(
       await db

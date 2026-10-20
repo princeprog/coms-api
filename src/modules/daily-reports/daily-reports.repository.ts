@@ -1,5 +1,6 @@
 import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import { lockReceivingBranch } from '../dispatches/receiving-policy';
+import { blockingShifts, reportShiftSummaries } from '../shifts/shift-register';
 import {
   pendingReportDeliveries,
   validateReportDeliveries,
@@ -374,7 +375,20 @@ export class DailyReportsRepository {
       const { today } = await this.manilaToday(transaction);
       if (report.business_date >= today)
         throw new ConflictException(
-          'Reports can be submitted after the Manila business day has ended',
+          'Reports can be submitted after the business day has ended',
+        );
+      const shifts = await blockingShifts(
+        transaction,
+        branchId,
+        report.business_date,
+      );
+      if (shifts.open.length)
+        throw new ConflictException(
+          `Close shift ${shifts.open.join(', ')} before submitting this report`,
+        );
+      if (shifts.unreviewed.length)
+        throw new ConflictException(
+          `A manager must review shift ${shifts.unreviewed.join(', ')} before this report can be submitted`,
         );
       const reportItems = await transaction
         .selectFrom('daily_branch_report_items')
@@ -669,8 +683,8 @@ export class DailyReportsRepository {
     await sql`
       WITH bounds AS (
         SELECT
-          (${businessDate}::date::timestamp AT TIME ZONE 'Asia/Manila') AS day_start,
-          ((${businessDate}::date + 1)::timestamp AT TIME ZONE 'Asia/Manila') AS day_end
+          coms_business_day_start(${businessDate}::date) AS day_start,
+          coms_business_day_end(${businessDate}::date) AS day_end
       ), summary AS (
         SELECT
           coalesce(sum(sale.total_amount)
@@ -771,8 +785,8 @@ export class DailyReportsRepository {
       WITH day_bounds AS (
         SELECT
           ${businessDate}::date AS business_date,
-          (${businessDate}::date::timestamp AT TIME ZONE 'Asia/Manila') AS day_start,
-          ((${businessDate}::date + 1)::timestamp AT TIME ZONE 'Asia/Manila') AS day_end
+          coms_business_day_start(${businessDate}::date) AS day_start,
+          coms_business_day_end(${businessDate}::date) AS day_end
       ), branch_stock AS (
         SELECT stock_item_id
         FROM branch_inventory
@@ -785,22 +799,22 @@ export class DailyReportsRepository {
               (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date < bounds.business_date)
               OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-                AND coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) < bounds.day_start)), 0)::text
+                AND coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) < bounds.day_start)), 0)::text
             AS opening_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
               AND movement.movement_type IN ('TRANSFER_IN', 'RECEIPT')), 0)::text
             AS receipt_quantity,
           COALESCE(SUM(-movement.quantity_delta)
-            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'SALE'), 0)::text
             AS sale_consumption_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'SALE_VOID'), 0)::text
             AS sale_void_reversal_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
               AND movement.movement_type = 'ADJUSTMENT'
               OR (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date = bounds.business_date)), 0)::text
@@ -820,7 +834,7 @@ export class DailyReportsRepository {
             (movement.movement_type = 'REPORT_ADJUSTMENT'
               AND source_report.business_date < bounds.business_date + 1)
             OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-              AND coalesce((receipt.delivery_date::timestamp AT TIME ZONE 'Asia/Manila'), movement.created_at) < bounds.day_end)
+              AND coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) < bounds.day_end)
           )
         GROUP BY movement.stock_item_id
       )
@@ -929,6 +943,11 @@ export class DailyReportsRepository {
       branchId,
       report.business_date,
     );
+    const shifts = await reportShiftSummaries(
+      executor,
+      branchId,
+      report.business_date,
+    );
     const delivery_exceptions = await executor
       .selectFrom('daily_report_delivery_exceptions as x')
       .innerJoin('daily_branch_report_events as e', 'e.id', 'x.report_event_id')
@@ -950,6 +969,7 @@ export class DailyReportsRepository {
       events,
       pending_deliveries,
       delivery_exceptions,
+      shifts,
     };
   }
 
@@ -1001,7 +1021,7 @@ export class DailyReportsRepository {
 
   private async manilaToday(executor: DbExecutor) {
     return sql<{ today: string }>`
-      SELECT (now() AT TIME ZONE 'Asia/Manila')::date::text AS today
+      SELECT coms_business_date(now())::text AS today
     `
       .execute(executor)
       .then((result) => result.rows[0]!);

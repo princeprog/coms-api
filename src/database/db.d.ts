@@ -3,18 +3,13 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from 'kysely';
+import type { ColumnType } from "kysely";
 
-export type Generated<T> =
-  T extends ColumnType<infer S, infer I, infer U>
-    ? ColumnType<S, I | undefined, U>
-    : ColumnType<T, T | undefined, T>;
+export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S, I | undefined, U>
+  : ColumnType<T, T | undefined, T>;
 
-export type Int8 = ColumnType<
-  string,
-  bigint | number | string,
-  bigint | number | string
->;
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
 export type Json = JsonValue;
 
@@ -148,6 +143,13 @@ export interface BranchProducts {
   product_id: string;
   service_types: Generated<string[]>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface BusinessDayRules {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  effective_from: Timestamp;
+  start_time: string;
 }
 
 export interface CommissaryInventory {
@@ -412,6 +414,11 @@ export interface MigrationMenuGrants {
   role_id: Int8;
 }
 
+export interface MigrationShiftGrants {
+  permission_id: Int8;
+  role_id: Int8;
+}
+
 export interface MigrationStockRequestPermissionCatalogBackup {
   action_key: string;
   description: string;
@@ -444,6 +451,7 @@ export interface NotificationEvents {
   receiving_source_id: string | null;
   report_event_id: string | null;
   report_id: string | null;
+  shift_id: string | null;
 }
 
 export interface NotificationRecipients {
@@ -515,6 +523,53 @@ export interface ReceivingNotificationSources {
   reminder_date: Timestamp | null;
 }
 
+export interface RegisterShiftCashMovements {
+  actor_user_id: string;
+  amount: Numeric;
+  created_at: Generated<Timestamp>;
+  direction: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  reason: string;
+  shift_id: string;
+}
+
+export interface RegisterShifts {
+  branch_id: string;
+  business_date: Timestamp;
+  cash_difference: Numeric | null;
+  cash_in_amount: Numeric | null;
+  cash_out_amount: Numeric | null;
+  cash_refunds_amount: Numeric | null;
+  cash_sales_amount: Numeric | null;
+  cashier_explanation: string | null;
+  close_idempotency_key: string | null;
+  close_type: string | null;
+  closed_at: Timestamp | null;
+  closed_by_user_id: string | null;
+  counted_cash: Numeric | null;
+  created_at: Generated<Timestamp>;
+  expected_cash: Numeric | null;
+  expected_opening_float: Numeric | null;
+  force_close_reason: string | null;
+  id: Generated<string>;
+  left_in_drawer: Numeric | null;
+  non_cash_sales_amount: Numeric | null;
+  open_idempotency_key: string;
+  opened_at: Generated<Timestamp>;
+  opened_by_user_id: string;
+  opening_difference: Numeric | null;
+  opening_float: Numeric;
+  review_note: string | null;
+  reviewed_at: Timestamp | null;
+  reviewed_by_user_id: string | null;
+  sales_count: number | null;
+  shift_number: number;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  voids_count: number | null;
+}
+
 export interface SaleEvents {
   actor_user_id: string;
   created_at: Generated<Timestamp>;
@@ -522,6 +577,7 @@ export interface SaleEvents {
   id: Generated<string>;
   idempotency_key: string | null;
   reason: string | null;
+  refund_shift_id: string | null;
   sale_id: string;
 }
 
@@ -552,9 +608,11 @@ export interface Sales {
   id: Generated<string>;
   idempotency_key: string;
   inventory_deducted: Generated<boolean>;
+  payment_kind: string | null;
   payment_method_id: string | null;
   sale_number: Generated<Int8>;
   service_type: string | null;
+  shift_id: string | null;
   status: string;
   tender_method: string;
   total_amount: Numeric;
@@ -635,19 +693,20 @@ export interface Suppliers {
 }
 
 export interface DB {
-  'auth.branch_users': AuthBranchUsers;
-  'auth.permissions': AuthPermissions;
-  'auth.rate_limit_buckets': AuthRateLimitBuckets;
-  'auth.refresh_tokens': AuthRefreshTokens;
-  'auth.role_permissions': AuthRolePermissions;
-  'auth.roles': AuthRoles;
-  'auth.sessions': AuthSessions;
-  'auth.token_families': AuthTokenFamilies;
-  'auth.users': AuthUsers;
+  "auth.branch_users": AuthBranchUsers;
+  "auth.permissions": AuthPermissions;
+  "auth.rate_limit_buckets": AuthRateLimitBuckets;
+  "auth.refresh_tokens": AuthRefreshTokens;
+  "auth.role_permissions": AuthRolePermissions;
+  "auth.roles": AuthRoles;
+  "auth.sessions": AuthSessions;
+  "auth.token_families": AuthTokenFamilies;
+  "auth.users": AuthUsers;
   branch_inventory: BranchInventory;
   branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
   branches: Branches;
+  business_day_rules: BusinessDayRules;
   commissary_inventory: CommissaryInventory;
   daily_branch_report_events: DailyBranchReportEvents;
   daily_branch_report_items: DailyBranchReportItems;
@@ -670,6 +729,7 @@ export interface DB {
   menu_template_items: MenuTemplateItems;
   menu_templates: MenuTemplates;
   migration_menu_grants: MigrationMenuGrants;
+  migration_shift_grants: MigrationShiftGrants;
   migration_stock_request_permission_catalog_backup: MigrationStockRequestPermissionCatalogBackup;
   migration_stock_request_permission_grant_backup: MigrationStockRequestPermissionGrantBackup;
   migration_supplier_receipt_create_description_backup: MigrationSupplierReceiptCreateDescriptionBackup;
@@ -682,6 +742,8 @@ export interface DB {
   product_setup_operations: ProductSetupOperations;
   products: Products;
   receiving_notification_sources: ReceivingNotificationSources;
+  register_shift_cash_movements: RegisterShiftCashMovements;
+  register_shifts: RegisterShifts;
   sale_events: SaleEvents;
   sale_item_consumptions: SaleItemConsumptions;
   sale_items: SaleItems;

@@ -7,17 +7,19 @@ export const notificationKinds = [
   'REPORT_APPROVED',
   'DISPATCH_OVERDUE',
   'DISPATCH_LATE_COUNT',
+  'SHIFT_NEEDS_REVIEW',
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
 export const notificationPolicy: Record<
   NotificationKind,
   {
-    module: 'dispatches' | 'daily_reports';
+    module: 'dispatches' | 'daily_reports' | 'shifts';
     actions: string[];
     review: boolean;
   }
 > = {
+  SHIFT_NEEDS_REVIEW: { module: 'shifts', actions: ['review'], review: true },
   DISPATCH_OVERDUE: {
     module: 'dispatches',
     actions: ['receive', 'shortage_close'],

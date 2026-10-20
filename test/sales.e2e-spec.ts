@@ -20,6 +20,7 @@ import {
   up as addReferences,
   down as removeReferences,
 } from '../src/database/migrations/20261020185858_sale_references';
+import { deleteTestShifts, openTestShift } from './shift-fixture';
 
 type TestRequest = { user?: { id: string } };
 
@@ -121,6 +122,7 @@ describe('sales routes (e2e)', () => {
       .insertInto('auth.branch_users')
       .values({ user_id: actorUserId, branch_id: branchId })
       .execute();
+    await openTestShift(db, branchId, actorUserId);
 
     const stockItem = await db
       .insertInto('stock_items')
@@ -276,6 +278,7 @@ describe('sales routes (e2e)', () => {
           .where('id', 'in', dailyReportIds)
           .execute();
       await clearSales();
+      await deleteTestShifts(db, branchIds);
       await db
         .deleteFrom('branch_inventory')
         .where('branch_id', 'in', branchIds)

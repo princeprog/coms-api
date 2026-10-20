@@ -13,6 +13,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openTestShift } from './shift-fixture';
 import {
   up as addPaymentMethods,
   down as removePaymentMethods,
@@ -162,6 +163,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           { branch_id: branch, user_id: central },
         ])
         .execute();
+      await openTestShift(db, branch, manager);
       stock = (
         await db
           .insertInto('stock_items')

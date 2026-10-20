@@ -9,6 +9,10 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import {
+  down as shiftsDown,
+  up as shiftsUp,
+} from '../src/database/migrations/20261020234124_register_shifts_and_business_day';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import request from 'supertest';
@@ -679,6 +683,7 @@ describe('notifications (disposable database)', () => {
       .select(sql<number>`count(*)::int`.as('total'))
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
+      await shiftsDown(tx);
       await followupDown(tx);
       await down(tx);
       const removed = await sql<{
@@ -687,6 +692,7 @@ describe('notifications (disposable database)', () => {
       expect(removed.rows[0].name).toBeNull();
       await up(tx);
       await followupUp(tx);
+      await shiftsUp(tx);
     });
     expect(
       await db

@@ -1,4 +1,6 @@
 import './config/load-env';
+import { BusinessDayModule } from './modules/business-day/business-day.module';
+import { ShiftsModule } from './modules/shifts/shifts.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProductCategoriesModule } from './modules/product-categories/product-categories.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
@@ -26,6 +28,8 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
 @Module({
   imports: [
+    BusinessDayModule,
+    ShiftsModule,
     NotificationsModule,
     PaymentMethodsModule,
     ProductCategoriesModule,

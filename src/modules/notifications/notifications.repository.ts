@@ -24,6 +24,7 @@ export class NotificationsRepository {
       .innerJoin('notification_events as ne', 'ne.id', 'nr.event_id')
       .innerJoin('branches as b', 'b.id', 'ne.branch_id')
       .leftJoin('daily_branch_reports as report', 'report.id', 'ne.report_id')
+      .leftJoin('register_shifts as shift', 'shift.id', 'ne.shift_id')
       .leftJoin(
         'receiving_notification_sources as rs',
         'rs.id',
@@ -46,6 +47,9 @@ export class NotificationsRepository {
             ...(access.permissions.includes('daily_reports.read')
               ? [eb('ne.report_id', 'is not', null)]
               : []),
+            ...(access.permissions.includes('shifts.read')
+              ? [eb('ne.shift_id', 'is not', null)]
+              : []),
           ]),
         );
     }
@@ -64,6 +68,8 @@ export class NotificationsRepository {
           records = records.where('ne.kind', 'like', 'DISPATCH_%');
         if (query.type === 'reports')
           records = records.where('ne.report_id', 'is not', null);
+        if (query.type === 'shifts')
+          records = records.where('ne.shift_id', 'is not', null);
         const total = await records
           .select(sql<number>`count(*)::int`.as('total'))
           .executeTakeFirstOrThrow();
@@ -75,8 +81,14 @@ export class NotificationsRepository {
             'b.branch_name',
             'ne.dispatch_id',
             'ne.report_id',
+            'ne.shift_id',
+            'shift.shift_number',
             'rs.overdue_count',
-            sql<string | null>`report.business_date::text`.as('business_date'),
+            sql<
+              string | null
+            >`coalesce(report.business_date, shift.business_date)::text`.as(
+              'business_date',
+            ),
             'nr.created_at',
             'nr.read_at',
           ])

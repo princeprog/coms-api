@@ -23,7 +23,7 @@ export function pendingReportDeliveries(
     .where(
       'd.dispatched_at',
       '<',
-      sql<Date>`(${date}::date + 1)::timestamp AT TIME ZONE 'Asia/Manila'`,
+      sql<Date>`coms_business_day_end(${date}::date)`,
     )
     .orderBy('d.dispatched_at')
     .orderBy('d.id')

@@ -310,6 +310,21 @@ export const PERMISSION_CATALOG = [
     action_key: 'apply',
     description: 'Apply templates to assigned branch menus',
   },
+  {
+    module_key: 'shifts',
+    action_key: 'read',
+    description: 'View register shifts',
+  },
+  {
+    module_key: 'shifts',
+    action_key: 'operate',
+    description: 'Open, close and record cash for your register shift',
+  },
+  {
+    module_key: 'shifts',
+    action_key: 'review',
+    description: 'Review and force-close register shifts',
+  },
 ] as const;
 
 export type PermissionKey =

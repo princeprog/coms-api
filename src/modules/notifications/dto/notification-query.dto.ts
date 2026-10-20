@@ -12,6 +12,6 @@ export class NotificationQueryDto {
   page_size = 10;
   @IsIn(['all', 'unread'])
   status: 'all' | 'unread' = 'all';
-  @IsIn(['all', 'dispatches', 'reports'])
-  type: 'all' | 'dispatches' | 'reports' = 'all';
+  @IsIn(['all', 'dispatches', 'reports', 'shifts'])
+  type: 'all' | 'dispatches' | 'reports' | 'shifts' = 'all';
 }

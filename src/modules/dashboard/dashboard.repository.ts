@@ -58,8 +58,8 @@ export class DashboardRepository {
         FROM sale_events AS se
         JOIN sales AS s ON s.id = se.sale_id
         JOIN selected_branches AS branch ON branch.id = s.branch_id
-        WHERE se.created_at >= ${range.startAt}
-          AND se.created_at < ${range.endExclusiveAt}
+        WHERE se.created_at >= coms_business_day_start(${range.from}::date)
+          AND se.created_at < coms_business_day_end(${range.to}::date)
           AND se.event_type IN ('COMPLETED', 'VOIDED')
       ),
       sales_totals AS (
@@ -160,13 +160,13 @@ export class DashboardRepository {
            FROM sale_items AS si WHERE si.sale_id = s.id) AS units
         FROM sale_events AS se
         JOIN sales AS s ON s.id = se.sale_id
-        WHERE se.created_at >= ${range.startAt}
-          AND se.created_at < ${range.endExclusiveAt}
+        WHERE se.created_at >= coms_business_day_start(${range.from}::date)
+          AND se.created_at < coms_business_day_end(${range.to}::date)
           AND (${branchId ?? null}::uuid IS NULL OR s.branch_id = ${branchId ?? null}::uuid)
           AND se.event_type IN ('COMPLETED', 'VOIDED')
       ),
       daily AS (
-        SELECT (created_at AT TIME ZONE 'Asia/Manila')::date AS business_date,
+        SELECT coms_business_date(created_at) AS business_date,
           coalesce(sum(total_amount) FILTER (WHERE event_type = 'COMPLETED'), 0)::text AS completed_sales_amount,
           count(*) FILTER (WHERE event_type = 'COMPLETED')::int AS completed_sales_count,
           coalesce(sum(total_amount) FILTER (WHERE event_type = 'VOIDED'), 0)::text AS voided_sales_amount,

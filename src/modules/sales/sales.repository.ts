@@ -13,6 +13,11 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import type { SaleQueryDto } from './dto/sale-query.dto';
+import {
+  lockOpenShift,
+  requireSellingShift,
+  salePaymentKind,
+} from '../shifts/shift-register';
 
 type DbExecutor = Kysely<DB> | Transaction<DB>;
 type Sale = Selectable<DB['sales']>;
@@ -61,13 +66,13 @@ export class SalesRepository {
           filtered = filtered.where(
             's.created_at',
             '>=',
-            sql<Date>`${query.date_from}::date AT TIME ZONE 'Asia/Manila'`,
+            sql<Date>`coms_business_day_start(${query.date_from}::date)`,
           );
         if (query.date_to)
           filtered = filtered.where(
             's.created_at',
             '<',
-            sql<Date>`(${query.date_to}::date + interval '1 day') AT TIME ZONE 'Asia/Manila'`,
+            sql<Date>`coms_business_day_end(${query.date_to}::date)`,
           );
         if (query.search) {
           const reference = /^S-0*([0-9]{1,19})$/i.exec(query.search);
@@ -196,6 +201,8 @@ export class SalesRepository {
           .executeTakeFirst();
         if (!branch || branch.status !== 'active')
           throw new NotFoundException('Active branch not found');
+        // Cash refunds come out of the drawer that is open now.
+        const openShiftId = await lockOpenShift(transaction, input.branchId);
 
         const sale = await transaction
           .selectFrom('sales')
@@ -210,8 +217,9 @@ export class SalesRepository {
           SELECT id, status
           FROM daily_branch_reports
           WHERE branch_id = ${sale.branch_id}
-            AND business_date =
-              (${sale.created_at}::timestamptz AT TIME ZONE 'Asia/Manila')::date
+            AND business_date = COALESCE(
+              (SELECT business_date FROM register_shifts WHERE id = ${sale.shift_id}::uuid),
+              coms_business_date(${sale.created_at}::timestamptz))
           FOR SHARE
         `.execute(transaction);
         if (dailyReport.rows[0]?.status === 'APPROVED')
@@ -234,6 +242,19 @@ export class SalesRepository {
             return this.findDetails(transaction, input.branchId, sale.id);
           throw new ConflictException('Only a completed sale can be voided');
         }
+
+        const kind = await sql<{ payment_kind: string }>`
+          SELECT ${salePaymentKind} AS payment_kind
+          FROM sales AS s
+          LEFT JOIN payment_methods AS pm ON pm.id = s.payment_method_id
+          WHERE s.id = ${sale.id}
+        `.execute(transaction);
+        if (kind.rows[0]?.payment_kind === 'CASH' && !openShiftId)
+          throw new ConflictException({
+            code: 'SHIFT_REQUIRED_FOR_REFUND',
+            message:
+              'Open a shift before voiding a cash sale so the refund is taken from the drawer.',
+          });
 
         if (sale.inventory_deducted) {
           const originalMovements = await transaction
@@ -388,6 +409,7 @@ export class SalesRepository {
             actor_user_id: input.actorUserId,
             reason: input.reason,
             idempotency_key: input.idempotencyKey,
+            refund_shift_id: openShiftId,
           })
           .execute();
 
@@ -449,6 +471,11 @@ export class SalesRepository {
       throw new ConflictException(
         'This branch does not support the selected service type',
       );
+    const shiftId = await requireSellingShift(
+      transaction,
+      input.branchId,
+      input.actorUserId,
+    );
 
     const productIds = input.items.map(({ productId }) => productId).sort();
     const products = await transaction
@@ -563,6 +590,8 @@ export class SalesRepository {
         inventory_deducted: false,
         total_amount: totalAmount,
         idempotency_key: input.idempotencyKey,
+        shift_id: shiftId,
+        payment_kind: paymentMethod.kind,
       })
       .returningAll()
       .executeTakeFirstOrThrow();
