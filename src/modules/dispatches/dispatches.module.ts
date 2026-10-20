@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { DispatchesController } from './dispatches.controller';
@@ -8,7 +9,7 @@ import { DispatchesRepository } from './dispatches.repository';
 import { DispatchesService } from './dispatches.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, NotificationsModule],
   controllers: [DispatchesController],
   providers: [
     DispatchesRepository,

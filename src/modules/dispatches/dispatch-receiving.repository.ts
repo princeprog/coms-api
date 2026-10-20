@@ -1,3 +1,4 @@
+import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import {
   BadRequestException,
   ConflictException,
@@ -33,6 +34,7 @@ export class DispatchReceivingRepository {
   constructor(
     @Inject(DATABASE) private readonly db: Kysely<DB>,
     private readonly queries: DispatchesRepository,
+    private readonly notifications: NotificationWriterRepository,
   ) {}
 
   async receive(input: ReceiveInput) {
@@ -101,7 +103,9 @@ export class DispatchReceivingRepository {
         const lines = await this.queries.loadOutstanding(transaction, input.id);
         const inTransit = new Map(
           lines
-            .filter((line) => compareDecimal(line.quantity_outstanding, '0') > 0)
+            .filter(
+              (line) => compareDecimal(line.quantity_outstanding, '0') > 0,
+            )
             .map((line) => [line.id, line]),
         );
         if (
@@ -278,7 +282,9 @@ export class DispatchReceivingRepository {
           dispatch.status === 'RECEIVED' ||
           dispatch.status === 'CLOSED_WITH_SHORTAGE'
         )
-          throw new ConflictException('This dispatch has no unresolved variance');
+          throw new ConflictException(
+            'This dispatch has no unresolved variance',
+          );
         if (dispatch.counted_by_user_id === input.actor_user_id)
           throw new ForbiddenException(
             'The person who counted this delivery cannot resolve its variance',
@@ -456,7 +462,8 @@ export class DispatchReceivingRepository {
         inventory_scope: 'COMMISSARY',
         branch_id: null,
         stock_item_id: line.stock_item_id,
-        movement_type: outcome === 'NOT_LOADED' ? 'DISPATCH_RETURN' : 'DISPATCH',
+        movement_type:
+          outcome === 'NOT_LOADED' ? 'DISPATCH_RETURN' : 'DISPATCH',
         quantity_delta: outcome === 'NOT_LOADED' ? quantity : negate(quantity),
         actor_user_id: actorUserId,
         dispatch_shortage_closure_item_id: entry.closureItemId,
@@ -465,7 +472,7 @@ export class DispatchReceivingRepository {
   }
 
   private async openVariance(
-    transaction: DispatchDbExecutor,
+    transaction: Transaction<DB>,
     input: ReceiveInput,
   ) {
     const active = await sql<{ id: string }>`
@@ -484,17 +491,30 @@ export class DispatchReceivingRepository {
     const discrepancyId = discrepancy.rows[0]?.id;
     if (!discrepancyId)
       throw new ConflictException('Could not create discrepancy record');
-    await sql`
+    const notificationSource = await sql<{ id: string }>`
       INSERT INTO dispatch_discrepancy_events
         (discrepancy_id, event_type, actor_user_id, note, idempotency_key)
       VALUES
         (${discrepancyId}, 'REPORTED', ${input.actor_user_id},
          ${input.note ?? DEFAULT_VARIANCE_NOTE}, ${input.idempotency_key})
+      RETURNING id
     `.execute(transaction);
+    const notificationDispatch = await transaction
+      .selectFrom('dispatches')
+      .select('branch_id')
+      .where('id', '=', input.id)
+      .executeTakeFirstOrThrow();
+    await this.notifications.publish(transaction, {
+      kind: 'DISPATCH_DISCREPANCY',
+      discrepancy_event_id: notificationSource.rows[0].id,
+      dispatch_id: input.id,
+      branch_id: notificationDispatch.branch_id,
+      actor_user_id: input.actor_user_id,
+    });
   }
 
   private async resolveDiscrepancyIfComplete(
-    transaction: DispatchDbExecutor,
+    transaction: Transaction<DB>,
     dispatchId: string,
     actorUserId: string,
     idempotencyKey: string,
@@ -514,12 +534,25 @@ export class DispatchReceivingRepository {
       SET status = 'RESOLVED', resolved_at = now(), updated_at = now()
       WHERE id = ${discrepancyId}
     `.execute(transaction);
-    await sql`
+    const notificationSource = await sql<{ id: string }>`
       INSERT INTO dispatch_discrepancy_events
         (discrepancy_id, event_type, actor_user_id, note, idempotency_key)
       VALUES
         (${discrepancyId}, ${eventType}, ${actorUserId}, ${note}, ${idempotencyKey})
+      RETURNING id
     `.execute(transaction);
+    const notificationDispatch = await transaction
+      .selectFrom('dispatches')
+      .select('branch_id')
+      .where('id', '=', dispatchId)
+      .executeTakeFirstOrThrow();
+    await this.notifications.publish(transaction, {
+      kind: 'DISPATCH_RESOLVED',
+      discrepancy_event_id: notificationSource.rows[0].id,
+      dispatch_id: dispatchId,
+      branch_id: notificationDispatch.branch_id,
+      actor_user_id: actorUserId,
+    });
   }
 
   private findReceiptByIdempotencyKey(

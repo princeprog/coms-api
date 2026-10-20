@@ -401,6 +401,27 @@ export interface MigrationSupplierReceiptPostGrantBackup {
   role_id: Int8;
 }
 
+export interface NotificationEvents {
+  actor_user_id: string | null;
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  discrepancy_event_id: string | null;
+  dispatch_event_id: string | null;
+  dispatch_id: string | null;
+  id: Generated<string>;
+  kind: string;
+  report_event_id: string | null;
+  report_id: string | null;
+}
+
+export interface NotificationRecipients {
+  created_at: Generated<Timestamp>;
+  event_id: string;
+  id: Generated<string>;
+  read_at: Timestamp | null;
+  user_id: string;
+}
+
 export interface PaymentMethods {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
@@ -606,6 +627,8 @@ export interface DB {
   migration_stock_request_permission_grant_backup: MigrationStockRequestPermissionGrantBackup;
   migration_supplier_receipt_create_description_backup: MigrationSupplierReceiptCreateDescriptionBackup;
   migration_supplier_receipt_post_grant_backup: MigrationSupplierReceiptPostGrantBackup;
+  notification_events: NotificationEvents;
+  notification_recipients: NotificationRecipients;
   payment_methods: PaymentMethods;
   product_categories: ProductCategories;
   product_ingredients: ProductIngredients;

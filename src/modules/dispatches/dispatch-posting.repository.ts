@@ -1,3 +1,4 @@
+import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import {
   BadRequestException,
   ConflictException,
@@ -25,6 +26,7 @@ export class DispatchPostingRepository {
   constructor(
     @Inject(DATABASE) private readonly db: Kysely<DB>,
     private readonly queries: DispatchesRepository,
+    private readonly notifications: NotificationWriterRepository,
   ) {}
 
   async createAndSend(input: SendDispatchInput) {
@@ -52,7 +54,7 @@ export class DispatchPostingRepository {
           })
           .returning('id')
           .executeTakeFirstOrThrow();
-        await transaction
+        const notificationSource = await transaction
           .insertInto('dispatch_events')
           .values({
             dispatch_id: dispatch.id,
@@ -60,7 +62,15 @@ export class DispatchPostingRepository {
             actor_user_id: input.created_by_user_id,
             idempotency_key: input.idempotency_key,
           })
-          .execute();
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await this.notifications.publish(transaction, {
+          kind: 'DISPATCH_SENT',
+          dispatch_event_id: notificationSource.id,
+          dispatch_id: dispatch.id,
+          branch_id: input.branch_id,
+          actor_user_id: input.created_by_user_id,
+        });
         await transaction
           .insertInto('dispatch_items')
           .values(
@@ -213,7 +223,7 @@ export class DispatchPostingRepository {
           })
           .where('id', '=', input.id)
           .executeTakeFirstOrThrow();
-        await transaction
+        const notificationSource = await transaction
           .insertInto('dispatch_events')
           .values({
             dispatch_id: input.id,
@@ -221,7 +231,15 @@ export class DispatchPostingRepository {
             actor_user_id: input.actor_user_id,
             idempotency_key: input.idempotency_key,
           })
-          .execute();
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await this.notifications.publish(transaction, {
+          kind: 'DISPATCH_SENT',
+          dispatch_event_id: notificationSource.id,
+          dispatch_id: input.id,
+          branch_id: dispatch.branch_id,
+          actor_user_id: input.actor_user_id,
+        });
 
         const details = await this.queries.findDetails(transaction, input.id);
         if (!details) throw new NotFoundException('Dispatch not found');

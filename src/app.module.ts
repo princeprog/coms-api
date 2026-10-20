@@ -1,4 +1,5 @@
 import './config/load-env';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProductCategoriesModule } from './modules/product-categories/product-categories.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 
@@ -25,6 +26,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
 @Module({
   imports: [
+    NotificationsModule,
     PaymentMethodsModule,
     ProductCategoriesModule,
     // Distributed tracing, auto-correlated logs, request/job metrics, error

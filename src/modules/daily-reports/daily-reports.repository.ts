@@ -1,3 +1,4 @@
+import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import {
   paginatedResult,
   paginationOffset,
@@ -37,7 +38,10 @@ type LedgerTotals = {
 
 @Injectable()
 export class DailyReportsRepository {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    private readonly notifications: NotificationWriterRepository,
+  ) {}
 
   async list(branchId: string, query: DailyReportQueryDto) {
     await this.requireBranch(this.db, branchId);
@@ -394,14 +398,22 @@ export class DailyReportsRepository {
         })
         .where('id', '=', reportId)
         .execute();
-      await transaction
+      const notificationSource = await transaction
         .insertInto('daily_branch_report_events')
         .values({
           daily_branch_report_id: reportId,
           event_type: 'SUBMITTED',
           actor_user_id: actorUserId,
         })
-        .execute();
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.notifications.publish(transaction, {
+        kind: 'REPORT_SUBMITTED',
+        report_event_id: notificationSource.id,
+        report_id: reportId,
+        branch_id: branchId,
+        actor_user_id: actorUserId,
+      });
       return this.findDetails(transaction, branchId, reportId);
     });
   }
@@ -435,7 +447,7 @@ export class DailyReportsRepository {
         })
         .where('id', '=', reportId)
         .execute();
-      await transaction
+      const notificationSource = await transaction
         .insertInto('daily_branch_report_events')
         .values({
           daily_branch_report_id: reportId,
@@ -443,7 +455,15 @@ export class DailyReportsRepository {
           actor_user_id: actorUserId,
           note: reason,
         })
-        .execute();
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.notifications.publish(transaction, {
+        kind: 'REPORT_RETURNED',
+        report_event_id: notificationSource.id,
+        report_id: reportId,
+        branch_id: branchId,
+        actor_user_id: actorUserId,
+      });
       return this.findDetails(transaction, branchId, reportId);
     });
   }
@@ -576,14 +596,22 @@ export class DailyReportsRepository {
         })
         .where('id', '=', reportId)
         .execute();
-      await transaction
+      const notificationSource = await transaction
         .insertInto('daily_branch_report_events')
         .values({
           daily_branch_report_id: reportId,
           event_type: 'APPROVED',
           actor_user_id: actorUserId,
         })
-        .execute();
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.notifications.publish(transaction, {
+        kind: 'REPORT_APPROVED',
+        report_event_id: notificationSource.id,
+        report_id: reportId,
+        branch_id: branchId,
+        actor_user_id: actorUserId,
+      });
       return this.findDetails(transaction, branchId, reportId);
     });
   }
