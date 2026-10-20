@@ -27,6 +27,14 @@ export class ShiftsService {
     return this.visible(await this.repository.find(branchId, shiftId), access);
   }
 
+  async mine(access: AccessContext) {
+    const shift = await this.repository.currentForUser(
+      access.userId,
+      isSuperAdmin(access) ? null : access.branchIds,
+    );
+    return { shift: shift ? this.visible(shift, access) : null };
+  }
+
   list(branchId: string, query: ShiftQueryDto) {
     if (query.date_from && query.date_to && query.date_from > query.date_to)
       throw new BadRequestException('Start date must be on or before end date');

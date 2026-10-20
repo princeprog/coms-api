@@ -355,6 +355,15 @@ describe('register shifts and business day (disposable database)', () => {
       expected_opening_float: null,
       cash_hidden: true,
     });
+    const mine = (await get(winner, '/shifts/mine').expect(200)).body.shift;
+    expect(mine).toMatchObject({
+      id: shift.id,
+      branch_name: expect.stringContaining('Shift branch'),
+      cash_hidden: true,
+    });
+    expect(
+      (await get(other, '/shifts/mine').expect(200)).body.shift,
+    ).toBeNull();
 
     expect((await sell(other)).body.code).toBe('SHIFT_OWNED_BY_OTHER');
     const cashSale = (await sell(winner).expect(201)).body;

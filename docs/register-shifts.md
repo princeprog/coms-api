@@ -10,6 +10,10 @@ Each branch runs one register shift at a time. The cashier who opens it counts t
 - `PUT /settings/business-day` (Super Admin): `{start_time: "HH:00"|"HH:30", effective_from}`; the date must follow the current business day and the new start must be in the future. Replaces any scheduled rule.
 - `DELETE /settings/business-day/scheduled` (Super Admin).
 
+## My shift (`GET /shifts/mine`, `shifts.read`)
+
+Returns `{shift}`: the signed-in user's open shift in any branch they can access (Super Admin: any branch), or `null`. It is not branch-scoped so the app header can show shift status before a branch is chosen. Shift payloads include `branch_name`.
+
 ## Shifts API (`/branches/:branchId/shifts`, branch-scoped, UUID `Idempotency-Key` on open, cash and close actions)
 
 | Route | Permission | Notes |

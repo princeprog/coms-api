@@ -42,6 +42,7 @@ export class ShiftsRepository {
   private shifts(executor: Executor) {
     return executor
       .selectFrom('register_shifts as shift')
+      .innerJoin('branches as branch', 'branch.id', 'shift.branch_id')
       .innerJoin('auth.users as opener', 'opener.id', 'shift.opened_by_user_id')
       .leftJoin('auth.users as closer', 'closer.id', 'shift.closed_by_user_id')
       .leftJoin(
@@ -52,6 +53,7 @@ export class ShiftsRepository {
       .select([
         'shift.id',
         'shift.branch_id',
+        'branch.branch_name',
         sql<string>`shift.business_date::text`.as('business_date'),
         'shift.shift_number',
         'shift.status',
@@ -101,6 +103,26 @@ export class ShiftsRepository {
 
   find(branchId: string, shiftId: string) {
     return this.detail(this.db, branchId, shiftId);
+  }
+
+  /** The open shift this user is running, at any branch they can access. */
+  async currentForUser(userId: string, branchIds: string[] | null) {
+    let query = this.db
+      .selectFrom('register_shifts')
+      .select(['id', 'branch_id'])
+      .where('opened_by_user_id', '=', userId)
+      .where('status', '=', 'OPEN');
+    if (branchIds)
+      query = query.where(
+        'branch_id',
+        'in',
+        branchIds.length ? branchIds : [sql<string>`NULL`],
+      );
+    const shift = await query
+      .orderBy('opened_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return shift ? this.detail(this.db, shift.branch_id, shift.id) : null;
   }
 
   async list(branchId: string, query: ShiftQueryDto) {
