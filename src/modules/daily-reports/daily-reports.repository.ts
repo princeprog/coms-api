@@ -639,6 +639,14 @@ export class DailyReportsRepository {
         report.business_date,
       );
 
+      // Value variance and waste at the cost in effect when the count is approved.
+      await sql`
+        UPDATE daily_branch_report_items AS i
+        SET unit_cost = c.average_unit_cost
+        FROM stock_item_costs AS c
+        WHERE c.stock_item_id = i.stock_item_id
+          AND i.daily_branch_report_id = ${reportId}::uuid
+      `.execute(transaction);
       await transaction
         .updateTable('daily_branch_reports')
         .set({

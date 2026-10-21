@@ -9,6 +9,7 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import { findReceiptDetails } from './receipt-details';
+import { applyReceiptCost } from '../costs/stock-costs';
 export type ReceiptKind = 'SUPPLIER_DELIVERY' | 'DIRECT_PURCHASE';
 export type CreateReceiptInput = {
   receipt_kind: ReceiptKind;
@@ -98,7 +99,7 @@ export class ReceiptPostingRepository {
               unit_cost: item.unit_cost,
             })),
           )
-          .returning(['id', 'stock_item_id', 'quantity_received'])
+          .returning(['id', 'stock_item_id', 'quantity_received', 'unit_cost'])
           .execute();
 
         await transaction
@@ -124,6 +125,13 @@ export class ReceiptPostingRepository {
           .forUpdate()
           .execute();
         for (const item of receiptItems) {
+          await applyReceiptCost(transaction, {
+            stockItemId: item.stock_item_id,
+            quantity: item.quantity_received,
+            unitCost: item.unit_cost,
+            receivedAt: input.received_at,
+            actorUserId: input.recorded_by_user_id,
+          });
           await transaction
             .updateTable('commissary_inventory')
             .set({

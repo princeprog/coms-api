@@ -45,5 +45,4 @@ export class SupplierReceiptsController {
   ) {
     return this.service.create(dto, access.userId, idempotencyKey);
   }
-
 }

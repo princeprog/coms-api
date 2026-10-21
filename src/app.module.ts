@@ -23,6 +23,7 @@ import { BranchProductsModule } from './modules/branch-products/branch-products.
 import { SalesModule } from './modules/sales/sales.module';
 import { DailyReportsModule } from './modules/daily-reports/daily-reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { CostsModule } from './modules/costs/costs.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -54,6 +55,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     SalesModule,
     DailyReportsModule,
     DashboardModule,
+    CostsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

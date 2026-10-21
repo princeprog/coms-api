@@ -61,8 +61,8 @@ async function main() {
       'vitest.mjs',
     );
     const args = process.argv.slice(2);
-    const unit = args.includes("--unit");
-    if (unit) args.splice(args.indexOf("--unit"),1);
+    const unit = args.includes('--unit');
+    if (unit) args.splice(args.indexOf('--unit'), 1);
     const run = spawnSync(
       process.execPath,
       [

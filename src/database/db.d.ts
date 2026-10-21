@@ -182,6 +182,7 @@ export interface DailyBranchReportItems {
   sale_consumption_quantity: Numeric;
   sale_void_reversal_quantity: Numeric;
   stock_item_id: string;
+  unit_cost: Numeric | null;
   updated_at: Generated<Timestamp>;
   variance_quantity: Numeric | null;
   waste_quantity: Generated<Numeric>;
@@ -587,6 +588,7 @@ export interface SaleItemConsumptions {
   quantity_consumed: Numeric;
   sale_item_id: string;
   stock_item_id: string;
+  unit_cost: Numeric | null;
 }
 
 export interface SaleItems {
@@ -616,6 +618,16 @@ export interface Sales {
   status: string;
   tender_method: string;
   total_amount: Numeric;
+}
+
+export interface StockItemCosts {
+  average_unit_cost: Numeric;
+  cost_source: string;
+  last_received_at: Timestamp | null;
+  last_unit_cost: Numeric | null;
+  stock_item_id: string;
+  updated_at: Generated<Timestamp>;
+  updated_by_user_id: string | null;
 }
 
 export interface StockItems {
@@ -748,6 +760,7 @@ export interface DB {
   sale_item_consumptions: SaleItemConsumptions;
   sale_items: SaleItems;
   sales: Sales;
+  stock_item_costs: StockItemCosts;
   stock_items: StockItems;
   stock_request_events: StockRequestEvents;
   stock_request_items: StockRequestItems;

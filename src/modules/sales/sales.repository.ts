@@ -18,6 +18,7 @@ import {
   requireSellingShift,
   salePaymentKind,
 } from '../shifts/shift-register';
+import { currentUnitCosts } from '../costs/stock-costs';
 
 type DbExecutor = Kysely<DB> | Transaction<DB>;
 type Sale = Selectable<DB['sales']>;
@@ -667,6 +668,10 @@ export class SalesRepository {
     recipeConsumption: RecipeConsumption[],
   ) {
     if (!recipeConsumption.length) return;
+    // Snapshot today's average cost so later cost changes never rewrite profit.
+    const unitCosts = await currentUnitCosts(transaction, [
+      ...new Set(recipeConsumption.map((line) => line.stock_item_id)),
+    ]);
     const saleItemIdByProduct = new Map(
       saleItems.map(({ id, product_id }) => [product_id, id]),
     );
@@ -683,6 +688,7 @@ export class SalesRepository {
             sale_item_id: saleItemId,
             stock_item_id: line.stock_item_id,
             quantity_consumed: line.quantity_consumed,
+            unit_cost: unitCosts.get(line.stock_item_id) ?? null,
           };
         }),
       )

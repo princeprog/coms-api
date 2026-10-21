@@ -782,6 +782,14 @@ describe('daily report routes (e2e)', () => {
       .expect(200)
       .expect(({ body }) => expect(body.status).toBe('SUBMITTED'));
 
+    await db
+      .insertInto('stock_item_costs')
+      .values({
+        stock_item_id: stockItemId,
+        average_unit_cost: '12.5',
+        cost_source: 'MANUAL',
+      })
+      .execute();
     activeActorId = reviewerId;
     const approvalResponses = await Promise.all([
       request(app.getHttpServer())
@@ -807,6 +815,18 @@ describe('daily report routes (e2e)', () => {
       '13.25',
     );
     expect(normalizeDecimal(approvedItem.variance_quantity)).toBe('-0.75');
+    // Approval values the count at the cost in effect at that moment.
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('daily_branch_report_items')
+            .select('unit_cost')
+            .where('id', '=', approvedItem.id)
+            .executeTakeFirstOrThrow()
+        ).unit_cost,
+      ),
+    ).toBe(12.5);
 
     const balance = await db
       .selectFrom('branch_inventory')

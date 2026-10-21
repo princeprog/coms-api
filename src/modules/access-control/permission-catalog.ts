@@ -325,6 +325,21 @@ export const PERMISSION_CATALOG = [
     action_key: 'review',
     description: 'Review and force-close register shifts',
   },
+  {
+    module_key: 'costs',
+    action_key: 'read',
+    description: 'View costs and profit for assigned branches',
+  },
+  {
+    module_key: 'costs',
+    action_key: 'global_read',
+    description: 'View costs and profit for all branches',
+  },
+  {
+    module_key: 'costs',
+    action_key: 'manage',
+    description: 'Set stock item costs',
+  },
 ] as const;
 
 export type PermissionKey =

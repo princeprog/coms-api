@@ -285,6 +285,51 @@ export const productCategoryNames: Record<string, string> = {
   'Sago at Gulaman 16oz': 'Beverages',
 };
 
+// Typical Metro Manila wholesale unit costs (PHP per stock unit) for opening
+// stock, so cost and profit reports have values before real deliveries.
+export const sampleUnitCosts: Record<string, string> = {
+  'Dinorado Rice': '62',
+  'Jasmine Rice': '55',
+  'Chicken Leg Quarter': '185',
+  'Pork Belly': '340',
+  'Beef Brisket': '420',
+  'Boneless Bangus': '95',
+  Tilapia: '140',
+  'Medium Shrimp': '380',
+  'Chicken Eggs - Large': '8.5',
+  'Evaporated Milk 370ml': '38',
+  'Condensed Milk 300ml': '55',
+  'Red Onion': '140',
+  Garlic: '130',
+  Ginger: '120',
+  Tomato: '80',
+  Kangkong: '60',
+  Calamansi: '90',
+  'Ripe Mango': '140',
+  'Soy Sauce': '65',
+  'Cane Vinegar': '45',
+  'Fish Sauce': '70',
+  'Cooking Oil': '110',
+  'Brown Sugar': '75',
+  'Iodized Salt': '30',
+  'Ground Black Pepper': '520',
+  'Adobo Sauce Base': '120',
+  'Marinated Chicken Inasal': '75',
+  'Pork Sisig Mix': '380',
+  'Beef Tapa - Marinated': '480',
+  'Pork Tocino': '330',
+  'Skinless Longganisa': '300',
+  'Lumpiang Shanghai - Frozen': '4.5',
+  'Bottled Water 500ml': '12',
+  'Cola 330ml': '28',
+  'Kraft Meal Box 750ml': '7.5',
+  'Paper Bowl with Lid 500ml': '6',
+  'Cold Cup with Lid 16oz': '5.5',
+  'Wooden Spoon and Fork Set': '2.5',
+  'Table Napkin': '45',
+  'Dishwashing Liquid': '95',
+};
+
 // Per unit sold, in each stock item's unit. Rice is raw weight per cooked
 // serving. Packaging and utensils are Takeout only. Items COMS does not stock
 // (noodles, tea, sago, gulaman, buko, peanut sauce) are left out.

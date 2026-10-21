@@ -10,6 +10,7 @@ import {
   productRecipes,
   products,
   productCategoryNames,
+  sampleUnitCosts,
   stockItems,
   suppliers,
 } from './philippine-sample-data';
@@ -25,7 +26,8 @@ type Counts = Record<
   | 'paymentMethods'
   | 'inventoryBalances'
   | 'inventoryMovements'
-  | 'recipeLines',
+  | 'recipeLines'
+  | 'stockCosts',
   number
 >;
 const emptyCounts = (): Counts => ({
@@ -38,6 +40,7 @@ const emptyCounts = (): Counts => ({
   inventoryBalances: 0,
   inventoryMovements: 0,
   recipeLines: 0,
+  stockCosts: 0,
 });
 
 function seedId(key: string): string {
@@ -188,6 +191,21 @@ async function populate(tx: Transaction<DB>, actorId: string): Promise<Counts> {
     if (!existing) counts.stockItems++;
     // Never add stock to a preexisting item that happens to share a sample name.
     if (row.id !== id || !row.is_active || row.unit !== unit) continue;
+    const unitCost = sampleUnitCosts[name];
+    if (!unitCost) throw new Error('Missing sample unit cost: ' + name);
+    // Only items with no cost yet; real receipts and manual costs win.
+    const costed = await tx
+      .insertInto('stock_item_costs')
+      .values({
+        stock_item_id: id,
+        average_unit_cost: unitCost,
+        cost_source: 'MANUAL',
+        updated_by_user_id: actorId,
+      })
+      .onConflict((c) => c.column('stock_item_id').doNothing())
+      .returning('stock_item_id')
+      .executeTakeFirst();
+    if (costed) counts.stockCosts++;
     const locations = [
       { branchId: null, quantity: commissaryQty },
       ...seedBranches.map((branch) => ({
@@ -361,6 +379,7 @@ const snapshotTables = [
   'branches',
   'suppliers',
   'stock_items',
+  'stock_item_costs',
   'products',
   'product_ingredients',
   'payment_methods',
