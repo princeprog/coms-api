@@ -7,6 +7,7 @@ import type { DB } from '../src/database/db';
 import {
   branches,
   paymentMethods,
+  productRecipes,
   products,
   productCategoryNames,
   stockItems,
@@ -23,7 +24,8 @@ type Counts = Record<
   | 'menuItems'
   | 'paymentMethods'
   | 'inventoryBalances'
-  | 'inventoryMovements',
+  | 'inventoryMovements'
+  | 'recipeLines',
   number
 >;
 const emptyCounts = (): Counts => ({
@@ -35,6 +37,7 @@ const emptyCounts = (): Counts => ({
   paymentMethods: 0,
   inventoryBalances: 0,
   inventoryMovements: 0,
+  recipeLines: 0,
 });
 
 function seedId(key: string): string {
@@ -174,6 +177,11 @@ async function populate(tx: Transaction<DB>, actorId: string): Promise<Counts> {
           stock_item_name: name,
           category,
           unit,
+          // Only operating supplies stay out of product recipes.
+          usage_types:
+            category === 'Cleaning supplies'
+              ? ['OPERATING_SUPPLY']
+              : ['INGREDIENT'],
         })
         .returningAll()
         .executeTakeFirstOrThrow());
@@ -287,6 +295,7 @@ async function populate(tx: Transaction<DB>, actorId: string): Promise<Counts> {
         .executeTakeFirstOrThrow());
     if (!existing) counts.products++;
     if (product.id !== id || !product.is_active) continue;
+    counts.recipeLines += await seedRecipe(tx, id, name);
     for (const branch of seedBranches) {
       const services = product.service_types.filter(
         (service) =>
@@ -312,11 +321,48 @@ async function populate(tx: Transaction<DB>, actorId: string): Promise<Counts> {
   return counts;
 }
 
+// Fills an empty recipe only; any existing line means the recipe is owned by
+// someone and stays untouched. A recipe is written whole or not at all.
+async function seedRecipe(
+  tx: Transaction<DB>,
+  productId: string,
+  name: string,
+) {
+  const recipe = productRecipes[name];
+  if (!recipe) throw new Error('Missing sample recipe: ' + name);
+  const existing = await tx
+    .selectFrom('product_ingredients')
+    .select('stock_item_id')
+    .where('product_id', '=', productId)
+    .executeTakeFirst();
+  if (existing) return 0;
+  const lines = [];
+  for (const [stockName, quantity, scope] of recipe) {
+    const stock = await tx
+      .selectFrom('stock_items')
+      .select(['id', 'is_active', 'usage_types'])
+      .where('id', '=', seedId(`stock:${stockName}`))
+      .executeTakeFirst();
+    if (!stock?.is_active || stock.usage_types.includes('OPERATING_SUPPLY'))
+      return 0;
+    lines.push({
+      product_id: productId,
+      stock_item_id: stock.id,
+      quantity_required: quantity,
+      usage_scope: scope,
+      component_type: 'INGREDIENT',
+    });
+  }
+  await tx.insertInto('product_ingredients').values(lines).execute();
+  return lines.length;
+}
+
 const snapshotTables = [
   'branches',
   'suppliers',
   'stock_items',
   'products',
+  'product_ingredients',
   'payment_methods',
   'branch_products',
   'commissary_inventory',

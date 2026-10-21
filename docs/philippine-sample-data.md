@@ -20,3 +20,7 @@ Before committing, checks verify preservation of existing catalog, inventory and
 Applied on 2026-10-19 to local `coms-db`: 8 branches, 8 suppliers, 40 stock items, 30 products, 240 menu entries, 4 new payment methods (existing Cash/GCash retained), and 360 balances with 360 ledger entries. A fresh post-commit dry run added zero records.
 
 Product categories are required after migration `20261019235124_product_categories`. New sample products use the explicit name-to-category mapping in `scripts/philippine-sample-data.ts`, validate that the mapped category is active, and hold a category lock during insertion. Existing products retain later category assignments and category renames. The script does not guess or create replacement categories. Fresh disposable verification created all 30 sample products and 240 menu entries inside a dry run, passed repeat-run checks, then rolled back. The migrated local database dry run adds zero rows.
+
+## Product recipes
+
+Every sample product gets a recipe built from sample stock: quantities per unit sold in each stock item's unit (rice as raw weight per serving), with meal boxes, bowls, cups and utensils applied to Takeout only. Items COMS doesn't stock (noodles, tea, sago, gulaman, buko, peanut sauce) are left out. The seed only fills a product with no recipe lines, writes a recipe whole or not at all, and skips operating supplies. Sample cleaning supplies are created as operating supplies.
