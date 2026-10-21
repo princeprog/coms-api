@@ -17,17 +17,27 @@ import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CreateSupplierReceiptDto } from './dto/create-supplier-receipt.dto';
 import { SupplierReceiptQueryDto } from './dto/supplier-receipt-query.dto';
+import { ReceiptExportService } from './receipt-export.service';
 import { SupplierReceiptsService } from './supplier-receipts.service';
 
 @Controller('supplier-receipts')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 export class SupplierReceiptsController {
-  constructor(private readonly service: SupplierReceiptsService) {}
+  constructor(
+    private readonly service: SupplierReceiptsService,
+    private readonly exports: ReceiptExportService,
+  ) {}
 
   @Get()
   @RequirePermission('supplier_receipts.read')
   list(@Query() query: SupplierReceiptQueryDto) {
     return this.service.list(query);
+  }
+
+  @Get('export')
+  @RequirePermission('supplier_receipts.read')
+  exportLines(@Query() query: SupplierReceiptQueryDto) {
+    return this.exports.supplierDeliveries(query);
   }
 
   @Get(':id')

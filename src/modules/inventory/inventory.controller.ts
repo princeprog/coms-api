@@ -21,12 +21,48 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { CreateInventoryAdjustmentDto } from './dto/create-inventory-adjustment.dto';
 import { InventoryMovementQueryDto } from './dto/inventory-movement-query.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
+import { InventoryExportService } from './inventory-export.service';
 import { InventoryService } from './inventory.service';
 
 @Controller('inventory')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 export class InventoryController {
-  constructor(private readonly service: InventoryService) {}
+  constructor(
+    private readonly service: InventoryService,
+    private readonly exports: InventoryExportService,
+  ) {}
+
+  @Get('commissary/export')
+  @RequirePermission('inventory.commissary_read')
+  exportCommissary(@Query() query: InventoryQueryDto) {
+    return this.exports.commissaryBalances(query);
+  }
+
+  @Get('commissary/movements/export')
+  @RequirePermission('inventory.commissary_read')
+  exportCommissaryMovements(@Query() query: InventoryMovementQueryDto) {
+    return this.exports.commissaryMovements(query);
+  }
+
+  @Get('branches/:branchId/export')
+  @RequirePermission('inventory.read')
+  @RequireBranchScope()
+  exportBranch(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query() query: InventoryQueryDto,
+  ) {
+    return this.exports.branchBalances(branchId, query);
+  }
+
+  @Get('branches/:branchId/movements/export')
+  @RequirePermission('inventory.read')
+  @RequireBranchScope()
+  exportBranchMovements(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query() query: InventoryMovementQueryDto,
+  ) {
+    return this.exports.branchMovements(branchId, query);
+  }
 
   @Get('commissary')
   @RequirePermission('inventory.commissary_read')

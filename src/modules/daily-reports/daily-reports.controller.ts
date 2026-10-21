@@ -24,6 +24,7 @@ import { CreateDailyReportDto } from './dto/create-daily-report.dto';
 import { DailyReportQueryDto } from './dto/daily-report-query.dto';
 import { ReturnDailyReportDto } from './dto/return-daily-report.dto';
 import { UpdateDailyReportDto } from './dto/update-daily-report.dto';
+import { DailyReportExportService } from './daily-report-export.service';
 import { DailyReportsService } from './daily-reports.service';
 import { SubmitDailyReportDto } from './dto/submit-daily-report.dto';
 
@@ -31,7 +32,10 @@ import { SubmitDailyReportDto } from './dto/submit-daily-report.dto';
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 @RequireBranchScope()
 export class DailyReportsController {
-  constructor(private readonly service: DailyReportsService) {}
+  constructor(
+    private readonly service: DailyReportsService,
+    private readonly exports: DailyReportExportService,
+  ) {}
 
   @Get()
   @RequirePermission('daily_reports.read')
@@ -40,6 +44,15 @@ export class DailyReportsController {
     @Query() query: DailyReportQueryDto,
   ) {
     return this.service.list(branchId, query);
+  }
+
+  @Get('export')
+  @RequirePermission('daily_reports.read')
+  exportItems(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query() query: DailyReportQueryDto,
+  ) {
+    return this.exports.items(branchId, query);
   }
 
   @Post()

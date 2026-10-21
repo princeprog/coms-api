@@ -14,6 +14,7 @@ import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import type { AccessContext } from '../access-control/access-control.types';
+import { CostsExportService } from './costs-export.service';
 import { CostsService } from './costs.service';
 import {
   CostRangeQueryDto,
@@ -25,7 +26,40 @@ import {
 @Controller('costs')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 export class CostsController {
-  constructor(private readonly service: CostsService) {}
+  constructor(
+    private readonly service: CostsService,
+    private readonly exports: CostsExportService,
+  ) {}
+
+  @Get('products/export')
+  @RequirePermission('costs.read')
+  exportProducts(@Query() query: ProductCostQueryDto) {
+    return this.exports.productCosts(query);
+  }
+
+  @Get('branches/export')
+  @RequirePermission('costs.read')
+  exportBranches(
+    @Query() query: CostRangeQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.exports.branchProfit(query, access);
+  }
+
+  @Get('branch-products/export')
+  @RequirePermission('costs.read')
+  exportBranchProducts(
+    @Query() query: CostRangeQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.exports.productProfit(query, access);
+  }
+
+  @Get('stock-items/export')
+  @RequirePermission('costs.read')
+  exportStockItems(@Query() query: StockCostQueryDto) {
+    return this.exports.stockCosts(query);
+  }
 
   @Get('products')
   @RequirePermission('costs.read')

@@ -20,14 +20,23 @@ import {
   DirectPurchaseQueryDto,
 } from './dto/direct-purchase.dto';
 import { DirectPurchasesService } from './direct-purchases.service';
+import { ReceiptExportService } from './receipt-export.service';
 @Controller('direct-purchases')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 export class DirectPurchasesController {
-  constructor(private readonly service: DirectPurchasesService) {}
+  constructor(
+    private readonly service: DirectPurchasesService,
+    private readonly exports: ReceiptExportService,
+  ) {}
   @Get() @RequirePermission('supplier_receipts.read') list(
     @Query() query: DirectPurchaseQueryDto,
   ) {
     return this.service.list(query);
+  }
+  @Get('export') @RequirePermission('supplier_receipts.read') exportLines(
+    @Query() query: DirectPurchaseQueryDto,
+  ) {
+    return this.exports.directPurchases(query);
   }
   @Get(':id') @RequirePermission('supplier_receipts.read') get(
     @Param('id', ParseUUIDPipe) id: string,

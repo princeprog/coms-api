@@ -21,13 +21,17 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { VoidSaleDto } from './dto/void-sale.dto';
+import { SalesExportService } from './sales-export.service';
 import { SalesService } from './sales.service';
 
 @Controller('branches/:branchId/sales')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 @RequireBranchScope()
 export class SalesController {
-  constructor(private readonly service: SalesService) {}
+  constructor(
+    private readonly service: SalesService,
+    private readonly exports: SalesExportService,
+  ) {}
 
   @Get()
   @RequirePermission('sales.read')
@@ -36,6 +40,15 @@ export class SalesController {
     @Query() query: SaleQueryDto,
   ) {
     return this.service.list(branchId, query);
+  }
+
+  @Get('export')
+  @RequirePermission('sales.read')
+  exportHistory(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query() query: SaleQueryDto,
+  ) {
+    return this.exports.history(branchId, query);
   }
 
   @Get(':saleId')
