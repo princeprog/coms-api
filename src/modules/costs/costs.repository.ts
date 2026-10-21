@@ -144,7 +144,7 @@ export class CostsRepository {
       SELECT branch_id, branch_name, sales_count,
         ${money(sql`net_sales`)} AS net_sales,
         ${money(sql`food_cost`)} AS food_cost,
-        ${money(sql`net_sales - food_cost`)} AS gross_profit,
+        ${money(sql`net_sales - round(food_cost, 2)`)} AS gross_profit,
         trim_scale(round(100 * food_cost / nullif(net_sales, 0), 1))::text AS food_cost_percent,
         trim_scale(round(100 * costed_sales / nullif(net_sales, 0), 1))::text AS cost_coverage_percent,
         ${money(sql`waste_value`)} AS waste_value,
@@ -185,7 +185,7 @@ export class CostsRepository {
       SELECT product_id, product_name, trim_scale(units_sold)::text AS units_sold,
         ${money(sql`net_sales`)} AS net_sales,
         ${money(sql`food_cost`)} AS food_cost,
-        ${money(sql`net_sales - food_cost`)} AS gross_profit,
+        ${money(sql`net_sales - round(food_cost, 2)`)} AS gross_profit,
         trim_scale(round(100 * food_cost / nullif(net_sales, 0), 1))::text AS food_cost_percent,
         fully_costed,
         count(*) OVER ()::int AS total

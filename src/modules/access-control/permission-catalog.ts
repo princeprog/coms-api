@@ -350,6 +350,11 @@ export const PERMISSION_CATALOG = [
     action_key: 'read',
     description: 'View the audit log of settings and security changes',
   },
+  {
+    module_key: 'sales_report',
+    action_key: 'read',
+    description: 'View the sales report',
+  },
 ] as const;
 
 export type PermissionKey =

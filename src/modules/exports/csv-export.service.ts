@@ -65,12 +65,46 @@ export class CsvExportService {
 
   async file<T>(input: CsvExport<T>) {
     this.assertWithinLimit(input.total);
-    const filename =
-      ['coms', ...input.nameParts]
+    const filename = this.filename(input.nameParts, 'csv');
+    await this.recordDownload(input, filename, input.rows.length);
+    return new StreamableFile(Buffer.from(toCsv(input.columns, input.rows)), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${filename}"`,
+    });
+  }
+
+  /** Sends a generated PDF and records the download like a CSV export. */
+  async pdf(
+    input: Pick<
+      CsvExport<never>,
+      'label' | 'nameParts' | 'filters' | 'branchId'
+    > & {
+      buffer: Buffer;
+    },
+  ) {
+    const filename = this.filename(input.nameParts, 'pdf');
+    await this.recordDownload(input, filename, null);
+    return new StreamableFile(input.buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${filename}"`,
+    });
+  }
+
+  private filename(parts: CsvExport<never>['nameParts'], extension: string) {
+    return (
+      ['coms', ...parts]
         .filter((part): part is string => Boolean(part))
         .map(fileSafe)
         .filter(Boolean)
-        .join('-') + '.csv';
+        .join('-') + `.${extension}`
+    );
+  }
+
+  private async recordDownload(
+    input: Pick<CsvExport<never>, 'label' | 'filters' | 'branchId'>,
+    filename: string,
+    rows: number | null,
+  ) {
     const filters = Object.fromEntries(
       Object.entries(input.filters).filter(
         ([key, value]) =>
@@ -84,11 +118,11 @@ export class CsvExportService {
       entityType: 'export',
       entityLabel: input.label,
       branchId: input.branchId ?? null,
-      metadata: { file: filename, rows: input.rows.length, filters },
-    });
-    return new StreamableFile(Buffer.from(toCsv(input.columns, input.rows)), {
-      type: 'text/csv; charset=utf-8',
-      disposition: `attachment; filename="${filename}"`,
+      metadata: {
+        file: filename,
+        ...(rows === null ? {} : { rows }),
+        filters,
+      },
     });
   }
 
