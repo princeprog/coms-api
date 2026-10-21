@@ -8,6 +8,8 @@ import { DispatchReceivingRepository } from './dispatch-receiving.repository';
 import { DispatchesRepository } from './dispatches.repository';
 import { DispatchesService } from './dispatches.service';
 import { DispatchLateCountRepository } from './dispatch-late-count.repository';
+import { DispatchRestockRepository } from './dispatch-restock.repository';
+import { DispatchRestockService } from './dispatch-restock.service';
 
 @Module({
   imports: [AuthModule, NotificationsModule],
@@ -19,6 +21,8 @@ import { DispatchLateCountRepository } from './dispatch-late-count.repository';
     DispatchPostingRepository,
     DispatchReceivingRepository,
     DispatchesService,
+    DispatchRestockRepository,
+    DispatchRestockService,
   ],
 })
 export class DispatchesModule {}

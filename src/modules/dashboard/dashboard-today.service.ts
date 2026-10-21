@@ -20,6 +20,8 @@ const ATTENTION_PERMISSION: Record<AttentionKey, PermissionKey> = {
   shifts_open_past_day: 'shifts.read',
   cash_shortages: 'shifts.read',
   stock_below_zero: 'inventory.read',
+  branch_stock_low: 'inventory.read',
+  commissary_stock_low: 'inventory.commissary_read',
   reports_to_review: 'daily_reports.read',
   reports_returned: 'daily_reports.read',
   reports_missing: 'daily_reports.read',
@@ -123,7 +125,11 @@ export class DashboardTodayService {
       },
       attention: ATTENTION_KEYS.filter((key) =>
         can(ATTENTION_PERMISSION[key]),
-      ).map((key) => ({ key, count: attention[key] })),
+      ).map((key) => ({
+        key,
+        // Commissary stock is not part of a single branch's view.
+        count: key === 'commissary_stock_low' && branchId ? 0 : attention[key],
+      })),
       branches: branches.map(({ yesterday_sales_count: sold, ...row }) => ({
         ...row,
         // A missing report only matters when the branch sold something.

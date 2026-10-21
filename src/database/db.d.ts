@@ -662,6 +662,18 @@ export interface StockItems {
   usage_types: Generated<string[]>;
 }
 
+export interface StockLevels {
+  branch_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  inventory_scope: string;
+  reorder_level: Numeric;
+  stock_item_id: string;
+  target_level: Numeric;
+  updated_at: Generated<Timestamp>;
+  updated_by_user_id: string | null;
+}
+
 export interface StockRequestEvents {
   actor_user_id: string;
   created_at: Generated<Timestamp>;
@@ -784,6 +796,7 @@ export interface DB {
   sales: Sales;
   stock_item_costs: StockItemCosts;
   stock_items: StockItems;
+  stock_levels: StockLevels;
   stock_request_events: StockRequestEvents;
   stock_request_items: StockRequestItems;
   stock_requests: StockRequests;

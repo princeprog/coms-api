@@ -1,7 +1,13 @@
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { Transform } from 'class-transformer';
 import { parseBooleanFilter } from '../../../common/utils/list-filters';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class InventoryQueryDto extends PaginationQueryDto {
   override page_size = 10;
@@ -22,4 +28,9 @@ export class InventoryQueryDto extends PaginationQueryDto {
   @IsString()
   @MaxLength(80)
   category?: string;
+
+  /** `low`: items at or below their reorder level, counting stock on the way. */
+  @IsOptional()
+  @IsIn(['low'])
+  stock?: 'low';
 }

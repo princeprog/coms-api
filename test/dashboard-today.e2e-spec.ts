@@ -373,6 +373,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         cash_shortages: 1,
         // Sales deducted rice and boxes below zero at branch A.
         stock_below_zero: 2,
+        // No reorder levels are set in this fixture.
+        branch_stock_low: 0,
+        commissary_stock_low: 0,
         reports_missing: 1,
         reports_returned: 0,
         reports_to_review: 1,

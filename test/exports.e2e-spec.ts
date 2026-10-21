@@ -191,8 +191,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
     );
     expect(filtered.status).toBe(200);
     expect(lines(filtered.text)).toEqual([
-      'Stock item,Category,Unit,On hand,Active',
-      'Export garlic,Export test,kg,0,Yes',
+      'Stock item,Category,Unit,On hand,Reorder level,Target level,Status,Active',
+      'Export garlic,Export test,kg,0,,,Out of stock,Yes',
       '',
     ]);
     expect((await as(noCosts).get('/costs/stock-items/export')).status).toBe(

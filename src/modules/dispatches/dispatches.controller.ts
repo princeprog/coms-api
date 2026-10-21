@@ -26,13 +26,18 @@ import {
 } from './dto/create-dispatch.dto';
 import { DispatchQueryDto } from './dto/dispatch-query.dto';
 import { ReceiveDispatchDto } from './dto/receive-dispatch.dto';
+import { RestockSuggestionQueryDto } from './dto/restock-suggestion-query.dto';
 import { DispatchesService } from './dispatches.service';
+import { DispatchRestockService } from './dispatch-restock.service';
 import { ReviewLateCountDto } from './dto/review-late-count.dto';
 
 @Controller('dispatches')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
 export class DispatchesController {
-  constructor(private readonly service: DispatchesService) {}
+  constructor(
+    private readonly service: DispatchesService,
+    private readonly restock: DispatchRestockService,
+  ) {}
 
   @Get()
   @RequirePermission('dispatches.read')
@@ -41,6 +46,17 @@ export class DispatchesController {
     @CurrentAccessContext() access: AccessContext,
   ) {
     return this.service.list(query, access);
+  }
+
+  // Declared before ':id' so the path is not parsed as a dispatch ID.
+  @Get('restock-suggestions')
+  @RequirePermission('dispatches.create')
+  @RequireBranchScope()
+  restockSuggestions(
+    @Query() query: RestockSuggestionQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.restock.suggestions(query.branch_id.toLowerCase(), access);
   }
 
   @Get(':id')

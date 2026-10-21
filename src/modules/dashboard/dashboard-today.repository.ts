@@ -3,6 +3,7 @@ import { sql, type Kysely, type RawBuilder } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import { receivingStatus } from '../dispatches/receiving-policy';
+import { onTheWaySql } from '../inventory/stock-position';
 
 /** Branch IDs the caller may see; null means every branch. */
 export type TodayScope = string[] | null;
@@ -13,6 +14,8 @@ export const ATTENTION_KEYS = [
   'shifts_open_past_day',
   'cash_shortages',
   'stock_below_zero',
+  'branch_stock_low',
+  'commissary_stock_low',
   'reports_missing',
   'reports_returned',
   'reports_to_review',
@@ -151,6 +154,20 @@ export class DashboardTodayRepository {
             AND rs.business_date > day.today - 7) AS cash_shortages,
         (SELECT count(*)::int FROM branch_inventory bi JOIN scope b ON b.id = bi.branch_id
           WHERE bi.quantity_on_hand < 0) AS stock_below_zero,
+        (SELECT count(*)::int FROM stock_levels sl
+          JOIN scope b ON b.id = sl.branch_id AND b.status = 'active'
+          JOIN stock_items si ON si.id = sl.stock_item_id AND si.is_active
+          LEFT JOIN branch_inventory bi
+            ON bi.branch_id = sl.branch_id AND bi.stock_item_id = sl.stock_item_id
+          WHERE sl.inventory_scope = 'BRANCH'
+            AND coalesce(bi.quantity_on_hand, 0)
+              + ${onTheWaySql(sql.ref('sl.branch_id'), sql.ref('sl.stock_item_id'))}
+              <= sl.reorder_level) AS branch_stock_low,
+        (SELECT count(*)::int FROM stock_levels sl
+          JOIN stock_items si ON si.id = sl.stock_item_id AND si.is_active
+          LEFT JOIN commissary_inventory ci ON ci.stock_item_id = sl.stock_item_id
+          WHERE sl.inventory_scope = 'COMMISSARY'
+            AND coalesce(ci.quantity_on_hand, 0) <= sl.reorder_level) AS commissary_stock_low,
         (SELECT count(*)::int FROM daily_branch_reports r JOIN scope b ON b.id = r.branch_id
           WHERE r.status = 'SUBMITTED') AS reports_to_review,
         (SELECT count(*)::int FROM daily_branch_reports r JOIN scope b ON b.id = r.branch_id

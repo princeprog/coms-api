@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -21,8 +22,10 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { CreateInventoryAdjustmentDto } from './dto/create-inventory-adjustment.dto';
 import { InventoryMovementQueryDto } from './dto/inventory-movement-query.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
+import { SetStockLevelsDto } from './dto/set-stock-levels.dto';
 import { InventoryExportService } from './inventory-export.service';
 import { InventoryService } from './inventory.service';
+import { StockLevelsService } from './stock-levels.service';
 
 @Controller('inventory')
 @UseGuards(AuthGatewayGuard, AuthGuard, AccessControlGuard)
@@ -30,7 +33,17 @@ export class InventoryController {
   constructor(
     private readonly service: InventoryService,
     private readonly exports: InventoryExportService,
+    private readonly levels: StockLevelsService,
   ) {}
+
+  @Put('levels')
+  @RequirePermission('inventory.levels_manage')
+  setLevels(
+    @Body() dto: SetStockLevelsDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.levels.set(dto, access);
+  }
 
   @Get('commissary/export')
   @RequirePermission('inventory.commissary_read')

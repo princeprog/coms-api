@@ -25,6 +25,8 @@
 | shifts_open_past_day | Shifts still open from an earlier business day | shifts.read |
 | cash_shortages | Closed shifts short of cash in the last 7 business days | shifts.read |
 | stock_below_zero | Branch stock rows below zero | inventory.read |
+| branch_stock_low | Branch items at or below their reorder level, counting stock on the way (see stock-levels.md) | inventory.read |
+| commissary_stock_low | Commissary items at or below their reorder level; 0 when the dashboard is filtered to a branch | inventory.commissary_read |
 | reports_to_review / reports_returned | Daily reports submitted / returned | daily_reports.read |
 | reports_missing | Branches that sold yesterday without a report | daily_reports.read |
 | products_incomplete_costs | Active products without a recipe or with uncosted stock (all branches) | costs.read |

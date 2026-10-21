@@ -11,6 +11,9 @@ type Balance = {
   unit: string;
   is_active: boolean;
   quantity_on_hand: string;
+  reorder_level: string | null;
+  target_level: string | null;
+  stock_status: string;
 };
 type Movement = {
   created_at: Date;
@@ -93,6 +96,9 @@ export class InventoryExportService {
         { header: 'Category', value: (row) => row.category },
         { header: 'Unit', value: (row) => row.unit },
         { header: 'On hand', value: (row) => row.quantity_on_hand },
+        { header: 'Reorder level', value: (row) => row.reorder_level },
+        { header: 'Target level', value: (row) => row.target_level },
+        { header: 'Status', value: (row) => csvLabel(row.stock_status) },
         { header: 'Active', value: (row) => row.is_active },
       ],
     });

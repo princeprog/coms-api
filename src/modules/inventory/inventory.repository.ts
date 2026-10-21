@@ -22,6 +22,7 @@ import type { DB } from '../../database/db';
 import type { InventoryMovementQueryDto } from './dto/inventory-movement-query.dto';
 import type { InventoryQueryDto } from './dto/inventory-query.dto';
 import type { InventoryScope } from './inventory.service';
+import { needsRestockSql, onTheWaySql, stockStatusSql } from './stock-position';
 
 type AdjustmentInput = {
   scope: InventoryScope;
@@ -46,73 +47,66 @@ export class InventoryRepository {
     return Boolean(branch);
   }
 
-  async listCommissary(query: InventoryQueryDto) {
-    let records = this.db
-      .selectFrom('stock_items as si')
-      .leftJoin('commissary_inventory as ci', 'ci.stock_item_id', 'si.id')
-      .select([
-        'si.id',
-        'si.stock_item_name',
-        'si.category',
-        'si.unit',
-        'si.is_active',
-        'si.created_at',
-        'si.updated_at',
-        sql<string>`coalesce(ci.quantity_on_hand, 0)::text`.as(
-          'quantity_on_hand',
-        ),
-      ])
-      .orderBy('si.stock_item_name')
-      .orderBy('si.id')
-      .limit(query.page_size)
-      .offset(paginationOffset(query));
-    let count = this.db
-      .selectFrom('stock_items as si')
-      .select((eb) => eb.fn.countAll<number>().as('total'));
-
-    if (query.search) {
-      const pattern = containsSearchPattern(query.search);
-      records = records.where((eb) =>
-        eb.or([
-          eb('si.stock_item_name', 'ilike', pattern),
-          eb('si.category', 'ilike', pattern),
-        ]),
-      );
-      count = count.where((eb) =>
-        eb.or([
-          eb('si.stock_item_name', 'ilike', pattern),
-          eb('si.category', 'ilike', pattern),
-        ]),
-      );
-    }
-    if (query.is_active !== undefined) {
-      records = records.where('si.is_active', '=', query.is_active);
-      count = count.where('si.is_active', '=', query.is_active);
-    }
-    if (query.category) {
-      records = records.where('si.category', '=', query.category);
-      count = count.where('si.category', '=', query.category);
-    }
-
-    const [items, result, categories] = await Promise.all([
-      records.execute(),
-      count.executeTakeFirstOrThrow(),
-      this.listAvailableCategories(),
-    ]);
-    return {
-      ...paginatedResult(items, Number(result.total), query),
-      available_categories: categories,
-    };
+  listCommissary(query: InventoryQueryDto) {
+    return this.listBalances(null, query);
   }
 
-  async listBranch(branchId: string, query: InventoryQueryDto) {
-    let records = this.db
+  listBranch(branchId: string, query: InventoryQueryDto) {
+    return this.listBalances(branchId, query);
+  }
+
+  // One query shape for both locations so status, levels and the low-stock
+  // filter follow the same rule everywhere.
+  private async listBalances(
+    branchId: string | null,
+    query: InventoryQueryDto,
+  ) {
+    const onHand = branchId
+      ? sql<string>`coalesce((SELECT bi.quantity_on_hand FROM branch_inventory bi
+          WHERE bi.branch_id = ${branchId}::uuid AND bi.stock_item_id = si.id), 0)`
+      : sql<string>`coalesce((SELECT ci.quantity_on_hand FROM commissary_inventory ci
+          WHERE ci.stock_item_id = si.id), 0)`;
+    const onTheWay = branchId
+      ? onTheWaySql(sql`${branchId}::uuid`, sql.ref('si.id'))
+      : sql<string>`0`;
+    const reorder = sql.ref('sl.reorder_level');
+    // Average over 14 days of what leaves this location in normal work:
+    // net sales at a branch, net dispatches at the commissary.
+    const usage = branchId
+      ? sql`im.inventory_scope = 'BRANCH' AND im.branch_id = ${branchId}::uuid
+          AND im.movement_type IN ('SALE', 'SALE_VOID')`
+      : sql`im.inventory_scope = 'COMMISSARY'
+          AND im.movement_type IN ('DISPATCH', 'DISPATCH_RETURN')`;
+
+    let base = this.db
       .selectFrom('stock_items as si')
-      .leftJoin('branch_inventory as bi', (join) =>
-        join
-          .onRef('bi.stock_item_id', '=', 'si.id')
-          .on('bi.branch_id', '=', branchId),
-      )
+      .leftJoin('stock_levels as sl', (join) => {
+        const item = join.onRef('sl.stock_item_id', '=', 'si.id');
+        return branchId
+          ? item
+              .on('sl.inventory_scope', '=', 'BRANCH')
+              .on('sl.branch_id', '=', branchId)
+          : item.on('sl.inventory_scope', '=', 'COMMISSARY');
+      });
+
+    if (query.search) {
+      const pattern = containsSearchPattern(query.search);
+      base = base.where((eb) =>
+        eb.or([
+          eb('si.stock_item_name', 'ilike', pattern),
+          eb('si.category', 'ilike', pattern),
+        ]),
+      );
+    }
+    if (query.is_active !== undefined)
+      base = base.where('si.is_active', '=', query.is_active);
+    if (query.category) base = base.where('si.category', '=', query.category);
+    if (query.stock === 'low')
+      base = base.where(
+        sql<SqlBool>`si.is_active AND ${needsRestockSql(onHand, onTheWay, reorder)}`,
+      );
+
+    const records = base
       .select([
         'si.id',
         'si.stock_item_name',
@@ -121,41 +115,33 @@ export class InventoryRepository {
         'si.is_active',
         'si.created_at',
         'si.updated_at',
-        sql<string>`coalesce(bi.quantity_on_hand, 0)::text`.as(
-          'quantity_on_hand',
+        sql<string>`${onHand}::text`.as('quantity_on_hand'),
+        sql<string>`trim_scale(${onTheWay})::text`.as('on_the_way'),
+        sql<string | null>`trim_scale(sl.reorder_level)::text`.as(
+          'reorder_level',
         ),
+        sql<string | null>`trim_scale(sl.target_level)::text`.as(
+          'target_level',
+        ),
+        sql<string>`(SELECT trim_scale(round(
+            greatest(-coalesce(sum(im.quantity_delta), 0), 0) / 14, 2))::text
+          FROM inventory_movements im
+          WHERE im.stock_item_id = si.id AND ${usage}
+            AND im.created_at >= now() - interval '14 days')`.as(
+          'avg_daily_use',
+        ),
+        stockStatusSql({
+          active: sql.ref('si.is_active'),
+          onHand,
+          onTheWay,
+          reorder,
+        }).as('stock_status'),
       ])
       .orderBy('si.stock_item_name')
       .orderBy('si.id')
       .limit(query.page_size)
       .offset(paginationOffset(query));
-    let count = this.db
-      .selectFrom('stock_items as si')
-      .select((eb) => eb.fn.countAll<number>().as('total'));
-
-    if (query.search) {
-      const pattern = containsSearchPattern(query.search);
-      records = records.where((eb) =>
-        eb.or([
-          eb('si.stock_item_name', 'ilike', pattern),
-          eb('si.category', 'ilike', pattern),
-        ]),
-      );
-      count = count.where((eb) =>
-        eb.or([
-          eb('si.stock_item_name', 'ilike', pattern),
-          eb('si.category', 'ilike', pattern),
-        ]),
-      );
-    }
-    if (query.is_active !== undefined) {
-      records = records.where('si.is_active', '=', query.is_active);
-      count = count.where('si.is_active', '=', query.is_active);
-    }
-    if (query.category) {
-      records = records.where('si.category', '=', query.category);
-      count = count.where('si.category', '=', query.category);
-    }
+    const count = base.select((eb) => eb.fn.countAll<number>().as('total'));
 
     const [items, result, categories] = await Promise.all([
       records.execute(),

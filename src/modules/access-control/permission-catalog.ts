@@ -123,6 +123,11 @@ export const PERMISSION_CATALOG = [
     description: 'Adjust commissary inventory with a reason',
   },
   {
+    module_key: 'inventory',
+    action_key: 'levels_manage',
+    description: 'Set reorder and target stock levels',
+  },
+  {
     module_key: 'dashboard',
     action_key: 'read',
     description: 'View performance for assigned branches',
