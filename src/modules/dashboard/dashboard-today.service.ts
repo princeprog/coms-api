@@ -14,6 +14,8 @@ const ATTENTION_PERMISSION: Record<AttentionKey, PermissionKey> = {
   deliveries_in_transit: 'dispatches.read',
   late_counts_to_review: 'dispatches.read',
   open_discrepancies: 'dispatches.read',
+  // Drafts are commissary work, so only people who send dispatches see them.
+  dispatches_draft: 'dispatches.dispatch',
   shifts_to_review: 'shifts.read',
   shifts_open_past_day: 'shifts.read',
   cash_shortages: 'shifts.read',
@@ -48,28 +50,40 @@ export class DashboardTodayService {
     const can = (permission: PermissionKey) =>
       superAdmin || access.permissions.includes(permission);
     const showCosts = can('costs.read');
-    const [day, totals, attention, branches, days, topProducts, options] =
-      await Promise.all([
-        this.repository.businessDate(),
-        this.repository.totals(scope),
-        this.repository.attention(scope),
-        this.repository.branches(scope),
-        this.repository.lastSevenDays(scope),
-        this.repository.topProductsToday(scope),
-        this.repository.branchOptions(
-          superAdmin || access.permissions.includes('dashboard.global_read')
-            ? null
-            : access.branchIds,
-        ),
-      ]);
+    const [
+      day,
+      totals,
+      attention,
+      branches,
+      days,
+      topProducts,
+      options,
+      hours,
+    ] = await Promise.all([
+      this.repository.businessDate(),
+      this.repository.totals(scope),
+      this.repository.attention(scope),
+      this.repository.branches(scope),
+      this.repository.lastSevenDays(scope),
+      this.repository.topProductsToday(scope),
+      this.repository.branchOptions(
+        superAdmin || access.permissions.includes('dashboard.global_read')
+          ? null
+          : access.branchIds,
+      ),
+      this.repository.hourly(scope),
+    ]);
     const branch = branchId
       ? options.find((option) => option.id === branchId)
       : undefined;
     const {
       yesterday_net_sales,
       yesterday_sales_count,
+      last_week_net_sales,
+      last_week_sales_count,
       food_cost,
       gross_profit,
+      cost_coverage_percent,
       ...today
     } = totals;
     return {
@@ -88,14 +102,24 @@ export class DashboardTodayService {
         ...today,
         food_cost: showCosts ? food_cost : null,
         gross_profit: showCosts ? gross_profit : null,
+        cost_coverage_percent: showCosts ? cost_coverage_percent : null,
+      },
+      // The same weekday is the fairer comparison; yesterday stays alongside.
+      last_week_same_time: {
+        net_sales: last_week_net_sales,
+        sales_count: last_week_sales_count,
       },
       yesterday_same_time: {
         net_sales: yesterday_net_sales,
         sales_count: yesterday_sales_count,
       },
       changes: {
-        net_sales: percentChange(today.net_sales, yesterday_net_sales),
-        sales_count: percentChange(today.sales_count, yesterday_sales_count),
+        net_sales: percentChange(today.net_sales, last_week_net_sales),
+        sales_count: percentChange(today.sales_count, last_week_sales_count),
+        net_sales_vs_yesterday: percentChange(
+          today.net_sales,
+          yesterday_net_sales,
+        ),
       },
       attention: ATTENTION_KEYS.filter((key) =>
         can(ATTENTION_PERMISSION[key]),
@@ -112,6 +136,7 @@ export class DashboardTodayService {
         gross_profit: showCosts ? row.gross_profit : null,
       })),
       top_products_today: topProducts,
+      hourly: hours,
     };
   }
 

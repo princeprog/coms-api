@@ -18,6 +18,7 @@ export const ATTENTION_KEYS = [
   'reports_to_review',
   'late_counts_to_review',
   'shifts_to_review',
+  'dispatches_draft',
   'deliveries_in_transit',
   'products_incomplete_costs',
 ] as const;
@@ -60,8 +61,11 @@ export class DashboardTodayRepository {
       void_count: number;
       food_cost: string;
       gross_profit: string;
+      cost_coverage_percent: string | null;
       yesterday_net_sales: string;
       yesterday_sales_count: number;
+      last_week_net_sales: string;
+      last_week_sales_count: number;
     }>`
       WITH ${this.scope(scope)},
       today_sales AS (
@@ -72,9 +76,12 @@ export class DashboardTodayRepository {
       ),
       completed AS (SELECT * FROM today_sales WHERE status = 'COMPLETED'),
       lines AS (
-        SELECT si.quantity,
+        SELECT si.quantity, si.line_total,
           coalesce((SELECT sum(x.quantity_consumed * x.unit_cost)
-            FROM sale_item_consumptions x WHERE x.sale_item_id = si.id), 0) AS cost
+            FROM sale_item_consumptions x WHERE x.sale_item_id = si.id), 0) AS cost,
+          EXISTS (SELECT 1 FROM sale_item_consumptions x WHERE x.sale_item_id = si.id)
+            AND NOT EXISTS (SELECT 1 FROM sale_item_consumptions x
+              WHERE x.sale_item_id = si.id AND x.unit_cost IS NULL) AS costed
         FROM sale_items si JOIN completed c ON c.id = si.sale_id
       ),
       yesterday AS (
@@ -84,6 +91,13 @@ export class DashboardTodayRepository {
           AND s.created_at >= coms_business_day_start(day.today - 1)
           AND s.created_at < least(now() - interval '1 day', coms_business_day_end(day.today - 1))
       ),
+      last_week AS (
+        SELECT s.total_amount FROM sales s
+        JOIN scope b ON b.id = s.branch_id, day
+        WHERE s.status = 'COMPLETED'
+          AND s.created_at >= coms_business_day_start(day.today - 7)
+          AND s.created_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
+      ),
       sums AS (
         SELECT
           (SELECT coalesce(sum(total_amount), 0) FROM completed) AS net_sales,
@@ -91,16 +105,22 @@ export class DashboardTodayRepository {
           (SELECT count(*)::int FROM today_sales WHERE status = 'VOIDED') AS void_count,
           (SELECT coalesce(sum(quantity), 0) FROM lines) AS items_sold,
           (SELECT coalesce(sum(cost), 0) FROM lines) AS food_cost,
+          (SELECT coalesce(sum(line_total) FILTER (WHERE costed), 0) FROM lines) AS costed_sales,
           (SELECT coalesce(sum(total_amount), 0) FROM yesterday) AS yesterday_net_sales,
-          (SELECT count(*)::int FROM yesterday) AS yesterday_sales_count
+          (SELECT count(*)::int FROM yesterday) AS yesterday_sales_count,
+          (SELECT coalesce(sum(total_amount), 0) FROM last_week) AS last_week_net_sales,
+          (SELECT count(*)::int FROM last_week) AS last_week_sales_count
       )
       SELECT ${money(sql`net_sales`)} AS net_sales, sales_count,
         CASE WHEN sales_count > 0 THEN ${money(sql`net_sales / sales_count`)} END AS average_sale,
         trim_scale(items_sold)::text AS items_sold, void_count,
         ${money(sql`food_cost`)} AS food_cost,
         ${money(sql`net_sales - round(food_cost, 2)`)} AS gross_profit,
+        trim_scale(round(100 * costed_sales / nullif(net_sales, 0), 1))::text AS cost_coverage_percent,
         ${money(sql`yesterday_net_sales`)} AS yesterday_net_sales,
-        yesterday_sales_count
+        yesterday_sales_count,
+        ${money(sql`last_week_net_sales`)} AS last_week_net_sales,
+        last_week_sales_count
       FROM sums
     `.execute(this.db);
     return result.rows[0];
@@ -120,6 +140,8 @@ export class DashboardTodayRepository {
         (SELECT count(*)::int FROM dispatch_discrepancies dd
           JOIN dispatches d ON d.id = dd.dispatch_id JOIN scope b ON b.id = d.branch_id
           WHERE dd.status = 'OPEN') AS open_discrepancies,
+        (SELECT count(*)::int FROM dispatches d JOIN scope b ON b.id = d.branch_id
+          WHERE d.status = 'DRAFT') AS dispatches_draft,
         (SELECT count(*)::int FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id
           WHERE rs.status = 'CLOSED') AS shifts_to_review,
         (SELECT count(*)::int FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id, day
@@ -198,6 +220,48 @@ export class DashboardTodayRepository {
       ) shift ON true
       WHERE b.status = 'active' OR p.branch_id IS NOT NULL OR shift.shift_number IS NOT NULL
       ORDER BY (shift.shift_number IS NOT NULL) DESC, coalesce(p.net_sales, 0) DESC, b.branch_name
+    `.execute(this.db);
+    return result.rows;
+  }
+
+  /**
+   * Net sales by Manila clock hour from the business-day start to now, beside
+   * the same hours on the same weekday last week.
+   */
+  async hourly(scope: TodayScope) {
+    const result = await sql<{
+      hour: string;
+      sales_count: number;
+      net_sales: string;
+      last_week_net_sales: string;
+    }>`
+      WITH ${this.scope(scope)},
+      hours AS (
+        SELECT generate_series(
+          date_trunc('hour', coms_business_day_start(day.today) AT TIME ZONE 'Asia/Manila'),
+          date_trunc('hour', least(now(), coms_business_day_end(day.today) - interval '1 second') AT TIME ZONE 'Asia/Manila'),
+          interval '1 hour'
+        ) AS local_hour
+        FROM day
+      ),
+      completed AS (
+        SELECT date_trunc('hour', s.created_at AT TIME ZONE 'Asia/Manila') AS local_hour,
+          s.total_amount
+        FROM sales s JOIN scope b ON b.id = s.branch_id, day
+        WHERE s.status = 'COMPLETED'
+          AND (
+            (s.created_at >= coms_business_day_start(day.today)
+              AND s.created_at < coms_business_day_end(day.today))
+            OR (s.created_at >= coms_business_day_start(day.today - 7)
+              AND s.created_at < coms_business_day_end(day.today - 7))
+          )
+      )
+      SELECT to_char(h.local_hour, 'HH24:MI') AS hour,
+        (SELECT count(*)::int FROM completed c WHERE c.local_hour = h.local_hour) AS sales_count,
+        ${money(sql`(SELECT coalesce(sum(c.total_amount), 0) FROM completed c WHERE c.local_hour = h.local_hour)`)} AS net_sales,
+        ${money(sql`(SELECT coalesce(sum(c.total_amount), 0) FROM completed c WHERE c.local_hour = h.local_hour - interval '7 days')`)} AS last_week_net_sales
+      FROM hours h
+      ORDER BY h.local_hour
     `.execute(this.db);
     return result.rows;
   }

@@ -5,8 +5,9 @@
 ## Response
 
 - `business_date`, `as_of`, `scope_label`, `branch_options`, `show_costs`.
-- `today`: net sales, sales count, average sale, items sold, voids, food cost and gross profit (null without Super Admin or `costs.read`).
-- `yesterday_same_time` and `changes`: completed sales from yesterday's business-day start up to exactly one day ago, with percent change (null when yesterday had none).
+- `today`: net sales, sales count, average sale, items sold, voids, food cost, gross profit and `cost_coverage_percent` (share of net sales whose recipe cost is known; the cost fields are null without Super Admin or `costs.read`).
+- `last_week_same_time` and `yesterday_same_time`: completed sales from that business day's start up to exactly 7 days / 1 day ago. `changes.net_sales` and `changes.sales_count` compare with the same weekday last week (fairer for restaurant weekly patterns); `changes.net_sales_vs_yesterday` keeps the yesterday view. Null when the earlier period had no sales.
+- `hourly[]`: net sales and sales count per Manila clock hour from the business-day start to now, with `last_week_net_sales` for the same hours last week.
 - `attention[]`: `{ key, count }` for every item the user may see; zero counts included.
 - `branches[]`: open shift (number, cashier, opened at), today's sales and net sales, last sale time, and yesterday's report status — `MISSING` when the branch sold something yesterday and has no report.
 - `last_7_days[]` (today − 6 to today) and `top_products_today[]` (top 5 by net sales).
@@ -19,6 +20,7 @@
 | deliveries_in_transit | Dispatches awaiting a count, not yet due | dispatches.read |
 | late_counts_to_review | Late counts waiting for review | dispatches.read |
 | open_discrepancies | Open dispatch discrepancies | dispatches.read |
+| dispatches_draft | Dispatches drafted but not sent | dispatches.dispatch |
 | shifts_to_review | Closed shifts not yet reviewed | shifts.read |
 | shifts_open_past_day | Shifts still open from an earlier business day | shifts.read |
 | cash_shortages | Closed shifts short of cash in the last 7 business days | shifts.read |

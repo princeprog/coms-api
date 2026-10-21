@@ -249,6 +249,11 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       await sql`UPDATE sales SET created_at = created_at - interval '1 day' WHERE id = ${earlier}::uuid`.execute(
         db,
       );
+      // Branch A on the same weekday last week, at this time: 150.
+      const lastWeek = await sell(cashierA, branchA, meal, '1', 'DINE_IN');
+      await sql`UPDATE sales SET created_at = created_at - interval '7 days' WHERE id = ${lastWeek}::uuid`.execute(
+        db,
+      );
       // Branch B today: 100; its shift is then left open from two days ago.
       await sell(cashierB, branchB, drink, '2', 'DINE_IN');
       await sql`UPDATE register_shifts SET business_date = business_date - 2 WHERE id = ${shiftB}::uuid`.execute(
@@ -277,6 +282,11 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const overdueA = await dispatch(branchA, '-1 hour');
       await dispatch(branchA, '1 day');
       await dispatch(branchB, '-3 hours');
+      // A drafted dispatch that has not been sent.
+      await sql`INSERT INTO dispatches (branch_id, status, idempotency_key, created_by_user_id)
+        VALUES (${branchA}::uuid, 'DRAFT', ${randomUUID()}::uuid, ${owner}::uuid)`.execute(
+        db,
+      );
       await db
         .insertInto('dispatch_discrepancies')
         .values({
@@ -334,12 +344,28 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         void_count: 1,
         food_cost: '112.00',
         gross_profit: '338.00',
+        // Only the takeout meals have recipe costs: 300 of 450.
+        cost_coverage_percent: '66.7',
       });
       expect(body.yesterday_same_time).toEqual({
         net_sales: '150.00',
         sales_count: 1,
       });
-      expect(body.changes).toEqual({ net_sales: '200', sales_count: '200' });
+      expect(body.last_week_same_time).toEqual({
+        net_sales: '150.00',
+        sales_count: 1,
+      });
+      expect(body.changes).toEqual({
+        net_sales: '200',
+        sales_count: '200',
+        net_sales_vs_yesterday: '200',
+      });
+      const sum = (rows: Record<string, string>[], key: string) =>
+        rows.reduce((total, row) => total + Number(row[key]), 0);
+      expect(body.hourly.length).toBeGreaterThan(0);
+      expect(sum(body.hourly, 'net_sales')).toBe(450);
+      expect(sum(body.hourly, 'last_week_net_sales')).toBe(150);
+      expect(body.hourly.at(-1).hour).toMatch(/^\d{2}:00$/);
       expect(counts(body.attention)).toEqual({
         deliveries_overdue: 2,
         open_discrepancies: 1,
@@ -352,6 +378,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         reports_to_review: 1,
         late_counts_to_review: 0,
         shifts_to_review: 1,
+        dispatches_draft: 1,
         deliveries_in_transit: 1,
         products_incomplete_costs: 1,
       });
@@ -392,6 +419,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       ).toEqual([branchA]);
       const items = counts(body.attention);
       expect(items).not.toHaveProperty('products_incomplete_costs');
+      expect(items).not.toHaveProperty('dispatches_draft');
+      expect(body.today.cost_coverage_percent).toBeNull();
       expect(items).toMatchObject({
         deliveries_overdue: 1,
         shifts_open_past_day: 0,
