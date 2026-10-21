@@ -11,6 +11,12 @@ import type { AccessContext } from '../access-control/access-control.types';
 import { decimal, fingerprint, services } from '../../common/utils/menu-rules';
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
+import type { RecipeUsageScope } from './dto/product-setup.dto';
+export type RecipeLineInput = {
+  stock_item_id: string;
+  quantity: string;
+  usage_scope: RecipeUsageScope;
+};
 export const PRODUCT_COLUMNS = [
   'id',
   'product_name',
@@ -28,6 +34,9 @@ export const PRODUCT_COLUMNS = [
   ),
   sql<boolean>`(SELECT is_active FROM product_categories WHERE id = products.category_id)`.as(
     'category_is_active',
+  ),
+  sql<number>`(SELECT count(*)::int FROM product_ingredients WHERE product_id = products.id)`.as(
+    'recipe_line_count',
   ),
 ] as const;
 type Executor = Kysely<DB> | Transaction<DB>;
@@ -55,7 +64,28 @@ export class ProductSetupRepository {
           : ['00000000-0000-4000-8000-000000000000'],
       );
     const branches = await query.orderBy('branch_id').execute();
-    return { product, branch_ids: branches.map((b) => b.branch_id) };
+    return {
+      product,
+      branch_ids: branches.map((b) => b.branch_id),
+      recipe: await this.recipe(id, executor),
+    };
+  }
+  private recipe(productId: string, executor: Executor) {
+    return executor
+      .selectFrom('product_ingredients as r')
+      .innerJoin('stock_items as s', 's.id', 'r.stock_item_id')
+      .select([
+        'r.stock_item_id',
+        's.stock_item_name',
+        's.unit',
+        's.is_active',
+        'r.usage_scope',
+        sql<string>`trim_scale(r.quantity_required)::text`.as('quantity'),
+      ])
+      .where('r.product_id', '=', productId)
+      .orderBy('s.stock_item_name')
+      .orderBy('r.usage_scope')
+      .execute();
   }
   async save(
     id: string | undefined,
@@ -63,6 +93,7 @@ export class ProductSetupRepository {
     expected: number,
     access: AccessContext,
     key?: string,
+    recipe?: RecipeLineInput[],
   ) {
     const { expected_product_revision: _revision, ...raw } =
       input as UpdateProductDto;
@@ -76,7 +107,12 @@ export class ProductSetupRepository {
         ? {}
         : { branch_ids: [...raw.branch_ids].sort() }),
     };
-    const hash = fingerprint({ id: id ?? null, input: metadata, expected });
+    const hash = fingerprint({
+      id: id ?? null,
+      input: metadata,
+      expected,
+      ...(recipe === undefined ? {} : { recipe }),
+    });
     return this.db.transaction().execute(async (tx) => {
       if (key) {
         await sql`SELECT pg_advisory_xact_lock(hashtextextended(${key},0))`.execute(
@@ -98,6 +134,9 @@ export class ProductSetupRepository {
           const saved = prior.result as unknown as Awaited<
             ReturnType<ProductSetupRepository['get']>
           >;
+          // Saves recorded before recipes existed never changed the recipe.
+          const recipeLines =
+            saved.recipe ?? (await this.recipe(prior.product_id, tx));
           // Old successful retries retain their original result and receive only the
           // newly required category fields; never replay the mutation.
           if (
@@ -115,9 +154,13 @@ export class ProductSetupRepository {
               ])
               .where('p.id', '=', prior.product_id)
               .executeTakeFirstOrThrow();
-            return { ...saved, product: { ...saved.product, ...category } };
+            return {
+              ...saved,
+              recipe: recipeLines,
+              product: { ...saved.product, ...category },
+            };
           }
-          return saved;
+          return { ...saved, recipe: recipeLines };
         }
       }
       // Every menu/sale mutation locks branches before products, then offerings.
@@ -183,6 +226,7 @@ export class ProductSetupRepository {
             'Inactive products cannot be enabled on a branch menu.',
           );
       }
+      await this.validateRecipe(tx, current?.id, types, recipe);
       const priceChanged = current && decimal(current.price) !== decimal(price);
       const product = current
         ? await tx
@@ -219,6 +263,30 @@ export class ProductSetupRepository {
         .set({ price: product.price, updated_at: sql`now()` })
         .where('product_id', '=', product.id)
         .execute();
+      if (recipe !== undefined) {
+        await tx
+          .deleteFrom('product_ingredients')
+          .where('product_id', '=', product.id)
+          .execute();
+        if (recipe.length)
+          await tx
+            .insertInto('product_ingredients')
+            .values(
+              recipe.map((line) => ({
+                product_id: product.id,
+                stock_item_id: line.stock_item_id,
+                quantity_required: line.quantity,
+                usage_scope: line.usage_scope,
+                component_type: 'INGREDIENT',
+              })),
+            )
+            .execute();
+        await tx
+          .updateTable('products')
+          .set({ recipe_revision: sql`recipe_revision + 1` })
+          .where('id', '=', product.id)
+          .execute();
+      }
       if (selected !== undefined) {
         await tx
           .updateTable('branch_products')
@@ -281,5 +349,52 @@ export class ProductSetupRepository {
           .execute();
       return JSON.parse(JSON.stringify(result)) as typeof result;
     });
+  }
+  private async validateRecipe(
+    tx: Transaction<DB>,
+    productId: string | undefined,
+    types: string[],
+    recipe: RecipeLineInput[] | undefined,
+  ) {
+    if (recipe === undefined) {
+      if (!productId) return;
+      // Narrowing services must not leave lines for a service that is gone.
+      const orphaned = await tx
+        .selectFrom('product_ingredients')
+        .select('stock_item_id')
+        .where('product_id', '=', productId)
+        .where('usage_scope', '<>', 'ALL')
+        .where('usage_scope', 'not in', types)
+        .executeTakeFirst();
+      if (orphaned)
+        throw new ConflictException(
+          'Update the recipe: a line applies to a service this product no longer offers.',
+        );
+      return;
+    }
+    if (
+      recipe.some(
+        (l) => l.usage_scope !== 'ALL' && !types.includes(l.usage_scope),
+      )
+    )
+      throw new ConflictException(
+        'A recipe line applies to a service this product does not offer.',
+      );
+    const ids = [...new Set(recipe.map((l) => l.stock_item_id))].sort();
+    if (!ids.length) return;
+    const stockItems = await tx
+      .selectFrom('stock_items')
+      .select(['id', 'stock_item_name', 'is_active'])
+      .where('id', 'in', ids)
+      .orderBy('id')
+      .forShare()
+      .execute();
+    if (stockItems.length !== ids.length)
+      throw new NotFoundException('A recipe stock item was not found');
+    const inactive = stockItems.find((s) => !s.is_active);
+    if (inactive)
+      throw new ConflictException(
+        `${inactive.stock_item_name} is inactive. Choose an active stock item.`,
+      );
   }
 }

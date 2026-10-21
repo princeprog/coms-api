@@ -38,6 +38,11 @@ type VoidSaleInput = {
   reason: string;
 };
 type QuantityByStockItem = { stock_item_id: string; quantity: string };
+type RecipeConsumption = {
+  product_id: string;
+  stock_item_id: string;
+  quantity_consumed: string;
+};
 
 @Injectable()
 export class SalesRepository {
@@ -294,23 +299,9 @@ export class SalesRepository {
             .select((expression) => expression.fn.countAll().as('count'))
             .where('si.sale_id', '=', sale.id)
             .executeTakeFirstOrThrow();
-          const missingLine = await transaction
-            .selectFrom('sale_items as si')
-            .select('si.id')
-            .where('si.sale_id', '=', sale.id)
-            .where((eb) =>
-              eb.not(
-                eb.exists(
-                  eb
-                    .selectFrom('sale_item_consumptions as sic')
-                    .select('sic.id')
-                    .whereRef('sic.sale_item_id', '=', 'si.id'),
-                ),
-              ),
-            )
-            .executeTakeFirst();
+          // Lines for products without a recipe legitimately have no consumption;
+          // every recorded consumption must still have exactly one movement.
           if (
-            missingLine ||
             String(consumptionCount.count) !== String(originalMovements.length)
           )
             throw new InternalServerErrorException(
@@ -577,6 +568,7 @@ export class SalesRepository {
       throw new InternalServerErrorException(
         'Sale total could not be calculated',
       );
+    const recipeConsumption = await this.recipeConsumption(transaction, input);
 
     const sale = await transaction
       .insertInto('sales')
@@ -587,7 +579,7 @@ export class SalesRepository {
         tender_method: paymentMethod.name,
         payment_method_id: paymentMethod.id,
         service_type: input.serviceType,
-        inventory_deducted: false,
+        inventory_deducted: recipeConsumption.length > 0,
         total_amount: totalAmount,
         idempotency_key: input.idempotencyKey,
         shift_id: shiftId,
@@ -596,7 +588,7 @@ export class SalesRepository {
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    await transaction
+    const saleItems = await transaction
       .insertInto('sale_items')
       .values(
         input.items.map((item) => {
@@ -620,6 +612,12 @@ export class SalesRepository {
       )
       .returningAll()
       .execute();
+    await this.deductRecipeStock(
+      transaction,
+      input,
+      saleItems,
+      recipeConsumption,
+    );
     await transaction
       .insertInto('sale_events')
       .values({
@@ -630,6 +628,128 @@ export class SalesRepository {
       .execute();
 
     return this.findDetails(transaction, input.branchId, sale.id);
+  }
+
+  // Lines scoped to every service or to this sale's service, multiplied by the
+  // quantity sold. Products without matching lines simply consume nothing.
+  private async recipeConsumption(
+    transaction: Transaction<DB>,
+    input: CreateSaleInput,
+  ) {
+    const requested = sql.join(
+      input.items.map(
+        ({ productId, quantity }) =>
+          sql`(${productId}::uuid, ${quantity}::numeric)`,
+      ),
+    );
+    const result = await sql<RecipeConsumption>`
+      WITH requested(product_id, sale_quantity) AS (VALUES ${requested})
+      SELECT
+        requested.product_id::text AS product_id,
+        recipe.stock_item_id::text AS stock_item_id,
+        trim_scale(sum(recipe.quantity_required) * requested.sale_quantity)::text AS quantity_consumed
+      FROM requested
+      INNER JOIN product_ingredients AS recipe
+        ON recipe.product_id = requested.product_id
+      WHERE recipe.usage_scope IN ('ALL', ${input.serviceType})
+      GROUP BY requested.product_id, requested.sale_quantity, recipe.stock_item_id
+      ORDER BY recipe.stock_item_id, requested.product_id
+    `.execute(transaction);
+    return result.rows;
+  }
+
+  // A sale never waits on stock records: balances may go below zero and the
+  // daily physical count corrects them.
+  private async deductRecipeStock(
+    transaction: Transaction<DB>,
+    input: CreateSaleInput,
+    saleItems: { id: string; product_id: string }[],
+    recipeConsumption: RecipeConsumption[],
+  ) {
+    if (!recipeConsumption.length) return;
+    const saleItemIdByProduct = new Map(
+      saleItems.map(({ id, product_id }) => [product_id, id]),
+    );
+    const consumptions = await transaction
+      .insertInto('sale_item_consumptions')
+      .values(
+        recipeConsumption.map((line) => {
+          const saleItemId = saleItemIdByProduct.get(line.product_id);
+          if (!saleItemId)
+            throw new InternalServerErrorException(
+              'Sale recipe snapshot could not be created',
+            );
+          return {
+            sale_item_id: saleItemId,
+            stock_item_id: line.stock_item_id,
+            quantity_consumed: line.quantity_consumed,
+          };
+        }),
+      )
+      .returningAll()
+      .execute();
+    const requiredByStockItem = await this.sumQuantities(
+      transaction,
+      consumptions.map(({ stock_item_id, quantity_consumed }) => ({
+        stock_item_id,
+        quantity: quantity_consumed,
+      })),
+    );
+    const stockItemIds = requiredByStockItem.map(
+      ({ stock_item_id }) => stock_item_id,
+    );
+
+    await transaction
+      .insertInto('branch_inventory')
+      .values(
+        stockItemIds.map((stockItemId) => ({
+          branch_id: input.branchId,
+          stock_item_id: stockItemId,
+          quantity_on_hand: '0',
+        })),
+      )
+      .onConflict((conflict) =>
+        conflict.columns(['branch_id', 'stock_item_id']).doNothing(),
+      )
+      .execute();
+    const balances = await transaction
+      .selectFrom('branch_inventory')
+      .select('stock_item_id')
+      .where('branch_id', '=', input.branchId)
+      .where('stock_item_id', 'in', stockItemIds)
+      .orderBy('stock_item_id')
+      .forUpdate()
+      .execute();
+    if (balances.length !== stockItemIds.length)
+      throw new InternalServerErrorException(
+        'Sale inventory balances could not be locked',
+      );
+
+    for (const required of requiredByStockItem)
+      await transaction
+        .updateTable('branch_inventory')
+        .set({
+          quantity_on_hand: sql`quantity_on_hand - ${required.quantity}::numeric`,
+          updated_at: sql<Date>`now()`,
+        })
+        .where('branch_id', '=', input.branchId)
+        .where('stock_item_id', '=', required.stock_item_id)
+        .executeTakeFirstOrThrow();
+
+    await transaction
+      .insertInto('inventory_movements')
+      .values(
+        consumptions.map((consumption) => ({
+          inventory_scope: 'BRANCH',
+          branch_id: input.branchId,
+          stock_item_id: consumption.stock_item_id,
+          movement_type: 'SALE',
+          quantity_delta: `-${consumption.quantity_consumed}`,
+          actor_user_id: input.actorUserId,
+          sale_item_consumption_id: consumption.id,
+        })),
+      )
+      .execute();
   }
 
   private async sumQuantities(

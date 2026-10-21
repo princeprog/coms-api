@@ -875,25 +875,23 @@ describe('daily report routes (e2e)', () => {
     activeActorId = reviewerId;
     await request(app.getHttpServer())
       .post(`${reportUrl(earlier.report.id)}/approve`)
-      .expect(409);
-    await request(app.getHttpServer())
-      .get(reportUrl(earlier.report.id))
       .expect(200)
-      .expect(({ body }) => expect(body.status).toBe('SUBMITTED'));
-    const unchangedBalance = await db
+      .expect(({ body }) => expect(body.status).toBe('APPROVED'));
+    // Branch stock may go below zero; the earlier count still reconciles.
+    const reconciledBalance = await db
       .selectFrom('branch_inventory')
       .select('quantity_on_hand')
       .where('branch_id', '=', branchId)
       .where('stock_item_id', '=', stockItemId)
       .executeTakeFirstOrThrow();
-    expect(normalizeDecimal(unchangedBalance.quantity_on_hand)).toBe('4.5');
+    expect(normalizeDecimal(reconciledBalance.quantity_on_hand)).toBe('-5.5');
     expect(
       await db
         .selectFrom('inventory_movements')
         .select((expression) => expression.fn.countAll().as('count'))
         .where('daily_branch_report_item_id', '=', earlierItem.id)
         .executeTakeFirstOrThrow(),
-    ).toMatchObject({ count: '0' });
+    ).toMatchObject({ count: '1' });
   });
 
   it('requires grants, branch assignment, complete physical counts, and valid report dates', async () => {
@@ -1110,7 +1108,11 @@ describe('daily report routes (e2e)', () => {
               ledger_closing_quantity: string;
             }) => ({
               stock_item_id: item.stock_item_id,
-              physical_closing_quantity: item.ledger_closing_quantity,
+              // A ledger can be negative; a physical count never is.
+              physical_closing_quantity:
+                item.ledger_closing_quantity.startsWith('-')
+                  ? '0'
+                  : item.ledger_closing_quantity,
               waste_quantity: '0',
               adjustment_quantity: '0',
             }),

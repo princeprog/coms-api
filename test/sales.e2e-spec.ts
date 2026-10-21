@@ -570,7 +570,7 @@ describe('sales routes (e2e)', () => {
     expect(unknownField.status).toBe(400);
   });
 
-  it('posts exact sale snapshots, leaves inventory unchanged, and returns the same sale on retry', async () => {
+  it('posts exact sale snapshots, deducts recipe stock once, and returns the same sale on retry', async () => {
     const idempotencyKey = randomUUID();
     const payload = {
       service_type: 'TAKEAWAY',
@@ -615,7 +615,8 @@ describe('sales routes (e2e)', () => {
         .where('branch_id', '=', branchId)
         .where('stock_item_id', '=', stockItemId)
         .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ quantity_on_hand: '5.0000' });
+    ).resolves.toMatchObject({ quantity_on_hand: '4.9375' });
+    expect(first.body.inventory_deducted).toBe(true);
 
     const movements = await db
       .selectFrom('inventory_movements')
@@ -623,7 +624,9 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE')
       .execute();
-    expect(movements).toHaveLength(0);
+    expect(movements).toEqual([
+      expect.objectContaining({ quantity_delta: '-0.0625' }),
+    ]);
 
     const changedRetry = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
@@ -649,7 +652,7 @@ describe('sales routes (e2e)', () => {
     expect(detail.body.items).toHaveLength(1);
   });
 
-  it('rejects unavailable menus while accepting recipe-less and low-stock products', async () => {
+  it('rejects unavailable menus while selling recipe-less products and letting stock go negative', async () => {
     await db
       .updateTable('branch_products')
       .set({ is_available: false })
@@ -682,6 +685,7 @@ describe('sales routes (e2e)', () => {
 
     expect(unavailable.status).toBe(409);
     expect(noRecipe.status).toBe(201);
+    expect(noRecipe.body.inventory_deducted).toBe(false);
     expect(insufficient.status).toBe(201);
     const persisted = await db
       .selectFrom('sales')
@@ -694,7 +698,7 @@ describe('sales routes (e2e)', () => {
       .select('id')
       .where('actor_user_id', '=', actorUserId)
       .execute();
-    expect(movements).toHaveLength(0);
+    expect(movements).toHaveLength(2);
     const balances = await db
       .selectFrom('branch_inventory')
       .select(['stock_item_id', 'quantity_on_hand'])
@@ -703,13 +707,13 @@ describe('sales routes (e2e)', () => {
       .execute();
     expect(balances).toEqual(
       expect.arrayContaining([
-        { stock_item_id: stockItemId, quantity_on_hand: '5.0000' },
-        { stock_item_id: secondStockItemId, quantity_on_hand: '0.1000' },
+        { stock_item_id: stockItemId, quantity_on_hand: '4.8000' },
+        { stock_item_id: secondStockItemId, quantity_on_hand: '-0.4000' },
       ]),
     );
   });
 
-  it('prices multiple products exactly without consuming recipe stock', async () => {
+  it('prices multiple products exactly and sums their recipe consumption', async () => {
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/sales`)
       .set('Idempotency-Key', randomUUID())
@@ -755,8 +759,8 @@ describe('sales routes (e2e)', () => {
       .execute();
     expect(balances).toEqual(
       expect.arrayContaining([
-        { stock_item_id: stockItemId, quantity_on_hand: '5.0000' },
-        { stock_item_id: secondStockItemId, quantity_on_hand: '10.0000' },
+        { stock_item_id: stockItemId, quantity_on_hand: '4.5375' },
+        { stock_item_id: secondStockItemId, quantity_on_hand: '9.0000' },
       ]),
     );
 
@@ -766,10 +770,17 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE')
       .execute();
-    expect(movements).toHaveLength(0);
+    expect(movements).toEqual(
+      expect.arrayContaining([
+        { stock_item_id: stockItemId, quantity_delta: '-0.0625' },
+        { stock_item_id: stockItemId, quantity_delta: '-0.4' },
+        { stock_item_id: secondStockItemId, quantity_delta: '-1' },
+      ]),
+    );
+    expect(movements).toHaveLength(3);
   });
 
-  it('records concurrent sales without changing branch inventory', async () => {
+  it('deducts concurrent sales without losing updates, even below zero', async () => {
     await setStock('0.0625');
     const [first, second] = await Promise.all([
       postSale(randomUUID(), productId, '0.5'),
@@ -785,7 +796,7 @@ describe('sales routes (e2e)', () => {
         .where('branch_id', '=', branchId)
         .where('stock_item_id', '=', stockItemId)
         .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ quantity_on_hand: '0.0625' });
+    ).resolves.toMatchObject({ quantity_on_hand: '-0.0625' });
     const sales = await db
       .selectFrom('sales')
       .select('id')
@@ -819,10 +830,103 @@ describe('sales routes (e2e)', () => {
       .where('branch_id', '=', branchId)
       .where('stock_item_id', '=', stockItemId)
       .executeTakeFirstOrThrow();
-    expect(balance.quantity_on_hand).toBe('5.0800');
+    // 8 sales × 0.0625 deducted, 8 × 0.01 added.
+    expect(balance.quantity_on_hand).toBe('4.5800');
   }, 30000);
 
-  it('voids financial sales without an inventory reversal, with idempotent retry', async () => {
+  it('applies only every-sale and matching-service recipe lines', async () => {
+    const box = await db
+      .insertInto('stock_items')
+      .values({
+        stock_item_name: `Sales test takeout box ${suffix}`,
+        category: 'Sales test',
+        unit: 'pcs',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    stockItemIds.push(box.id);
+    await db
+      .insertInto('product_ingredients')
+      .values([
+        {
+          product_id: productId,
+          stock_item_id: box.id,
+          quantity_required: '1',
+          usage_scope: 'TAKEAWAY',
+        },
+        {
+          product_id: productId,
+          stock_item_id: secondStockItemId,
+          quantity_required: '0.05',
+          usage_scope: 'DINE_IN',
+        },
+      ])
+      .execute();
+    try {
+      const takeout = await postSale(randomUUID(), productId, '2');
+      expect(takeout.status).toBe(201);
+      const deducted = await db
+        .selectFrom('inventory_movements')
+        .select(['stock_item_id', 'quantity_delta'])
+        .where('actor_user_id', '=', actorUserId)
+        .where('movement_type', '=', 'SALE')
+        .execute();
+      expect(deducted).toHaveLength(2);
+      expect(deducted).toEqual(
+        expect.arrayContaining([
+          { stock_item_id: stockItemId, quantity_delta: '-0.25' },
+          { stock_item_id: box.id, quantity_delta: '-2' },
+        ]),
+      );
+      await expect(
+        db
+          .selectFrom('branch_inventory')
+          .select('quantity_on_hand')
+          .where('branch_id', '=', branchId)
+          .where('stock_item_id', '=', box.id)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toMatchObject({ quantity_on_hand: '-2' });
+    } finally {
+      await db
+        .deleteFrom('product_ingredients')
+        .where('product_id', '=', productId)
+        .where('usage_scope', '<>', 'ALL')
+        .execute();
+    }
+  });
+
+  it('voids by reversing the saved snapshot after a recipe change', async () => {
+    const sale = await postSale(randomUUID(), productId, '0.5');
+    expect(sale.status).toBe(201);
+    await db
+      .updateTable('product_ingredients')
+      .set({ quantity_required: '9' })
+      .where('product_id', '=', productId)
+      .execute();
+    try {
+      const voided = await request(app.getHttpServer())
+        .post(`/branches/${branchId}/sales/${sale.body.id}/void`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ reason: 'Recipe changed after the sale' });
+      expect(voided.status).toBe(201);
+      await expect(
+        db
+          .selectFrom('branch_inventory')
+          .select('quantity_on_hand')
+          .where('branch_id', '=', branchId)
+          .where('stock_item_id', '=', stockItemId)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toMatchObject({ quantity_on_hand: '5.0000' });
+    } finally {
+      await db
+        .updateTable('product_ingredients')
+        .set({ quantity_required: '0.1250' })
+        .where('product_id', '=', productId)
+        .execute();
+    }
+  });
+
+  it('voids a deducted sale with a stock reversal and idempotent retry', async () => {
     const saleKey = randomUUID();
     const sale = await postSale(saleKey, productId, '0.5');
     expect(sale.status).toBe(201);
@@ -885,7 +989,18 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .orderBy('created_at')
       .execute();
-    expect(movements).toEqual([]);
+    expect(movements).toEqual([
+      expect.objectContaining({
+        movement_type: 'SALE',
+        quantity_delta: '-0.0625',
+        reversal_of_movement_id: null,
+      }),
+      expect.objectContaining({
+        movement_type: 'SALE_VOID',
+        quantity_delta: '0.0625',
+        reason: 'Cashier entered the wrong item',
+      }),
+    ]);
   });
 
   it('refuses to void a sale after its branch and business date report is approved', async () => {
@@ -1012,7 +1127,7 @@ describe('sales routes (e2e)', () => {
       .where('actor_user_id', '=', actorUserId)
       .where('movement_type', '=', 'SALE_VOID')
       .execute();
-    expect(reversals).toHaveLength(0);
+    expect(reversals).toHaveLength(1);
   });
 
   async function postSale(

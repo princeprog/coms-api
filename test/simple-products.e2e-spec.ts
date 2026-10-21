@@ -378,7 +378,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         (await client().get('/stock-items?usage_type=INGREDIENT')).status,
       ).toBe(400);
     });
-    it('sells without recipes, balances or ingredient validation and never writes consumption', async () => {
+    it('sells a product without a recipe without touching stock or writing consumption', async () => {
       const product = (await create()).body;
       const before = await db
         .selectFrom('branch_inventory')
@@ -657,7 +657,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         ).toHaveLength(0);
       },
     );
-    it('rejects historical voids when an entire sale line has lost its consumption history', async () => {
+    it('voids a mixed sale by restoring only the recorded recipe consumption', async () => {
       const id = await historical(true);
       const product = (await create(details([]))).body;
       await db
@@ -665,38 +665,191 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .values({
           sale_id: id,
           product_id: product.id,
-          product_name_snapshot: 'Missing consumption history',
+          product_name_snapshot: 'Product without a recipe',
           quantity: '1',
           unit_price: '0',
           line_total: '0',
         })
         .execute();
-      const balances = await db
-        .selectFrom('branch_inventory')
-        .selectAll()
-        .orderBy('stock_item_id')
-        .execute();
+      const balance = async () =>
+        Number(
+          (
+            await db
+              .selectFrom('branch_inventory')
+              .select('quantity_on_hand')
+              .where('stock_item_id', '=', stock)
+              .executeTakeFirstOrThrow()
+          ).quantity_on_hand,
+        );
+      const reversals = () =>
+        db
+          .selectFrom('inventory_movements')
+          .select('quantity_delta')
+          .where('movement_type', '=', 'SALE_VOID')
+          .execute();
+      const [balanceBefore, reversalsBefore] = [
+        await balance(),
+        (await reversals()).length,
+      ];
       const result = await client(manager)
         .post(`/branches/${branch}/sales/${id}/void`)
         .set('Idempotency-Key', randomUUID())
-        .send({ reason: 'Incomplete history' });
-      expect(result.status).toBe(500);
-      expect(
+        .send({ reason: 'Customer cancelled the order' });
+      expect(result.status).toBe(201);
+      expect(await balance()).toBe(balanceBefore + 1.25);
+      expect(await reversals()).toHaveLength(reversalsBefore + 1);
+    });
+
+    it('saves recipes through product setup and deducts them on sale', async () => {
+      const flour = (
         await db
-          .selectFrom('branch_inventory')
-          .selectAll()
-          .orderBy('stock_item_id')
-          .execute(),
-      ).toEqual(balances);
+          .insertInto('stock_items')
+          .values({
+            stock_item_name: 'Recipe rice',
+            category: 'Rice',
+            unit: 'kg',
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const retired = (
+        await db
+          .insertInto('stock_items')
+          .values({
+            stock_item_name: 'Retired oil',
+            category: 'Oil',
+            unit: 'L',
+            is_active: false,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const data = details([branch]);
+      const save = (
+        recipe: unknown,
+        expected = 0,
+        product = data,
+        path = '/products/setup',
+      ) =>
+        (path === '/products/setup' ? client().post(path) : client().put(path))
+          .set('Idempotency-Key', randomUUID())
+          .send({
+            product,
+            expected_product_revision: expected,
+            ...(recipe === undefined ? {} : { recipe }),
+          });
+      const saved = await save([
+        { stock_item_id: flour, quantity: '0.2500', usage_scope: 'ALL' },
+        { stock_item_id: stock, quantity: '1', usage_scope: 'TAKEAWAY' },
+      ]);
+      expect(saved.status).toBe(201);
+      expect(saved.body.product.recipe_line_count).toBe(2);
+      expect(saved.body.recipe).toEqual([
+        expect.objectContaining({
+          stock_item_id: stock,
+          stock_item_name: 'Historical packaging',
+          unit: 'pcs',
+          quantity: '1',
+          usage_scope: 'TAKEAWAY',
+        }),
+        expect.objectContaining({
+          stock_item_id: flour,
+          quantity: '0.25',
+          usage_scope: 'ALL',
+        }),
+      ]);
+      const product = saved.body.product;
+      const path = `/products/${product.id}/setup`;
+
+      const sale = await sell(product);
+      expect(sale.status).toBe(201);
+      expect(sale.body.inventory_deducted).toBe(true);
+      const used = await db
+        .selectFrom('inventory_movements as im')
+        .innerJoin(
+          'sale_item_consumptions as c',
+          'c.id',
+          'im.sale_item_consumption_id',
+        )
+        .innerJoin('sale_items as si', 'si.id', 'c.sale_item_id')
+        .select(['im.stock_item_id', 'im.quantity_delta'])
+        .where('si.sale_id', '=', sale.body.id)
+        .execute();
+      expect(used).toEqual(
+        expect.arrayContaining([
+          { stock_item_id: flour, quantity_delta: '-0.5' },
+          { stock_item_id: stock, quantity_delta: '-2' },
+        ]),
+      );
       expect(
         (
           await db
-            .selectFrom('sales')
-            .select('status')
-            .where('id', '=', id)
+            .selectFrom('branch_inventory')
+            .select('quantity_on_hand')
+            .where('branch_id', '=', branch)
+            .where('stock_item_id', '=', flour)
             .executeTakeFirstOrThrow()
+        ).quantity_on_hand,
+      ).toBe('-0.5');
+
+      const kept = await save(undefined, product.setup_revision, data, path);
+      expect(kept.status).toBe(200);
+      expect(kept.body.recipe).toHaveLength(2);
+      const revision = kept.body.product.setup_revision as number;
+
+      for (const invalid of [
+        [{ stock_item_id: flour, quantity: '0', usage_scope: 'ALL' }],
+        [{ stock_item_id: flour, quantity: '1.12345', usage_scope: 'ALL' }],
+        [{ stock_item_id: flour, quantity: '1', usage_scope: 'BOTH' }],
+        [
+          { stock_item_id: flour, quantity: '1', usage_scope: 'ALL' },
+          { stock_item_id: flour, quantity: '1', usage_scope: 'TAKEAWAY' },
+        ],
+      ])
+        expect((await save(invalid, revision, data, path)).status).toBe(400);
+      expect(
+        (
+          await save(
+            [{ stock_item_id: retired, quantity: '1', usage_scope: 'ALL' }],
+            revision,
+            data,
+            path,
+          )
         ).status,
-      ).toBe('COMPLETED');
+      ).toBe(409);
+      expect(
+        (
+          await save(
+            [{ stock_item_id: flour, quantity: '1', usage_scope: 'DINE_IN' }],
+            revision,
+            { ...data, service_types: ['TAKEAWAY'] },
+            path,
+          )
+        ).status,
+      ).toBe(409);
+      // Narrowing services must not orphan an existing Takeout-only line.
+      expect(
+        (
+          await save(
+            undefined,
+            revision,
+            { ...data, service_types: ['DINE_IN'] },
+            path,
+          )
+        ).status,
+      ).toBe(409);
+
+      const blocked = await client().post(`/stock-items/${flour}/deactivate`);
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.message).toContain(data.product_name);
+
+      const cleared = await save([], revision, data, path);
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.recipe).toEqual([]);
+      expect(cleared.body.product.recipe_line_count).toBe(0);
+      expect(
+        (await client().post(`/stock-items/${flour}/deactivate`)).status,
+      ).toBe(201);
     });
 
     it('restricts payment-method management to protected Super Admin', async () => {

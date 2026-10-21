@@ -3,8 +3,13 @@ import {
   paginatedResult,
   paginationOffset,
 } from '../../common/utils/pagination';
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { sql, type Kysely } from 'kysely';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import type { StockItemQueryDto } from './dto/stock-item-query.dto';
@@ -122,7 +127,38 @@ export class StockItemsRepository {
   }
 
   async deactivate(id: string) {
-    const stockItem = await this.db
+    return this.db.transaction().execute(async (tx) => {
+      // Lock the item first so a concurrent recipe save cannot add it unseen.
+      const locked = await tx
+        .selectFrom('stock_items')
+        .select('id')
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!locked) throw new NotFoundException('Stock item not found');
+      const recipeProducts = await tx
+        .selectFrom('product_ingredients as r')
+        .innerJoin('products as p', 'p.id', 'r.product_id')
+        .select('p.product_name')
+        .distinct()
+        .where('r.stock_item_id', '=', id)
+        .where('p.is_active', '=', true)
+        .orderBy('p.product_name')
+        .limit(4)
+        .execute();
+      if (recipeProducts.length) {
+        const names = recipeProducts.slice(0, 3).map((p) => p.product_name);
+        const more = recipeProducts.length > 3 ? ' and others' : '';
+        throw new ConflictException(
+          `Remove this stock item from the recipe of ${names.join(', ')}${more} before deactivating it.`,
+        );
+      }
+      return this.deactivateWith(tx, id);
+    });
+  }
+
+  private async deactivateWith(executor: Transaction<DB>, id: string) {
+    const stockItem = await executor
       .updateTable('stock_items')
       .set({ is_active: false, updated_at: sql<Date>`now()` })
       .where('id', '=', id)

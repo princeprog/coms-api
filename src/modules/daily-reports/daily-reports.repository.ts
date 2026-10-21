@@ -609,15 +609,11 @@ export class DailyReportsRepository {
             })
             .where('branch_id', '=', branchId)
             .where('stock_item_id', '=', item.stock_item_id)
-            .where(
-              sql<boolean>`quantity_on_hand + (${physical}::numeric
-                - ${item.ledger_closing_quantity}::numeric) >= 0`,
-            )
             .returning('quantity_on_hand')
             .executeTakeFirst();
           if (!balance)
             throw new ConflictException(
-              'Report reconciliation would make stock negative; resolve later inventory activity before approval',
+              'Branch inventory changed while this report was being approved',
             );
           await transaction
             .insertInto('inventory_movements')
