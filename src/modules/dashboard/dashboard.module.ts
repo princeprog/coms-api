@@ -4,10 +4,17 @@ import { BranchDashboardController } from './branch-dashboard.controller';
 import { DashboardController } from './dashboard.controller';
 import { DashboardRepository } from './dashboard.repository';
 import { DashboardService } from './dashboard.service';
+import { DashboardTodayRepository } from './dashboard-today.repository';
+import { DashboardTodayService } from './dashboard-today.service';
 
 @Module({
   imports: [AuthModule],
   controllers: [DashboardController, BranchDashboardController],
-  providers: [DashboardRepository, DashboardService],
+  providers: [
+    DashboardRepository,
+    DashboardService,
+    DashboardTodayRepository,
+    DashboardTodayService,
+  ],
 })
 export class DashboardModule {}

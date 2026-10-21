@@ -15,3 +15,9 @@ export class DashboardOverviewQueryDto extends DashboardQueryDto {
   @IsUUID()
   branch_id?: string;
 }
+
+export class DashboardTodayQueryDto {
+  @IsOptional()
+  @IsUUID()
+  branch_id?: string;
+}
