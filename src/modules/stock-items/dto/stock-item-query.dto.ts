@@ -1,7 +1,17 @@
 import { parseBooleanFilter } from '../../../common/utils/list-filters';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import {
+  STOCK_RECIPE_USES,
+  type StockRecipeUse,
+} from './create-stock-item.dto';
 
 export class StockItemQueryDto extends PaginationQueryDto {
   override page_size = 10;
@@ -16,4 +26,8 @@ export class StockItemQueryDto extends PaginationQueryDto {
   @Transform(({ value }) => parseBooleanFilter(value))
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsIn(STOCK_RECIPE_USES)
+  recipe_use?: StockRecipeUse;
 }

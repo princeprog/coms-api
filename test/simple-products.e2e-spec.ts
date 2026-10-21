@@ -843,6 +843,48 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect(blocked.status).toBe(409);
       expect(blocked.body.message).toContain(data.product_name);
 
+      expect(
+        (
+          await client()
+            .patch(`/stock-items/${flour}`)
+            .send({ recipe_use: 'OPERATING_SUPPLY' })
+        ).status,
+      ).toBe(409);
+      const soap = await client().post('/stock-items').send({
+        stock_item_name: 'Dish soap',
+        category: 'Cleaning supplies',
+        unit: 'L',
+        recipe_use: 'OPERATING_SUPPLY',
+      });
+      expect(soap.status).toBe(201);
+      expect(soap.body.recipe_use).toBe('OPERATING_SUPPLY');
+      expect(
+        (
+          await save(
+            [
+              {
+                stock_item_id: soap.body.id,
+                quantity: '1',
+                usage_scope: 'ALL',
+              },
+            ],
+            revision,
+            data,
+            path,
+          )
+        ).status,
+      ).toBe(409);
+      const byCategory = await client().get(
+        '/stock-items?search=cleaning&page=1&page_size=10',
+      );
+      expect(byCategory.body.items.map((i: { id: string }) => i.id)).toContain(
+        soap.body.id,
+      );
+      const recipeOnly = await client().get(
+        '/stock-items?search=cleaning&recipe_use=RECIPE&page=1&page_size=10',
+      );
+      expect(recipeOnly.body.items).toEqual([]);
+
       const cleared = await save([], revision, data, path);
       expect(cleared.status).toBe(200);
       expect(cleared.body.recipe).toEqual([]);

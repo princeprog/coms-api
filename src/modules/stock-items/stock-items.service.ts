@@ -19,6 +19,7 @@ export class StockItemsService {
       page_size: query.page_size,
       ...(search ? { search } : {}),
       ...(query.is_active === undefined ? {} : { is_active: query.is_active }),
+      ...(query.recipe_use ? { recipe_use: query.recipe_use } : {}),
     });
   }
 
@@ -40,6 +41,7 @@ export class StockItemsService {
       stock_item_name: stockItemName,
       category,
       unit,
+      recipe_use: input.recipe_use ?? 'RECIPE',
     });
   }
 
@@ -52,6 +54,9 @@ export class StockItemsService {
         ? { category: input.category.trim() }
         : {}),
       ...(input.unit !== undefined ? { unit: input.unit.trim() } : {}),
+      ...(input.recipe_use !== undefined
+        ? { recipe_use: input.recipe_use }
+        : {}),
     };
 
     if (Object.keys(patch).length === 0)

@@ -384,7 +384,14 @@ export class ProductSetupRepository {
     if (!ids.length) return;
     const stockItems = await tx
       .selectFrom('stock_items')
-      .select(['id', 'stock_item_name', 'is_active'])
+      .select([
+        'id',
+        'stock_item_name',
+        'is_active',
+        sql<boolean>`usage_types && ARRAY['INGREDIENT','PACKAGING','READY_TO_SELL']::text[]`.as(
+          'recipe_usable',
+        ),
+      ])
       .where('id', 'in', ids)
       .orderBy('id')
       .forShare()
@@ -395,6 +402,11 @@ export class ProductSetupRepository {
     if (inactive)
       throw new ConflictException(
         `${inactive.stock_item_name} is inactive. Choose an active stock item.`,
+      );
+    const operating = stockItems.find((s) => !s.recipe_usable);
+    if (operating)
+      throw new ConflictException(
+        `${operating.stock_item_name} is an operating supply and can't be used in recipes.`,
       );
   }
 }

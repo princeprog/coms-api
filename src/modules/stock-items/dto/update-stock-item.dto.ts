@@ -1,5 +1,15 @@
 import { Transform } from 'class-transformer';
-import { IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import {
+  IsIn,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
+import {
+  STOCK_RECIPE_USES,
+  type StockRecipeUse,
+} from './create-stock-item.dto';
 
 const trimText = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -25,4 +35,8 @@ export class UpdateStockItemDto {
   @MinLength(1)
   @MaxLength(40)
   unit?: string;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(STOCK_RECIPE_USES)
+  recipe_use?: StockRecipeUse;
 }

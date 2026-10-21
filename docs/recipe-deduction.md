@@ -11,6 +11,7 @@ Completed POS sales deduct branch stock from each product's recipe. Super Admin 
 - Recipe changes affect future sales only. A void reverses the sale's saved snapshot exactly (`SALE_VOID`), even after the recipe changed. Carts that mix recipe and no-recipe products void normally.
 - Daily reports derive opening, sales usage and expected closing from the ledger, so opening and ledger closing may be negative; physical counts stay non-negative. Approving a report may leave a negative balance when later sales exceed the counted stock.
 - Stock items used by an active product's recipe cannot be deactivated until removed from those recipes.
+- Each stock item has a recipe use: **Used in recipes** (`RECIPE`) or **Operating supply only** (`OPERATING_SUPPLY`, e.g. cleaning items). Only recipe stock appears in the recipe picker and passes recipe validation; an item in an active recipe can't be switched to operating-only. `GET /stock-items` returns `recipe_use`, filters with `recipe_use=RECIPE|OPERATING_SUPPLY`, and its search matches name or category. Migration `20261021201122_stock_item_recipe_use` marks every item recipe-usable except the Cleaning supplies category; new items default to recipe use.
 
 ## API contract
 
