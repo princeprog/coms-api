@@ -8,6 +8,7 @@ import {
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
+import { listDiff, recordAudit } from '../audit/audit-recorder';
 
 type RoleId = string;
 type RoleRow = {
@@ -202,6 +203,12 @@ export class RolesRepository {
     );
     if (selected.length !== permissionKeys.length)
       throw new ConflictException('Permission catalog is out of sync');
+    const before = await trx
+      .selectFrom('auth.role_permissions as rp')
+      .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+      .select(sql<string>`p.module_key || '.' || p.action_key`.as('key'))
+      .where('rp.role_id', '=', roleId)
+      .execute();
     await trx
       .deleteFrom('auth.role_permissions')
       .where('role_id', '=', roleId)
@@ -223,6 +230,24 @@ export class RolesRepository {
           selected.map(({ id }) => ({ role_id: roleId, permission_id: id })),
         )
         .execute();
+    const editableBefore = before
+      .map(({ key }) => key)
+      .filter((key) => EDITABLE_PERMISSION_KEYS.has(key));
+    const { added, removed } = listDiff(editableBefore, permissionKeys);
+    if (added.length || removed.length) {
+      const role = await trx
+        .selectFrom('auth.roles')
+        .select('role_name')
+        .where('id', '=', roleId)
+        .executeTakeFirst();
+      await recordAudit(trx, {
+        action: 'role.permissions_updated',
+        entityType: 'role',
+        entityId: String(roleId),
+        entityLabel: role?.role_name ?? null,
+        metadata: { granted: added, revoked: removed },
+      });
+    }
   }
 
   private isUniqueViolation(error: unknown): boolean {

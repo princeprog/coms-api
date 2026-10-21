@@ -32,6 +32,20 @@ export type Numeric = ColumnType<string, number | string, number | string>;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AuditEvents {
+  action: string;
+  actor_name: string | null;
+  actor_user_id: string | null;
+  branch_id: string | null;
+  changes: Generated<Json>;
+  entity_id: string | null;
+  entity_label: string | null;
+  entity_type: string;
+  id: Generated<string>;
+  metadata: Generated<Json>;
+  occurred_at: Generated<Timestamp>;
+}
+
 export interface AuthBranchUsers {
   assigned_at: Generated<Timestamp>;
   branch_id: string;
@@ -712,6 +726,7 @@ export interface Suppliers {
 }
 
 export interface DB {
+  audit_events: AuditEvents;
   'auth.branch_users': AuthBranchUsers;
   'auth.permissions': AuthPermissions;
   'auth.rate_limit_buckets': AuthRateLimitBuckets;

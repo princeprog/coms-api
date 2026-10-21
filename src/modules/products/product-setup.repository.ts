@@ -12,6 +12,7 @@ import { decimal, fingerprint, services } from '../../common/utils/menu-rules';
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
 import type { RecipeUsageScope } from './dto/product-setup.dto';
+import { listDiff, recordAudit } from '../audit/audit-recorder';
 export type RecipeLineInput = {
   stock_item_id: string;
   quantity: string;
@@ -227,6 +228,16 @@ export class ProductSetupRepository {
           );
       }
       await this.validateRecipe(tx, current?.id, types, recipe);
+      // Snapshot what the product form can change outside the products row,
+      // so the audit log records recipe and availability edits.
+      const recipeBefore =
+        current && recipe !== undefined
+          ? await this.describeRecipe(current.id, tx)
+          : [];
+      const branchesBefore =
+        current && selected !== undefined
+          ? await this.availableBranchNames(current.id, tx)
+          : [];
       const priceChanged = current && decimal(current.price) !== decimal(price);
       const product = current
         ? await tx
@@ -336,6 +347,10 @@ export class ProductSetupRepository {
         }
       }
       const result = await this.get(product.id, access, tx);
+      await this.auditChildren(tx, product, {
+        recipeBefore: recipe === undefined ? null : recipeBefore,
+        branchesBefore: selected === undefined ? null : branchesBefore,
+      });
       if (key)
         await tx
           .insertInto('product_setup_operations')
@@ -408,5 +423,57 @@ export class ProductSetupRepository {
       throw new ConflictException(
         `${operating.stock_item_name} is an operating supply and can't be used in recipes.`,
       );
+  }
+  private async describeRecipe(productId: string, executor: Executor) {
+    const scopes: Record<string, string> = {
+      ALL: '',
+      DINE_IN: ' (Dine-in only)',
+      TAKEAWAY: ' (Takeout only)',
+    };
+    return (await this.recipe(productId, executor)).map(
+      (line) =>
+        `${line.stock_item_name} ${line.quantity} ${line.unit}${scopes[line.usage_scope] ?? ''}`,
+    );
+  }
+  private async availableBranchNames(productId: string, executor: Executor) {
+    return (
+      await executor
+        .selectFrom('branch_products as bp')
+        .innerJoin('branches as b', 'b.id', 'bp.branch_id')
+        .select('b.branch_name')
+        .where('bp.product_id', '=', productId)
+        .where('bp.is_available', '=', true)
+        .execute()
+    ).map((row) => row.branch_name);
+  }
+  private async auditChildren(
+    tx: Transaction<DB>,
+    product: { id: string; product_name: string },
+    before: { recipeBefore: string[] | null; branchesBefore: string[] | null },
+  ) {
+    const events: [string, string[], string[]][] = [];
+    if (before.recipeBefore)
+      events.push([
+        'product.recipe_updated',
+        before.recipeBefore,
+        await this.describeRecipe(product.id, tx),
+      ]);
+    if (before.branchesBefore)
+      events.push([
+        'product.availability_updated',
+        before.branchesBefore,
+        await this.availableBranchNames(product.id, tx),
+      ]);
+    for (const [action, previous, next] of events) {
+      const { added, removed } = listDiff(previous, next);
+      if (!added.length && !removed.length) continue;
+      await recordAudit(tx, {
+        action,
+        entityType: 'product',
+        entityId: product.id,
+        entityLabel: product.product_name,
+        metadata: { added, removed },
+      });
+    }
   }
 }

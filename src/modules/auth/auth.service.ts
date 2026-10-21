@@ -73,8 +73,17 @@ export class AuthService {
       user?.hashed_password ?? (await this.dummyPasswordHashPromise),
       dto.password,
     );
-    if (!user || !matches || user.is_active === false)
+    if (!user || !matches || user.is_active === false) {
+      await this.repository.audit({
+        actorUserId: null,
+        action: 'auth.sign_in_failed',
+        entityType: 'staff',
+        entityId: user?.id ?? null,
+        entityLabel: user?.full_name ?? null,
+        metadata: { email: dto.email.trim().toLowerCase().slice(0, 320) },
+      });
       throw new UnauthorizedException('Invalid email or password');
+    }
     return this.repository.transaction(async (trx) => {
       const currentUser = await this.repository.findUserForSession(
         user.id,
@@ -87,6 +96,16 @@ export class AuthService {
         trx,
         currentUser.id,
         getAuthConfig().refreshTtlSeconds,
+      );
+      await this.repository.audit(
+        {
+          actorUserId: currentUser.id,
+          action: 'auth.signed_in',
+          entityType: 'staff',
+          entityId: currentUser.id,
+          entityLabel: currentUser.full_name,
+        },
+        trx,
       );
       return {
         user: this.publicUser(currentUser),
@@ -207,6 +226,16 @@ export class AuthService {
         throw new UnauthorizedException('Authentication required');
       await this.repository.updatePassword(trx, userId, hash);
       await this.repository.revokeUserFamilies(trx, userId);
+      await this.repository.audit(
+        {
+          actorUserId: userId,
+          action: 'auth.password_changed',
+          entityType: 'staff',
+          entityId: userId,
+          entityLabel: locked.full_name,
+        },
+        trx,
+      );
       const family = await this.repository.createFamily(
         trx,
         userId,

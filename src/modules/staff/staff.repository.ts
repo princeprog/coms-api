@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
+import { listDiff, recordAudit } from '../audit/audit-recorder';
 import type { DB } from '../../database/db';
 
 type Connection = Kysely<DB> | Transaction<DB>;
@@ -273,6 +274,11 @@ export class StaffRepository {
         );
         assignedBranchIds = [...new Set([...outsideScope, ...branchIds])];
       }
+      const previous = await trx
+        .selectFrom('auth.branch_users')
+        .select('branch_id')
+        .where('user_id', '=', id)
+        .execute();
       await trx
         .deleteFrom('auth.branch_users')
         .where('user_id', '=', id)
@@ -287,6 +293,34 @@ export class StaffRepository {
             })),
           )
           .execute();
+      const { added, removed } = listDiff(
+        previous.map(({ branch_id }) => branch_id),
+        assignedBranchIds,
+      );
+      if (added.length || removed.length) {
+        const names = new Map(
+          (
+            await trx
+              .selectFrom('branches')
+              .select(['id', 'branch_name'])
+              .where('id', 'in', [...added, ...removed])
+              .execute()
+          ).map((branch) => [branch.id, branch.branch_name]),
+        );
+        const user = await trx
+          .selectFrom('auth.users')
+          .select('full_name')
+          .where('id', '=', id)
+          .executeTakeFirst();
+        const label = (ids: string[]) => ids.map((b) => names.get(b) ?? b);
+        await recordAudit(trx, {
+          action: 'staff.branches_updated',
+          entityType: 'staff',
+          entityId: id,
+          entityLabel: user?.full_name ?? null,
+          metadata: { added: label(added), removed: label(removed) },
+        });
+      }
       return this.findById(id, trx);
     });
   }
@@ -331,6 +365,12 @@ export class StaffRepository {
         .executeTakeFirst();
       if (!member) throw new NotFoundException('Staff account not found');
       await this.revokeSessions(trx, id);
+      await recordAudit(trx, {
+        action: 'staff.password_reset',
+        entityType: 'staff',
+        entityId: member.id,
+        entityLabel: member.full_name,
+      });
       return member;
     });
   }

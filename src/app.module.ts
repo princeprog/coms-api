@@ -24,6 +24,9 @@ import { SalesModule } from './modules/sales/sales.module';
 import { DailyReportsModule } from './modules/daily-reports/daily-reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { CostsModule } from './modules/costs/costs.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -56,8 +59,12 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     DailyReportsModule,
     DashboardModule,
     CostsModule,
+    AuditModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_INTERCEPTOR, useClass: AuditContextInterceptor },
+  ],
 })
 export class AppModule {}

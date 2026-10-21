@@ -345,6 +345,11 @@ export const PERMISSION_CATALOG = [
     action_key: 'password_reset',
     description: 'Reset staff passwords',
   },
+  {
+    module_key: 'audit',
+    action_key: 'read',
+    description: 'View the audit log of settings and security changes',
+  },
 ] as const;
 
 export type PermissionKey =

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
+import { recordAudit, type AuditEventInput } from '../audit/audit-recorder';
 
 type Connection = Kysely<DB> | Transaction<DB>;
 
@@ -11,6 +12,9 @@ export class AuthRepository {
 
   transaction<T>(work: (trx: Transaction<DB>) => Promise<T>) {
     return this.db.transaction().execute(work);
+  }
+  audit(event: AuditEventInput, db: Connection = this.db) {
+    return recordAudit(db, event);
   }
   findByEmail(email: string) {
     return this.db

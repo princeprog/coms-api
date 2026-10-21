@@ -9,6 +9,7 @@ import {
   type Pagination,
 } from '../../common/utils/pagination';
 import type { CostRange } from './cost-range';
+import { recordAudit } from '../audit/audit-recorder';
 
 // null = every branch; otherwise the allowed branch ids.
 export type BranchScope = string[] | null;
@@ -231,6 +232,7 @@ export class CostsRepository {
     stockItemId: string,
     unitCost: string,
     actorUserId: string,
+    reason: string,
   ) {
     return this.db.transaction().execute(async (tx) => {
       const stock = await tx
@@ -264,6 +266,17 @@ export class CostsRepository {
           }),
         )
         .execute();
+      await recordAudit(tx, {
+        actorUserId,
+        action: 'stock_item.cost_set',
+        entityType: 'stock_item',
+        entityId: stock.id,
+        entityLabel: stock.stock_item_name,
+        changes: {
+          average_unit_cost: { from: previous?.cost ?? null, to: unitCost },
+        },
+        metadata: { reason },
+      });
       return {
         stock_item_id: stock.id,
         stock_item_name: stock.stock_item_name,

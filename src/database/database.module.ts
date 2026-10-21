@@ -1,7 +1,5 @@
 import { Global, Module, OnApplicationShutdown } from '@nestjs/common';
-import { Kysely, PostgresDialect } from 'kysely';
-import { Pool } from 'pg';
-import type { DB } from './db';
+import { createDatabase } from './create-database';
 
 export const DATABASE = Symbol('DATABASE');
 
@@ -9,14 +7,10 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required');
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.DB_POOL_MAX ?? 10),
-});
-
-const database = new Kysely<DB>({
-  dialect: new PostgresDialect({ pool }),
-});
+const database = createDatabase(
+  process.env.DATABASE_URL,
+  Number(process.env.DB_POOL_MAX ?? 10),
+);
 
 @Global()
 @Module({

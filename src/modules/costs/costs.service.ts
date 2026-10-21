@@ -50,6 +50,7 @@ export class CostsService {
       id,
       decimal(input.unit_cost),
       access.userId,
+      input.reason,
     );
   }
 
