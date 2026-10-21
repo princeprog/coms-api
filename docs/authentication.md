@@ -127,3 +127,10 @@ pnpm exec tsc --noEmit --module node20 --moduleResolution node16 --ignoreDepreca
 ```
 
 The API compiler configuration remains unchanged in this fix.
+
+## Account recovery
+
+- **Admin reset**: `POST /staff/:userId/password-reset` (`staff.password_reset`, branch-scoped like other staff actions) generates a 14-character temporary password, returns it once, stores only its Argon2id hash, ends every session of that user and sets `must_change_password`. Nobody can reset their own password this way, and only Super Admin can reset a Super Admin. Migration `20261021210514_account_recovery` grants the permission to roles holding `staff.update`.
+- **Forced change**: while `must_change_password` is set, every protected route except `GET /auth/me` and `POST /auth/password` returns 403 with `code: PASSWORD_CHANGE_REQUIRED`; the app redirects to `/change-password`.
+- **Change password**: `POST /auth/password { current_password, new_password }` (12–128 characters, different from the current one, rate-limited per user) ends all sessions and issues fresh cookies for this browser.
+- **Locked-out Super Admin**: on the server, `pnpm account:reset-password -- --email <email> [--generate]` sets a temporary password and ends sessions; the account must change it at next sign-in.

@@ -11,7 +11,7 @@ export class AuthRateLimitRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
   async consume(
-    scope: 'login' | 'refresh' | 'capacity',
+    scope: 'login' | 'refresh' | 'capacity' | 'password',
     identifier: string,
     limit: number,
     db: Kysely<DB> | Transaction<DB> = this.db,

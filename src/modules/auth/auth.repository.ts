@@ -22,16 +22,50 @@ export class AuthRepository {
   findUser(id: string, db: Connection = this.db) {
     return db
       .selectFrom('auth.users')
-      .select(['id', 'email', 'full_name', 'contact_number'])
+      .select([
+        'id',
+        'email',
+        'full_name',
+        'contact_number',
+        'must_change_password',
+      ])
       .where('id', '=', id)
       .executeTakeFirst();
   }
   findUserForSession(id: string, db: Connection = this.db, lock = false) {
     const query = db
       .selectFrom('auth.users')
-      .select(['id', 'email', 'full_name', 'contact_number', 'is_active'])
+      .select([
+        'id',
+        'email',
+        'full_name',
+        'contact_number',
+        'is_active',
+        'must_change_password',
+        'hashed_password',
+      ])
       .where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();
+  }
+  updatePassword(trx: Transaction<DB>, userId: string, hash: string) {
+    return trx
+      .updateTable('auth.users')
+      .set({
+        hashed_password: hash,
+        must_change_password: false,
+        password_changed_at: sql<Date>`now()`,
+        updated_at: sql<Date>`now()`,
+      })
+      .where('id', '=', userId)
+      .execute();
+  }
+  revokeUserFamilies(trx: Transaction<DB>, userId: string) {
+    return trx
+      .updateTable('auth.token_families')
+      .set({ revoked_at: sql<Date>`clock_timestamp()` })
+      .where('user_id', '=', userId)
+      .where('revoked_at', 'is', null)
+      .execute();
   }
   createFamily(trx: Transaction<DB>, userId: string, ttl: number) {
     return trx

@@ -153,4 +153,22 @@ export class StaffController {
       access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
   }
+
+  @Post(':userId/password-reset')
+  @RequirePermission('staff.password_reset')
+  @RequireBranchScope()
+  resetPassword(
+    @Param('userId') userId: string,
+    @CurrentUser() actor: RequestUser,
+    @Query() scope: StaffBranchQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.service.resetPassword(
+      userId,
+      actor.id,
+      scope.branch_id,
+      access.branchIds,
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
+    );
+  }
 }

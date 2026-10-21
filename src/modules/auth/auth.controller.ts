@@ -23,12 +23,16 @@ import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthCapacityGuard } from '../../common/guards/auth-capacity.guard';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { CurrentAccessContext } from '../../common/decorators/current-access-context.decorator';
-import { AllowUnassignedRole } from '../../common/decorators/access-policy.decorator';
+import {
+  AllowPendingPasswordChange,
+  AllowUnassignedRole,
+} from '../../common/decorators/access-policy.decorator';
 import { AuthExceptionFilter } from '../../common/filters/auth-exception.filter';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthService, type PublicUser, type TokenPair } from './auth.service';
 
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import type { AccessContext } from '../access-control/access-control.types';
 
 @Controller('auth')
@@ -91,6 +95,7 @@ export class AuthController {
   @Get('me')
   @UseGuards(AuthGuard, AccessControlGuard)
   @AllowUnassignedRole()
+  @AllowPendingPasswordChange()
   me(
     @CurrentUser() user: PublicUser,
     @CurrentAccessContext() access: AccessContext,
@@ -103,6 +108,26 @@ export class AuthController {
       permissions: access.permissions,
       branch_ids: access.branchIds,
     };
+  }
+
+  @Post('password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthOriginGuard, AuthGuard, AccessControlGuard)
+  @AllowUnassignedRole()
+  @AllowPendingPasswordChange()
+  async changePassword(
+    @CurrentUser() user: PublicUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.rateLimiter.passwordChange(user.id);
+    const result = await this.authService.changePassword(
+      user.id,
+      dto.current_password,
+      dto.new_password,
+    );
+    this.setAuthCookies(response, result.tokens);
+    return { user: result.user };
   }
 
   private setAuthCookies(response: Response, tokens: TokenPair): void {

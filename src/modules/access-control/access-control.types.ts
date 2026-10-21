@@ -12,4 +12,6 @@ export type AccessContext = {
   } | null;
   permissions: PermissionKey[];
   branchIds: string[];
+  /** Set after an admin reset; blocks everything but changing the password. */
+  mustChangePassword?: boolean;
 };

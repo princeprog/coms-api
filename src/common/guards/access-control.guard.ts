@@ -14,6 +14,7 @@ import { AccessControlService } from '../../modules/access-control/access-contro
 import type { AccessContext } from '../../modules/access-control/access-control.types';
 import {
   ACCESS_PERMISSION_KEY,
+  ALLOW_PENDING_PASSWORD_KEY,
   ALLOW_UNASSIGNED_ROLE_KEY,
   BRANCH_SCOPE_KEY,
   SUPER_ADMIN_ONLY_KEY,
@@ -43,6 +44,17 @@ export class AccessControlGuard implements CanActivate {
       throw new UnauthorizedException('Authentication required');
     request.accessContext = accessContext;
     const targets = [execution.getHandler(), execution.getClass()];
+    if (
+      accessContext.mustChangePassword &&
+      this.reflector.getAllAndOverride<boolean>(
+        ALLOW_PENDING_PASSWORD_KEY,
+        targets,
+      ) !== true
+    )
+      throw new ForbiddenException({
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Change your password to continue',
+      });
     const allowUnassignedRole =
       this.reflector.getAllAndOverride<boolean>(
         ALLOW_UNASSIGNED_ROLE_KEY,

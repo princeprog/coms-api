@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { hashPassword } from '../auth/password-hashing';
+import { generateTemporaryPassword } from '../auth/temporary-password';
 import { StaffRepository } from './staff.repository';
 
 const USER_ID_PATTERN =
@@ -293,6 +294,38 @@ export class StaffService {
     return {
       ...member,
       branch_ids: member.branch_ids.filter((id) => actorBranchIds.includes(id)),
+    };
+  }
+
+  // Returns the temporary password once; it is stored only as a hash.
+  async resetPassword(
+    id: string,
+    actorId: string,
+    requestedBranchId: string | undefined,
+    actorBranchIds: string[],
+    actorIsSuperAdmin: boolean,
+  ) {
+    this.validateUserId(id);
+    this.validateUserId(actorId);
+    if (id === actorId)
+      throw new ForbiddenException(
+        'Use Change password to update your own password',
+      );
+    const branchId = this.requireBranchAccess(
+      requestedBranchId,
+      actorBranchIds,
+      actorIsSuperAdmin,
+    );
+    const temporaryPassword = generateTemporaryPassword();
+    const member = await this.repository.resetPassword(
+      id,
+      await hashPassword(temporaryPassword),
+      actorIsSuperAdmin,
+      branchId,
+    );
+    return {
+      user: { id: member.id, full_name: member.full_name, email: member.email },
+      temporary_password: temporaryPassword,
     };
   }
 }

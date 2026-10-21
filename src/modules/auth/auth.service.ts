@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Selectable, Transaction } from 'kysely';
@@ -11,6 +15,7 @@ import {
 import { recordAuthEvent } from '../../common/utils/auth-events';
 import type { LoginDto } from './dto/login.dto';
 import { hashPassword, verifyPassword } from './password-hashing';
+import { validateNewPassword } from './temporary-password';
 import { AuthRepository } from './auth.repository';
 import { AuthRateLimitRepository } from './auth-rate-limit.repository';
 import { AuthRateLimitException } from './auth-rate-limit.service';
@@ -20,6 +25,7 @@ export type PublicUser = {
   email: string;
   full_name: string;
   contact_number: string;
+  must_change_password: boolean;
 };
 export type TokenClaims = {
   sub: string;
@@ -169,6 +175,50 @@ export class AuthService {
     if (claims) await this.repository.revokeFamily(claims.familyId);
   }
 
+  // Ends every session, including this one, and signs the user back in with
+  // fresh tokens so other devices must sign in with the new password.
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<AuthResult> {
+    if (!validateNewPassword(newPassword))
+      throw new BadRequestException(
+        'New password must be between 12 and 128 characters',
+      );
+    if (newPassword === currentPassword)
+      throw new BadRequestException(
+        'Choose a new password that differs from the current one',
+      );
+    const user = await this.repository.findUserForSession(userId);
+    if (
+      !user?.is_active ||
+      !(await verifyPassword(user.hashed_password, currentPassword))
+    )
+      throw new BadRequestException('The current password is incorrect');
+    const hash = await hashPassword(newPassword);
+    return this.repository.transaction(async (trx) => {
+      const locked = await this.repository.findUserForSession(
+        userId,
+        trx,
+        true,
+      );
+      if (!locked?.is_active)
+        throw new UnauthorizedException('Authentication required');
+      await this.repository.updatePassword(trx, userId, hash);
+      await this.repository.revokeUserFamilies(trx, userId);
+      const family = await this.repository.createFamily(
+        trx,
+        userId,
+        getAuthConfig().refreshTtlSeconds,
+      );
+      return {
+        user: this.publicUser({ ...locked, must_change_password: false }),
+        tokens: await this.issueTokenPair(trx, userId, family),
+      };
+    });
+  }
+
   async authenticateAccess(
     accessToken: string | undefined,
   ): Promise<PublicUser | null> {
@@ -286,6 +336,7 @@ export class AuthService {
       email: user.email,
       full_name: user.full_name,
       contact_number: user.contact_number,
+      must_change_password: user.must_change_password ?? false,
     };
   }
 }

@@ -303,14 +303,45 @@ export class StaffRepository {
         .returning(['id'])
         .executeTakeFirst();
       if (!member) throw new NotFoundException('Staff account not found');
-      await trx
-        .updateTable('auth.token_families')
-        .set({ revoked_at: sql<Date>`clock_timestamp()` })
-        .where('user_id', '=', id)
-        .where('revoked_at', 'is', null)
-        .execute();
+      await this.revokeSessions(trx, id);
       return this.findById(id, trx);
     });
+  }
+
+  async resetPassword(
+    id: string,
+    hash: string,
+    actorIsSuperAdmin: boolean,
+    branchId?: string,
+  ) {
+    return this.db.transaction().execute(async (trx) => {
+      await this.lockUser(trx, id);
+      if (branchId) await this.assertUserInBranch(trx, id, branchId);
+      await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
+      const member = await trx
+        .updateTable('auth.users')
+        .set({
+          hashed_password: hash,
+          must_change_password: true,
+          password_changed_at: sql<Date>`now()`,
+          updated_at: sql<Date>`now()`,
+        })
+        .where('id', '=', id)
+        .returning(['id', 'full_name', 'email'])
+        .executeTakeFirst();
+      if (!member) throw new NotFoundException('Staff account not found');
+      await this.revokeSessions(trx, id);
+      return member;
+    });
+  }
+
+  private revokeSessions(trx: Transaction<DB>, userId: string) {
+    return trx
+      .updateTable('auth.token_families')
+      .set({ revoked_at: sql<Date>`clock_timestamp()` })
+      .where('user_id', '=', userId)
+      .where('revoked_at', 'is', null)
+      .execute();
   }
 
   private async assertAssignableRole(

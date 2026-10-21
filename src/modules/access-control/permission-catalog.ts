@@ -340,6 +340,11 @@ export const PERMISSION_CATALOG = [
     action_key: 'manage',
     description: 'Set stock item costs',
   },
+  {
+    module_key: 'staff',
+    action_key: 'password_reset',
+    description: 'Reset staff passwords',
+  },
 ] as const;
 
 export type PermissionKey =

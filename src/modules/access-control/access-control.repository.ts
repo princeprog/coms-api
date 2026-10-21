@@ -25,6 +25,7 @@ export class AccessControlRepository {
       .select([
         'u.id as user_id',
         'u.is_active as account_active',
+        'u.must_change_password',
         'r.id as role_id',
         'r.code as role_code',
         'r.role_name as role_name',
@@ -60,6 +61,7 @@ export class AccessControlRepository {
     return {
       userId: account.user_id,
       accountActive: account.account_active,
+      mustChangePassword: account.must_change_password,
       role:
         account.role_id === null
           ? null

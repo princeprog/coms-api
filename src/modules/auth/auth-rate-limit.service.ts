@@ -36,6 +36,15 @@ export class AuthRateLimitService {
       ),
     );
   }
+  async passwordChange(userId: string): Promise<void> {
+    this.assert(
+      await this.repository.consume(
+        'password',
+        userId,
+        getAuthConfig().loginLimit,
+      ),
+    );
+  }
   private assert(decision: RateDecision): void {
     if (!decision.allowed)
       throw new AuthRateLimitException(decision.retryAfterSeconds);

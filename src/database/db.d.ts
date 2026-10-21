@@ -3,13 +3,18 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from "kysely";
+import type { ColumnType } from 'kysely';
 
-export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
-  ? ColumnType<S, I | undefined, U>
-  : ColumnType<T, T | undefined, T>;
+export type Generated<T> =
+  T extends ColumnType<infer S, infer I, infer U>
+    ? ColumnType<S, I | undefined, U>
+    : ColumnType<T, T | undefined, T>;
 
-export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+export type Int8 = ColumnType<
+  string,
+  bigint | number | string,
+  bigint | number | string
+>;
 
 export type Json = JsonValue;
 
@@ -101,6 +106,8 @@ export interface AuthUsers {
   hashed_password: string;
   id: Generated<string>;
   is_active: Generated<boolean>;
+  must_change_password: Generated<boolean>;
+  password_changed_at: Timestamp | null;
   role_id: Int8 | null;
   updated_at: Generated<Timestamp>;
 }
@@ -705,15 +712,15 @@ export interface Suppliers {
 }
 
 export interface DB {
-  "auth.branch_users": AuthBranchUsers;
-  "auth.permissions": AuthPermissions;
-  "auth.rate_limit_buckets": AuthRateLimitBuckets;
-  "auth.refresh_tokens": AuthRefreshTokens;
-  "auth.role_permissions": AuthRolePermissions;
-  "auth.roles": AuthRoles;
-  "auth.sessions": AuthSessions;
-  "auth.token_families": AuthTokenFamilies;
-  "auth.users": AuthUsers;
+  'auth.branch_users': AuthBranchUsers;
+  'auth.permissions': AuthPermissions;
+  'auth.rate_limit_buckets': AuthRateLimitBuckets;
+  'auth.refresh_tokens': AuthRefreshTokens;
+  'auth.role_permissions': AuthRolePermissions;
+  'auth.roles': AuthRoles;
+  'auth.sessions': AuthSessions;
+  'auth.token_families': AuthTokenFamilies;
+  'auth.users': AuthUsers;
   branch_inventory: BranchInventory;
   branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
