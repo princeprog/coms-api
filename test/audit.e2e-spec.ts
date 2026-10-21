@@ -279,5 +279,15 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('audit history', () => {
         (e: { entity_type: string }) => e.entity_type === 'stock_item',
       ),
     ).toBe(true);
+    const products = await as(reader).get(
+      '/audit-events?entity_type=product&search=Audit%20meal',
+    );
+    const created = products.body.items.find(
+      (e: { action: string }) => e.action === 'product.created',
+    );
+    expect(created.changes.category_id).toEqual({
+      from: null,
+      to: 'Rice meals',
+    });
   });
 });

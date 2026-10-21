@@ -9,6 +9,14 @@ import {
 } from '../../common/utils/pagination';
 import type { AuditQueryDto } from './dto/audit-query.dto';
 
+type Changes = Record<string, { from: unknown; to: unknown }>;
+
+// Reference columns stored as IDs, shown by their current name.
+const references = {
+  category_id: 'category',
+  role_id: 'role',
+} as const;
+
 @Injectable()
 export class AuditRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
@@ -25,7 +33,7 @@ export class AuditRepository {
       entity_id: string | null;
       entity_label: string | null;
       branch_id: string | null;
-      changes: Record<string, { from: unknown; to: unknown }>;
+      changes: Changes;
       metadata: Record<string, unknown>;
       total: number;
     }>`
@@ -44,10 +52,55 @@ export class AuditRepository {
       LIMIT ${query.page_size} OFFSET ${paginationOffset(query)}
     `.execute(this.db);
     const total = result.rows[0]?.total ?? 0;
+    const names = await this.referenceNames(result.rows.map((r) => r.changes));
     return paginatedResult(
-      result.rows.map(({ total: _total, ...row }) => row),
+      result.rows.map(({ total: _total, ...row }) => ({
+        ...row,
+        changes: this.nameReferences(row.changes, names),
+      })),
       total,
       query,
     );
+  }
+
+  private async referenceNames(changes: Changes[]) {
+    const ids = { category: new Set<string>(), role: new Set<string>() };
+    for (const change of changes)
+      for (const [field, kind] of Object.entries(references))
+        for (const value of [change[field]?.from, change[field]?.to])
+          if (typeof value === 'string') ids[kind].add(value);
+    const [categories, roles] = await Promise.all([
+      ids.category.size
+        ? this.db
+            .selectFrom('product_categories')
+            .select(['id', 'name'])
+            .where('id', 'in', [...ids.category])
+            .execute()
+        : [],
+      ids.role.size
+        ? this.db
+            .selectFrom('auth.roles')
+            .select(['id', 'role_name as name'])
+            .where('id', 'in', [...ids.role])
+            .execute()
+        : [],
+    ]);
+    return new Map(
+      [...categories, ...roles].map((row) => [String(row.id), row.name]),
+    );
+  }
+
+  private nameReferences(changes: Changes, names: Map<string, string>) {
+    const named = { ...changes };
+    for (const field of Object.keys(references)) {
+      const change = named[field];
+      if (!change) continue;
+      const name = (value: unknown) =>
+        typeof value === 'string'
+          ? (names.get(value) ?? 'Deleted record')
+          : value;
+      named[field] = { from: name(change.from), to: name(change.to) };
+    }
+    return named;
   }
 }
