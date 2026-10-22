@@ -630,6 +630,7 @@ describe('daily report routes (e2e)', () => {
       branch_id: branchId,
       business_date: '2026-09-23',
       status: 'DRAFT',
+      business_day_ended: true,
       completed_sales_amount: '2.0000',
       completed_sales_count: 1,
       voided_sales_amount: '2.0000',

@@ -889,6 +889,10 @@ export class DailyReportsRepository {
         sql<string>`voided_sales_amount::text`.as('voided_sales_amount'),
         'voided_sales_count',
         sql<string>`business_date::text`.as('business_date'),
+        // Same rule as submit: the report's business day is before today's.
+        sql<boolean>`coms_business_date(now()) > business_date`.as(
+          'business_day_ended',
+        ),
       ])
       .where('id', '=', reportId)
       .where('branch_id', '=', branchId)
