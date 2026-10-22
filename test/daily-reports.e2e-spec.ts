@@ -915,6 +915,119 @@ describe('daily report routes (e2e)', () => {
     ).toMatchObject({ count: '1' });
   });
 
+  it('lists reports across the branches a user can read, with filters and status counts', async () => {
+    const outsideBranch = await db
+      .insertInto('branches')
+      .values({
+        code: `DO-${suffix}`,
+        branch_name: `Daily Outside Branch ${suffix}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const created: string[] = [];
+    // Inserted directly: this test covers listing, not snapshot creation.
+    const createIn = async (branch: string, businessDate: string) => {
+      const report = await db
+        .insertInto('daily_branch_reports')
+        .values({
+          branch_id: branch,
+          business_date: new Date(`${businessDate}T00:00:00Z`),
+          idempotency_key: randomUUID(),
+          created_by_user_id: reporterId,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      created.push(report.id);
+      return report.id;
+    };
+    const list = (query: string) =>
+      request(app.getHttpServer()).get(`/daily-reports?${query}`);
+    const july = 'date_from=2026-07-01&date_to=2026-07-31';
+    try {
+      const own = await createIn(branchId, '2026-07-11');
+      const flow = await createIn(flowBranchId, '2026-07-12');
+      const outside = await createIn(outsideBranch.id, '2026-07-10');
+
+      activeActorId = reporterId;
+      const scoped = (await list(july).expect(200)).body;
+      expect(scoped.items.map((item: { id: string }) => item.id)).toEqual([
+        flow,
+        own,
+      ]);
+      expect(scoped).toMatchObject({ total: 2, page: 1, page_size: 10 });
+      expect(scoped.status_counts).toEqual({
+        DRAFT: 2,
+        SUBMITTED: 0,
+        RETURNED: 0,
+        APPROVED: 0,
+      });
+      expect(scoped.items[0]).toMatchObject({
+        branch_id: flowBranchId,
+        branch_name: `Daily Flow Branch ${suffix}`,
+        business_date: '2026-07-12',
+        status: 'DRAFT',
+        submitted_by_name: null,
+        item_count: expect.any(Number),
+        counted_count: 0,
+        variance_count: 0,
+      });
+      await list(`${july}&branch_id=${outsideBranch.id}`).expect(403);
+      await list('date_from=2026-07-31&date_to=2026-07-01').expect(400);
+
+      const oldest = (await list(`${july}&sort=oldest`).expect(200)).body;
+      expect(oldest.items.map((item: { id: string }) => item.id)).toEqual([
+        own,
+        flow,
+      ]);
+      const submitted = (await list(`${july}&status=SUBMITTED`).expect(200))
+        .body;
+      expect(submitted.total).toBe(0);
+      expect(submitted.status_counts.DRAFT).toBe(2);
+
+      activeActorId = superAdminId;
+      const everything = (await list(july).expect(200)).body;
+      expect(everything.items.map((item: { id: string }) => item.id)).toEqual([
+        flow,
+        own,
+        outside,
+      ]);
+      const oneBranch = (
+        await list(`${july}&branch_id=${outsideBranch.id}`).expect(200)
+      ).body;
+      expect(oneBranch.items.map((item: { id: string }) => item.id)).toEqual([
+        outside,
+      ]);
+
+      activeActorId = unassignedUserId;
+      expect((await list(july).expect(200)).body).toMatchObject({
+        items: [],
+        total: 0,
+      });
+      activeActorId = deniedUserId;
+      await list(july).expect(403);
+    } finally {
+      activeActorId = reporterId;
+      if (created.length) {
+        await db
+          .deleteFrom('daily_branch_report_events')
+          .where('daily_branch_report_id', 'in', created)
+          .execute();
+        await db
+          .deleteFrom('daily_branch_report_items')
+          .where('daily_branch_report_id', 'in', created)
+          .execute();
+        await db
+          .deleteFrom('daily_branch_reports')
+          .where('id', 'in', created)
+          .execute();
+      }
+      await db
+        .deleteFrom('branches')
+        .where('id', '=', outsideBranch.id)
+        .execute();
+    }
+  });
+
   it('requires grants, branch assignment, complete physical counts, and valid report dates', async () => {
     activeActorId = deniedUserId;
     await request(app.getHttpServer())

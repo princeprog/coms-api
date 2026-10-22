@@ -1,20 +1,53 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { isUUID } from 'class-validator';
+import type { AccessContext } from '../access-control/access-control.types';
 import { CreateDailyReportDto } from './dto/create-daily-report.dto';
+import type { DailyReportDirectoryQueryDto } from './dto/daily-report-directory-query.dto';
 import { DailyReportQueryDto } from './dto/daily-report-query.dto';
 import { ReturnDailyReportDto } from './dto/return-daily-report.dto';
 import { UpdateDailyReportDto } from './dto/update-daily-report.dto';
 import { DailyReportsRepository } from './daily-reports.repository';
+import {
+  DailyReportDirectoryRepository,
+  emptyStatusCounts,
+} from './daily-report-directory.repository';
 
 const NONNEGATIVE_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const SIGNED_DECIMAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
 
 @Injectable()
 export class DailyReportsService {
-  constructor(private readonly repository: DailyReportsRepository) {}
+  constructor(
+    private readonly repository: DailyReportsRepository,
+    private readonly directoryRepository: DailyReportDirectoryRepository,
+  ) {}
 
   list(branchId: string, query: DailyReportQueryDto) {
     return this.repository.list(branchId, query);
+  }
+
+  /** Super Admin sees every branch; everyone else sees assigned branches only. */
+  async directory(query: DailyReportDirectoryQueryDto, access: AccessContext) {
+    if (query.date_from && query.date_to && query.date_from > query.date_to)
+      throw new BadRequestException('Start date must be on or before end date');
+    const superAdmin =
+      access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN';
+    const branchIds = superAdmin ? null : access.branchIds;
+    if (query.branch_id && branchIds && !branchIds.includes(query.branch_id))
+      throw new ForbiddenException('Branch access required');
+    if (branchIds && branchIds.length === 0)
+      return {
+        items: [],
+        total: 0,
+        page: query.page,
+        page_size: query.page_size,
+        status_counts: emptyStatusCounts(),
+      };
+    return this.directoryRepository.list(query, branchIds);
   }
 
   get(branchId: string, reportId: string) {
