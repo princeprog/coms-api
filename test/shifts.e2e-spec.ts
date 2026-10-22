@@ -407,6 +407,14 @@ describe('register shifts and business day (disposable database)', () => {
       .body.shift;
     expect(cashierView.totals.expected_cash).toBeNull();
     expect(cashierView.totals.sales_count).toBe(3);
+    const cashierDetail = (
+      await get(winner, `${shifts()}/${shift.id}`).expect(200)
+    ).body;
+    expect(cashierDetail).toMatchObject({
+      cash_hidden: true,
+      sales_summary: null,
+      products: [],
+    });
     const managerView = (await get('mia', `${shifts()}/current`).expect(200))
       .body.shift;
     // 1000 + 18.5 × 2 cash sales − 18.5 refund − 100 out + 50.50 in
@@ -520,6 +528,33 @@ describe('register shifts and business day (disposable database)', () => {
     await post('mia', `${shifts()}/${next.id}/review`, {
       note: 'Float short at handover',
     }).expect(201);
+
+    // Shift 1 rang up three sales: one voided during it, one voided in shift 2.
+    const report = (await get('mia', `${shifts()}/${shift.id}`).expect(200))
+      .body;
+    expect(report.sales_summary).toMatchObject({
+      sales_count: 3,
+      gross_amount: '55.5',
+      voided_count: 2,
+      voided_amount: '37',
+      completed_count: 1,
+      net_amount: '18.5',
+      average_amount: '18.5',
+      items_sold: '2',
+      dine_in_count: 0,
+      takeaway_count: 1,
+      takeaway_amount: '18.5',
+    });
+    expect(report.sales_summary.first_sale_at).toEqual(expect.any(String));
+    expect(report.products).toEqual([
+      {
+        product_id: productId,
+        product_name: `Shift meal ${suffix}`,
+        category_name: expect.any(String),
+        quantity: '2',
+        amount: '18.5',
+      },
+    ]);
 
     const list = (await get('viewer', `${shifts()}?page_size=10`).expect(200))
       .body;

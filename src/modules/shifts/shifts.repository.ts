@@ -105,6 +105,75 @@ export class ShiftsRepository {
     return this.detail(this.db, branchId, shiftId);
   }
 
+  /**
+   * Report figures for sales rung up during the shift. Voids of earlier sales
+   * refunded during this shift stay in the detail's `voids` list.
+   */
+  async salesReport(branchId: string, shiftId: string) {
+    const [summary, products] = await Promise.all([
+      sql<{
+        sales_count: number;
+        gross_amount: string;
+        voided_count: number;
+        voided_amount: string;
+        completed_count: number;
+        net_amount: string;
+        average_amount: string | null;
+        items_sold: string;
+        dine_in_count: number;
+        dine_in_amount: string;
+        takeaway_count: number;
+        takeaway_amount: string;
+        first_sale_at: Date | null;
+        last_sale_at: Date | null;
+      }>`
+        SELECT
+          count(*)::int AS sales_count,
+          trim_scale(coalesce(sum(s.total_amount), 0))::text AS gross_amount,
+          count(*) FILTER (WHERE s.status = 'VOIDED')::int AS voided_count,
+          trim_scale(coalesce(sum(s.total_amount) FILTER (WHERE s.status = 'VOIDED'), 0))::text AS voided_amount,
+          count(*) FILTER (WHERE s.status = 'COMPLETED')::int AS completed_count,
+          trim_scale(coalesce(sum(s.total_amount) FILTER (WHERE s.status = 'COMPLETED'), 0))::text AS net_amount,
+          trim_scale(round(avg(s.total_amount) FILTER (WHERE s.status = 'COMPLETED'), 2))::text AS average_amount,
+          (SELECT trim_scale(coalesce(sum(i.quantity), 0))::text
+            FROM sale_items AS i JOIN sales AS sold ON sold.id = i.sale_id
+            WHERE sold.shift_id = ${shiftId} AND sold.status = 'COMPLETED') AS items_sold,
+          count(*) FILTER (WHERE s.status = 'COMPLETED' AND s.service_type = 'DINE_IN')::int AS dine_in_count,
+          trim_scale(coalesce(sum(s.total_amount) FILTER (
+            WHERE s.status = 'COMPLETED' AND s.service_type = 'DINE_IN'), 0))::text AS dine_in_amount,
+          count(*) FILTER (WHERE s.status = 'COMPLETED' AND s.service_type = 'TAKEAWAY')::int AS takeaway_count,
+          trim_scale(coalesce(sum(s.total_amount) FILTER (
+            WHERE s.status = 'COMPLETED' AND s.service_type = 'TAKEAWAY'), 0))::text AS takeaway_amount,
+          min(s.created_at) AS first_sale_at,
+          max(s.created_at) AS last_sale_at
+        FROM sales AS s
+        WHERE s.shift_id = ${shiftId} AND s.branch_id = ${branchId}
+      `.execute(this.db),
+      sql<{
+        product_id: string;
+        product_name: string;
+        category_name: string | null;
+        quantity: string;
+        amount: string;
+      }>`
+        SELECT i.product_id,
+          (array_agg(i.product_name_snapshot ORDER BY s.created_at DESC))[1] AS product_name,
+          c.name AS category_name,
+          trim_scale(sum(i.quantity))::text AS quantity,
+          trim_scale(sum(i.line_total))::text AS amount
+        FROM sale_items AS i
+        JOIN sales AS s ON s.id = i.sale_id
+        LEFT JOIN products AS p ON p.id = i.product_id
+        LEFT JOIN product_categories AS c ON c.id = p.category_id
+        WHERE s.shift_id = ${shiftId} AND s.branch_id = ${branchId}
+          AND s.status = 'COMPLETED'
+        GROUP BY i.product_id, c.name
+        ORDER BY sum(i.line_total) DESC, product_name
+      `.execute(this.db),
+    ]);
+    return { sales_summary: summary.rows[0]!, products: products.rows };
+  }
+
   /** The open shift this user is running, at any branch they can access. */
   async currentForUser(userId: string, branchIds: string[] | null) {
     let query = this.db

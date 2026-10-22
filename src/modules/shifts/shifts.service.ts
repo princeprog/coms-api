@@ -24,7 +24,17 @@ export class ShiftsService {
   }
 
   async find(branchId: string, shiftId: string, access: AccessContext) {
-    return this.visible(await this.repository.find(branchId, shiftId), access);
+    const shift = this.visible(
+      await this.repository.find(branchId, shiftId),
+      access,
+    );
+    // Sales figures would reveal expected cash during a cashier's blind count.
+    if (shift.cash_hidden)
+      return { ...shift, sales_summary: null, products: [] };
+    return {
+      ...shift,
+      ...(await this.repository.salesReport(branchId, shiftId)),
+    };
   }
 
   async mine(access: AccessContext) {
