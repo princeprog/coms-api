@@ -176,10 +176,6 @@ export class DailyReportsRepository {
           branchId,
           businessDate,
         );
-        if (totals.length === 0)
-          throw new ConflictException(
-            'There are no reportable stock items for this branch',
-          );
 
         const report = await transaction
           .insertInto('daily_branch_reports')
@@ -199,22 +195,23 @@ export class DailyReportsRepository {
           businessDate,
         );
 
-        await transaction
-          .insertInto('daily_branch_report_items')
-          .values(
-            totals.map((item) => ({
-              daily_branch_report_id: report.id,
-              stock_item_id: item.stock_item_id,
-              opening_quantity: item.opening_quantity,
-              receipt_quantity: item.receipt_quantity,
-              sale_consumption_quantity: item.sale_consumption_quantity,
-              sale_void_reversal_quantity: item.sale_void_reversal_quantity,
-              ledger_adjustment_quantity: item.ledger_adjustment_quantity,
-              ledger_closing_quantity: item.ledger_closing_quantity,
-              expected_closing_quantity: item.ledger_closing_quantity,
-            })),
-          )
-          .execute();
+        if (totals.length)
+          await transaction
+            .insertInto('daily_branch_report_items')
+            .values(
+              totals.map((item) => ({
+                daily_branch_report_id: report.id,
+                stock_item_id: item.stock_item_id,
+                opening_quantity: item.opening_quantity,
+                receipt_quantity: item.receipt_quantity,
+                sale_consumption_quantity: item.sale_consumption_quantity,
+                sale_void_reversal_quantity: item.sale_void_reversal_quantity,
+                ledger_adjustment_quantity: item.ledger_adjustment_quantity,
+                ledger_closing_quantity: item.ledger_closing_quantity,
+                expected_closing_quantity: item.ledger_closing_quantity,
+              })),
+            )
+            .execute();
         await transaction
           .insertInto('daily_branch_report_events')
           .values({
@@ -402,8 +399,7 @@ export class DailyReportsRepository {
         .execute();
       if (
         !bypassChecklist &&
-        (reportItems.length === 0 ||
-          reportItems.some((item) => item.physical_closing_quantity === null))
+        reportItems.some((item) => item.physical_closing_quantity === null)
       )
         throw new ConflictException(
           'Enter a physical closing count for every report item before submission',
@@ -573,10 +569,7 @@ export class DailyReportsRepository {
         .orderBy('stock_item_id')
         .forUpdate()
         .execute();
-      if (
-        items.length === 0 ||
-        items.some((item) => item.physical_closing_quantity === null)
-      )
+      if (items.some((item) => item.physical_closing_quantity === null))
         throw new ConflictException(
           'A physical closing count is required for every report item',
         );
@@ -795,11 +788,18 @@ export class DailyReportsRepository {
     executor: DbExecutor,
     branchId: string,
     businessDate: string,
-    includeStockItemIds: string[] = [],
+    includeStockItemIds?: string[],
   ): Promise<LedgerTotals[]> {
-    const includeInactive = includeStockItemIds.length
+    const includeInactive = includeStockItemIds?.length
       ? sql`OR item.id IN (${sql.join(includeStockItemIds)})`
       : sql``;
+    // Report membership is fixed at creation; later setting changes only affect new reports.
+    const countScope =
+      includeStockItemIds === undefined
+        ? sql`item.daily_count_required`
+        : includeStockItemIds.length
+          ? sql`item.id IN (${sql.join(includeStockItemIds)})`
+          : sql`false`;
     const result = await sql<LedgerTotals>`
       WITH day_bounds AS (
         SELECT
@@ -872,6 +872,7 @@ export class DailyReportsRepository {
       LEFT JOIN movement_totals AS totals ON totals.stock_item_id = item.id
       LEFT JOIN branch_stock ON branch_stock.stock_item_id = item.id
       WHERE item.created_at < bounds.day_end
+        AND ${countScope}
         AND (branch_stock.stock_item_id IS NOT NULL
           OR totals.stock_item_id IS NOT NULL ${includeInactive})
       ORDER BY item.stock_item_name, item.id

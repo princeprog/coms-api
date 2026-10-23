@@ -1,6 +1,8 @@
 import { Transform } from 'class-transformer';
 import {
   IsIn,
+  IsBoolean,
+  ValidateIf,
   IsOptional,
   IsString,
   MaxLength,
@@ -36,4 +38,8 @@ export class CreateStockItemDto {
   @IsOptional()
   @IsIn(STOCK_RECIPE_USES)
   recipe_use?: StockRecipeUse;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  daily_count_required?: boolean;
 }

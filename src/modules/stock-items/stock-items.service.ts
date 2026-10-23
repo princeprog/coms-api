@@ -42,11 +42,15 @@ export class StockItemsService {
       category,
       unit,
       recipe_use: input.recipe_use ?? 'RECIPE',
+      daily_count_required: input.daily_count_required ?? true,
     });
   }
 
   async update(id: string, input: UpdateStockItemDto) {
     const patch: Parameters<StockItemsRepository['update']>[1] = {
+      ...(input.daily_count_required !== undefined
+        ? { daily_count_required: input.daily_count_required }
+        : {}),
       ...(input.stock_item_name !== undefined
         ? { stock_item_name: input.stock_item_name.trim() }
         : {}),

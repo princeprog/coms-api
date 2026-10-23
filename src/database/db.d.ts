@@ -654,6 +654,7 @@ export interface StockItemCosts {
 export interface StockItems {
   category: string;
   created_at: Generated<Timestamp>;
+  daily_count_required: Generated<boolean>;
   id: Generated<string>;
   is_active: Generated<boolean>;
   stock_item_name: string;

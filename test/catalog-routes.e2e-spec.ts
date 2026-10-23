@@ -344,6 +344,37 @@ describe('catalog routes (e2e)', () => {
     );
   });
 
+  it('creates a periodically counted item without changing its recipe use', async () => {
+    const response = await request(validationApp.getHttpServer())
+      .post('/stock-items')
+      .send({
+        stock_item_name: `Periodic seasoning ${randomUUID()}`,
+        category: 'Seasonings',
+        unit: 'kg',
+        recipe_use: 'RECIPE',
+        daily_count_required: false,
+      })
+      .expect(201);
+    try {
+      expect(response.body).toMatchObject({
+        daily_count_required: false,
+        recipe_use: 'RECIPE',
+        is_active: true,
+      });
+      const renamed = await request(validationApp.getHttpServer())
+        .patch(`/stock-items/${response.body.id}`)
+        .send({ category: 'Sauces and seasonings' })
+        .expect(200);
+      expect(renamed.body.daily_count_required).toBe(false);
+    } finally {
+      await validationApp
+        .get<Kysely<DB>>(DATABASE)
+        .deleteFrom('stock_items')
+        .where('id', '=', response.body.id)
+        .execute();
+    }
+  });
+
   it('creates, searches, updates, and deactivates a stock item', async () => {
     const created = await request(validationApp.getHttpServer())
       .post('/stock-items')
@@ -360,6 +391,7 @@ describe('catalog routes (e2e)', () => {
       category: 'Poultry',
       unit: 'kg',
       is_active: true,
+      daily_count_required: true,
     });
 
     const listed = await request(validationApp.getHttpServer()).get(
@@ -368,10 +400,24 @@ describe('catalog routes (e2e)', () => {
     expect(listed.status).toBe(200);
     expect(listed.body.total).toBe(1);
     expect(listed.body.items[0].id).toBe(stockItemId);
+    expect(listed.body.items[0].daily_count_required).toBe(true);
+
+    for (const invalid of [null, 'false', 0]) {
+      await request(validationApp.getHttpServer())
+        .patch(`/stock-items/${stockItemId}`)
+        .send({ daily_count_required: invalid })
+        .expect(400);
+    }
+    const excluded = await request(validationApp.getHttpServer())
+      .patch(`/stock-items/${stockItemId}`)
+      .send({ daily_count_required: false })
+      .expect(200);
+    expect(excluded.body.daily_count_required).toBe(false);
 
     const detail = await request(validationApp.getHttpServer()).get(
       `/stock-items/${stockItemId}`,
     );
+    expect(detail.body.daily_count_required).toBe(false);
     expect(detail.status).toBe(200);
     expect(detail.body.id).toBe(stockItemId);
 

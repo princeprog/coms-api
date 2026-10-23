@@ -24,6 +24,7 @@ type StockItemCreateInput = {
   category: string;
   unit: string;
   recipe_use: StockRecipeUse;
+  daily_count_required: boolean;
 };
 type StockItemUpdateInput = Partial<StockItemCreateInput>;
 
@@ -36,6 +37,7 @@ const STOCK_ITEM_COLUMNS = [
   'category',
   'unit',
   'is_active',
+  'daily_count_required',
   'created_at',
   'updated_at',
   sql<StockRecipeUse>`CASE WHEN usage_types && ${RECIPE_USAGES} THEN 'RECIPE' ELSE 'OPERATING_SUPPLY' END`.as(

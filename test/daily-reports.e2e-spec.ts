@@ -1057,6 +1057,117 @@ describe('daily report routes (e2e)', () => {
       .expect(409);
   });
 
+  it('snapshots daily-count eligibility and never reconciles excluded inventory, including reports with no counts', async () => {
+    activeActorId = reporterId;
+    const original = await createReport('2026-10-01');
+    expect(
+      original.report.items.map(
+        (item: { stock_item_id: string }) => item.stock_item_id,
+      ),
+    ).toContain(stockItemId);
+    await request(app.getHttpServer())
+      .patch(`/stock-items/${stockItemId}`)
+      .send({ daily_count_required: false })
+      .expect(403);
+    activeActorId = superAdminId;
+    await request(app.getHttpServer())
+      .patch(`/stock-items/${stockItemId}`)
+      .send({ daily_count_required: false })
+      .expect(200);
+    try {
+      activeActorId = reporterId;
+      const replay = await createReport('2026-10-01', original.idempotencyKey);
+      expect(
+        replay.report.items.map(
+          (item: { stock_item_id: string }) => item.stock_item_id,
+        ),
+      ).toContain(stockItemId);
+      const empty = await createReport('2026-10-02');
+      expect(empty.report.items).toEqual([]);
+      const saved = await request(app.getHttpServer())
+        .put(reportUrl(original.report.id))
+        .send({
+          items: original.report.items.map(
+            (item: {
+              stock_item_id: string;
+              ledger_closing_quantity: string;
+            }) => ({
+              stock_item_id: item.stock_item_id,
+              physical_closing_quantity:
+                item.ledger_closing_quantity.startsWith('-')
+                  ? '0'
+                  : item.ledger_closing_quantity,
+              waste_quantity: '0',
+              adjustment_quantity: '0',
+            }),
+          ),
+        })
+        .expect(200);
+      expect(saved.body.items).toHaveLength(original.report.items.length);
+      await request(app.getHttpServer())
+        .post(`${reportUrl(original.report.id)}/submit`)
+        .expect(200);
+      activeActorId = reviewerId;
+      await request(app.getHttpServer())
+        .post(`${reportUrl(original.report.id)}/approve`)
+        .expect(200);
+      const balanceBefore = await db
+        .selectFrom('branch_inventory')
+        .select('quantity_on_hand')
+        .where('branch_id', '=', branchId)
+        .where('stock_item_id', '=', stockItemId)
+        .executeTakeFirstOrThrow();
+      activeActorId = superAdminId;
+      await request(app.getHttpServer())
+        .patch(`/stock-items/${stockItemId}`)
+        .send({ daily_count_required: true })
+        .expect(200);
+      activeActorId = reporterId;
+      const next = await createReport('2026-10-03');
+      expect(
+        next.report.items.map(
+          (item: { stock_item_id: string }) => item.stock_item_id,
+        ),
+      ).toContain(stockItemId);
+      // Re-enabling does not add counts to the existing empty report.
+      await request(app.getHttpServer())
+        .post(`${reportUrl(empty.report.id)}/submit`)
+        .expect(200);
+      activeActorId = reviewerId;
+      const approved = await request(app.getHttpServer())
+        .post(`${reportUrl(empty.report.id)}/approve`)
+        .expect(200);
+      expect(approved.body.items).toEqual([]);
+      const balanceAfter = await db
+        .selectFrom('branch_inventory')
+        .select('quantity_on_hand')
+        .where('branch_id', '=', branchId)
+        .where('stock_item_id', '=', stockItemId)
+        .executeTakeFirstOrThrow();
+      expect(balanceAfter).toEqual(balanceBefore);
+      const movements = await db
+        .selectFrom('inventory_movements')
+        .select('id')
+        .where(
+          'daily_branch_report_item_id',
+          'in',
+          db
+            .selectFrom('daily_branch_report_items')
+            .select('id')
+            .where('daily_branch_report_id', '=', empty.report.id),
+        )
+        .execute();
+      expect(movements).toEqual([]);
+    } finally {
+      await db
+        .updateTable('stock_items')
+        .set({ daily_count_required: true })
+        .where('id', '=', stockItemId)
+        .execute();
+      activeActorId = reporterId;
+    }
+  });
+
   it('bypasses submission readiness only in development, retaining access and approval checks', async () => {
     activeActorId = reporterId;
     const { report } = await createReport(manilaDate());
