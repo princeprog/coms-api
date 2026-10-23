@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { dashboardScope, isSuperAdmin } from './dashboard-access';
 import type { AccessContext } from '../access-control/access-control.types';
 import type { PermissionKey } from '../access-control/permission-catalog';
 import { SHORTAGE_WINDOW_DAYS } from './dashboard-report-health.repository';
@@ -6,7 +7,6 @@ import {
   ATTENTION_KEYS,
   DashboardTodayRepository,
   type AttentionKey,
-  type TodayScope,
 } from './dashboard-today.repository';
 
 // Who may see each attention item; Super Admin sees them all.
@@ -30,14 +30,6 @@ const ATTENTION_PERMISSION: Record<AttentionKey, PermissionKey> = {
   products_incomplete_costs: 'costs.read',
 };
 
-function isSuperAdmin(access: AccessContext) {
-  return Boolean(
-    access.role?.isSystem &&
-    access.role.isActive &&
-    access.role.code === 'SUPER_ADMIN',
-  );
-}
-
 function percentChange(current: string | number, previous: string | number) {
   const before = Number(previous);
   if (!before) return null;
@@ -49,7 +41,7 @@ export class DashboardTodayService {
   constructor(private readonly repository: DashboardTodayRepository) {}
 
   async today(branchId: string | undefined, access: AccessContext) {
-    const scope = this.scope(access, branchId);
+    const scope = dashboardScope(access, branchId);
     const superAdmin = isSuperAdmin(access);
     const can = (permission: PermissionKey) =>
       superAdmin || access.permissions.includes(permission);
@@ -218,21 +210,5 @@ export class DashboardTodayService {
       top_products_today: topProducts,
       hourly: hours,
     };
-  }
-
-  // Super Admin and global readers see every branch; others their own.
-  private scope(access: AccessContext, branchId?: string): TodayScope {
-    const global =
-      isSuperAdmin(access) ||
-      access.permissions.includes('dashboard.global_read');
-    if (global) return branchId ? [branchId] : null;
-    if (!access.branchIds.length)
-      throw new ForbiddenException('Branch access required');
-    if (branchId) {
-      if (!access.branchIds.includes(branchId))
-        throw new ForbiddenException('Branch access required');
-      return [branchId];
-    }
-    return access.branchIds;
   }
 }

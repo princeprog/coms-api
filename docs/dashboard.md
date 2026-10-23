@@ -46,3 +46,13 @@ Branch readers see their register/report board first. Global readers see sales a
 Alerts retain the full category link and add an oldest-record link (or an item search for stock). Stock links show the matching item across balances, since Inventory does not currently offer a below-zero-only filter. Sales-report links preserve the dashboard branch. Failed background refreshes retain the previous data and timestamp, with a visible retry notice. A branch change loads that branch independently; previous-branch figures are never relabeled as the new scope.
 
 No schema migration or inventory/report mutation is involved. Deploy the API before the app because the app validates the added progress/capability fields. Focused integration coverage uses disposable databases, including missing versus empty reports, saved count membership, branch isolation, permission revocation, cash totals, commissary deficits and report prioritization.
+
+## Exception trends
+
+`GET /dashboard/exceptions?branch_id=` (`dashboard.read`, same branch scope and 403 rules as `/dashboard/today`) returns the last 28 completed business days, today excluded, as four 7-day weeks (`week_starts`, oldest first). The app loads it separately and refreshes it every 5 minutes.
+
+- `branches[]`: each scoped branch with `weeks[4]` of `shortage_lines` (negative-variance report items on SUBMITTED/APPROVED reports), `uncosted_shortage_lines`, `shortage_value` (saved report cost, else current average cost; uncosted lines contribute nothing), `cash_short_shifts` and `cash_short_amount` (CLOSED/REVIEWED shifts with a negative cash difference, by shift business date), `receiving_differences` (dispatch discrepancies by reported business date) and `void_count`/`void_amount` (voided sales by sale business date). Inactive branches appear only when they have exceptions.
+- Field visibility: shortage counts need `daily_reports.read`, shortage values also `costs.read`, cash fields `shifts.read`, receiving `dispatches.read`; hidden fields are null and `access` says which are shown. Voids follow `dashboard.read`, like today's void count.
+- `cashiers`: null without `shifts.read`. Otherwise up to 25 people ordered by short shifts, short amount, then voids, with `total`. Cash figures belong to the shift opener; sales and voids belong to the selling cashier. Each row lists the branches where the person worked.
+
+The app marks a metric "Up" when last week is above zero and above the average of the three earlier weeks, and marks a cashier "Frequent" at 3 or more short shifts making up at least 30% of their shifts. These are prompts to review shifts and counts, not findings of misconduct.

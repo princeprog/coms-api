@@ -35,21 +35,26 @@ export type AttentionKey = (typeof ATTENTION_KEYS)[number];
 const money = (value: RawBuilder<unknown>) =>
   sql`round(${value}, 2)::numeric(14,2)::text`;
 
+/** Scope and business-day CTEs shared by dashboard queries. */
+export function scopeSql(scope: TodayScope) {
+  const filter =
+    scope === null
+      ? sql`true`
+      : scope.length
+        ? sql`id = ANY(${scope}::uuid[])`
+        : sql`false`;
+  return sql`
+    scope AS (SELECT id, branch_name, status FROM branches WHERE ${filter}),
+    day AS (SELECT coms_business_date(now()) AS today)
+  `;
+}
+
 @Injectable()
 export class DashboardTodayRepository {
   constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
 
   private scope(scope: TodayScope) {
-    const filter =
-      scope === null
-        ? sql`true`
-        : scope.length
-          ? sql`id = ANY(${scope}::uuid[])`
-          : sql`false`;
-    return sql`
-      scope AS (SELECT id, branch_name, status FROM branches WHERE ${filter}),
-      day AS (SELECT coms_business_date(now()) AS today)
-    `;
+    return scopeSql(scope);
   }
 
   async businessDate() {

@@ -745,5 +745,91 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         ),
       ).toBe(true);
     });
+
+    it('trends exceptions by week and branch, and by cashier', async () => {
+      const body = (await as(owner).get('/dashboard/exceptions').expect(200))
+        .body;
+      expect(body.week_starts).toHaveLength(4);
+      expect(body.access).toEqual({
+        shortages: true,
+        shortage_values: true,
+        cash: true,
+        receiving: true,
+        cashiers: true,
+      });
+      const row = (id: string) =>
+        body.branches.find((b: { branch_id: string }) => b.branch_id === id);
+      // Two rice shortages from the earlier reports land in the latest week.
+      expect(row(branchB).weeks[3]).toMatchObject({
+        shortage_lines: 2,
+        shortage_value: '140.00',
+      });
+      // Yesterday's closed shift at branch A was 20 short.
+      expect(row(branchA).weeks[3]).toMatchObject({
+        cash_short_shifts: 1,
+        cash_short_amount: '20.00',
+      });
+      expect(row(branchA).weeks[0]).toMatchObject({
+        shortage_lines: 0,
+        cash_short_shifts: 0,
+      });
+      expect(body.cashiers.items[0]).toMatchObject({
+        full_name: 'Today cashier-a',
+        shifts: 1,
+        short_shifts: 1,
+        short_amount: '20.00',
+        branches: ['Today TDY-A'],
+      });
+      expect(body.cashiers.total).toBe(body.cashiers.items.length);
+
+      const scoped = (
+        await as(manager).get('/dashboard/exceptions').expect(200)
+      ).body;
+      expect(
+        scoped.branches.map((b: { branch_id: string }) => b.branch_id),
+      ).toEqual([branchA]);
+      expect(scoped.access.shortage_values).toBe(false);
+      expect(scoped.branches[0].weeks[3].shortage_value).toBeNull();
+      expect(
+        (await as(manager).get('/dashboard/exceptions?branch_id=' + branchB))
+          .status,
+      ).toBe(403);
+      expect((await as(outsider).get('/dashboard/exceptions')).status).toBe(
+        403,
+      );
+
+      const { role_id } = await db
+        .selectFrom('auth.users')
+        .select('role_id')
+        .where('id', '=', manager)
+        .executeTakeFirstOrThrow();
+      const grants = await db
+        .selectFrom('auth.role_permissions as rp')
+        .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+        .select(['rp.role_id', 'rp.permission_id'])
+        .where('rp.role_id', '=', role_id!)
+        .where('p.module_key', '=', 'shifts')
+        .execute();
+      try {
+        await db
+          .deleteFrom('auth.role_permissions')
+          .where('role_id', '=', role_id!)
+          .where(
+            'permission_id',
+            'in',
+            grants.map((g) => g.permission_id),
+          )
+          .execute();
+        const limited = (
+          await as(manager).get('/dashboard/exceptions').expect(200)
+        ).body;
+        expect(limited.cashiers).toBeNull();
+        expect(limited.access.cash).toBe(false);
+        expect(limited.branches[0].weeks[3].cash_short_shifts).toBeNull();
+        expect(limited.branches[0].weeks[3].cash_short_amount).toBeNull();
+      } finally {
+        await db.insertInto('auth.role_permissions').values(grants).execute();
+      }
+    });
   },
 );

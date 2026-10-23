@@ -5,6 +5,7 @@ import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import type { AccessContext } from '../access-control/access-control.types';
+import { DashboardExceptionsService } from './dashboard-exceptions.service';
 import { DashboardTodayService } from './dashboard-today.service';
 import { DashboardService } from './dashboard.service';
 import {
@@ -18,6 +19,7 @@ export class DashboardController {
   constructor(
     private readonly service: DashboardService,
     private readonly todayService: DashboardTodayService,
+    private readonly exceptionsService: DashboardExceptionsService,
   ) {}
 
   @Get('overview')
@@ -33,5 +35,14 @@ export class DashboardController {
     @CurrentAccessContext() access: AccessContext,
   ) {
     return this.todayService.today(query.branch_id, access);
+  }
+
+  @Get('exceptions')
+  @RequirePermission('dashboard.read')
+  exceptions(
+    @Query() query: DashboardTodayQueryDto,
+    @CurrentAccessContext() access: AccessContext,
+  ) {
+    return this.exceptionsService.exceptions(query.branch_id, access);
   }
 }
