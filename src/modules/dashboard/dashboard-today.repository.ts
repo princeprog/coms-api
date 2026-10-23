@@ -4,6 +4,10 @@ import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import { attentionSummary } from './dashboard-attention.repository';
 import { reportProgress } from './dashboard-report-progress.repository';
+import {
+  countShortages,
+  reportBacklog,
+} from './dashboard-report-health.repository';
 
 /** Branch IDs the caller may see; null means every branch. */
 export type TodayScope = string[] | null;
@@ -136,6 +140,14 @@ export class DashboardTodayRepository {
 
   reportProgress(scope: TodayScope) {
     return reportProgress(this.db, this.scope(scope));
+  }
+
+  countShortages(scope: TodayScope) {
+    return countShortages(this.db, this.scope(scope));
+  }
+
+  reportBacklog(scope: TodayScope) {
+    return reportBacklog(this.db, this.scope(scope));
   }
 
   /** Register, sales and yesterday's report for each branch. */

@@ -623,5 +623,127 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         await db.insertInto('auth.role_permissions').values(grants).execute();
       }
     });
+
+    it('lists recurring count shortages and older unfinished reports', async () => {
+      const item = async (name: string) =>
+        (
+          await db
+            .selectFrom('stock_items')
+            .select('id')
+            .where('stock_item_name', '=', name)
+            .executeTakeFirstOrThrow()
+        ).id;
+      const rice = await item('Today rice');
+      const box = await item('Today box');
+      const report = async (
+        branch: string,
+        daysAgo: number,
+        status: 'DRAFT' | 'SUBMITTED' | 'APPROVED',
+        lines: { stock: string; variance: string; cost?: string }[],
+      ) => {
+        const created = await db
+          .insertInto('daily_branch_reports')
+          .values({
+            branch_id: branch,
+            business_date: sql<Date>`coms_business_date(now()) - ${daysAgo}::int`,
+            status,
+            idempotency_key: randomUUID(),
+            created_by_user_id: manager,
+            ...(status === 'DRAFT'
+              ? {}
+              : { submitted_by_user_id: manager, submitted_at: new Date() }),
+            ...(status === 'APPROVED'
+              ? { reviewed_by_user_id: owner, reviewed_at: new Date() }
+              : {}),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        if (lines.length)
+          await db
+            .insertInto('daily_branch_report_items')
+            .values(
+              lines.map((line) => ({
+                daily_branch_report_id: created.id,
+                stock_item_id: line.stock,
+                opening_quantity: '10',
+                receipt_quantity: '0',
+                sale_consumption_quantity: '0',
+                sale_void_reversal_quantity: '0',
+                ledger_adjustment_quantity: '0',
+                ledger_closing_quantity: '10',
+                expected_closing_quantity: '10',
+                physical_closing_quantity: String(10 + Number(line.variance)),
+                variance_quantity: line.variance,
+                unit_cost: line.cost ?? null,
+              })),
+            )
+            .execute();
+        return created.id;
+      };
+      // Rice came up short on two reports; the surplus box is not a shortage.
+      const latest = await report(branchB, 2, 'SUBMITTED', [
+        { stock: rice, variance: '-2' },
+        { stock: box, variance: '1' },
+      ]);
+      await report(branchB, 4, 'APPROVED', [
+        { stock: rice, variance: '-1', cost: '40' },
+      ]);
+      const draft = await report(branchA, 5, 'DRAFT', []);
+
+      const body = (await as(owner).get('/dashboard/today').expect(200)).body;
+      expect(body.count_shortages.items).toEqual([
+        expect.objectContaining({
+          branch_id: branchB,
+          stock_item_name: 'Today rice',
+          unit: 'kg',
+          short_quantity: '3',
+          // 2 kg at the current 50 cost plus 1 kg at the saved 40.
+          shortage_value: '140.00',
+          times_short: 2,
+          latest_report_id: latest,
+        }),
+      ]);
+      expect(
+        body.count_shortages.branches.find(
+          (b: { branch_id: string }) => b.branch_id === branchB,
+        ),
+      ).toMatchObject({ reports: 2, short_lines: 2, shortage_value: '140.00' });
+
+      const backlog = body.report_backlog;
+      expect(backlog.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            branch_id: branchA,
+            report_id: draft,
+            status: 'DRAFT',
+            days_outstanding: 5,
+          }),
+          // Branch A sold on this day last week and never started a report.
+          expect.objectContaining({
+            branch_id: branchA,
+            report_id: null,
+            status: 'MISSING',
+            days_outstanding: 7,
+          }),
+        ]),
+      );
+      expect(backlog.total).toBe(backlog.items.length);
+      expect(backlog.items[0].days_outstanding).toBe(7);
+
+      const scoped = (await as(manager).get('/dashboard/today').expect(200))
+        .body;
+      expect(scoped.count_shortages.items).toEqual([]);
+      expect(
+        scoped.report_backlog.items.every(
+          (row: { branch_id: string }) => row.branch_id === branchA,
+        ),
+      ).toBe(true);
+      expect(
+        scoped.count_shortages.branches.every(
+          (row: { shortage_value: string | null }) =>
+            row.shortage_value === null,
+        ),
+      ).toBe(true);
+    });
   },
 );

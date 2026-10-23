@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { AccessContext } from '../access-control/access-control.types';
 import type { PermissionKey } from '../access-control/permission-catalog';
+import { SHORTAGE_WINDOW_DAYS } from './dashboard-report-health.repository';
 import {
   ATTENTION_KEYS,
   DashboardTodayRepository,
@@ -63,6 +64,8 @@ export class DashboardTodayService {
       options,
       hours,
       progress,
+      shortages,
+      backlog,
     ] = await Promise.all([
       this.repository.businessDate(),
       this.repository.totals(scope),
@@ -79,6 +82,12 @@ export class DashboardTodayService {
       can('daily_reports.read')
         ? this.repository.reportProgress(scope)
         : Promise.resolve([]),
+      can('daily_reports.read')
+        ? this.repository.countShortages(scope)
+        : Promise.resolve({ branches: [], items: [] }),
+      can('daily_reports.read')
+        ? this.repository.reportBacklog(scope)
+        : Promise.resolve({ total: 0, items: [] }),
     ]);
     const branch = branchId
       ? options.find((option) => option.id === branchId)
@@ -121,6 +130,19 @@ export class DashboardTodayService {
       },
       submission_checklist_bypassed: process.env.NODE_ENV === 'development',
       report_progress: progress,
+      // Values are stock cost, so they follow the cost permission.
+      count_shortages: {
+        days: SHORTAGE_WINDOW_DAYS,
+        branches: shortages.branches.map((row) => ({
+          ...row,
+          shortage_value: showCosts ? row.shortage_value : null,
+        })),
+        items: shortages.items.map((row) => ({
+          ...row,
+          shortage_value: showCosts ? row.shortage_value : null,
+        })),
+      },
+      report_backlog: backlog,
       business_date: day.today,
       as_of: day.as_of,
       scope_label: branch
