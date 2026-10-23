@@ -401,6 +401,18 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         sales_count: 2,
         cashier_name: 'Today cashier-a',
         yesterday_report_status: 'MISSING',
+        // Branch A sold 150 by this time on the same weekday last week.
+        last_week_net_sales: '150.00',
+        net_sales_change: '133.3',
+      });
+      expect(
+        body.branches.find(
+          (b: { branch_id: string }) => b.branch_id === branchB,
+        ),
+      ).toMatchObject({
+        net_sales: '100.00',
+        last_week_net_sales: '0.00',
+        net_sales_change: null,
       });
       expect(body.last_7_days).toHaveLength(7);
       expect(body.last_7_days[6]).toMatchObject({

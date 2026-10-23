@@ -191,6 +191,10 @@ export class DashboardTodayService {
       branches: branches
         .map(({ yesterday_sales_count: sold, ...row }) => ({
           ...row,
+          net_sales_change: percentChange(
+            row.net_sales,
+            row.last_week_net_sales,
+          ),
           shift_id: can('shifts.read') ? row.shift_id : null,
           // A missing report only matters when the branch sold something.
           yesterday_report_status: can('daily_reports.read')

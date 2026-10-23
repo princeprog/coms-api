@@ -168,6 +168,7 @@ export class DashboardTodayRepository {
       sales_count: number;
       net_sales: string;
       last_sale_at: Date | null;
+      last_week_net_sales: string;
       yesterday_report_status: string | null;
       yesterday_sales_count: number;
     }>`
@@ -184,12 +185,22 @@ export class DashboardTodayRepository {
           coalesce(sum(total_amount) FILTER (WHERE status = 'COMPLETED'), 0) AS net_sales,
           max(created_at) AS last_sale_at
         FROM today_sales GROUP BY branch_id
+      ),
+      -- Same weekday last week, up to this moment, as in the summary cards.
+      last_week AS (
+        SELECT s.branch_id, sum(s.total_amount) AS net_sales
+        FROM sales s JOIN scope b ON b.id = s.branch_id, day
+        WHERE s.status = 'COMPLETED'
+          AND s.created_at >= coms_business_day_start(day.today - 7)
+          AND s.created_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
+        GROUP BY s.branch_id
       )
       SELECT b.id AS branch_id, b.branch_name, b.status,
         shift.id AS shift_id, shift.shift_number, shift.cashier_name, shift.opened_at,
         coalesce(p.sales_count, 0) AS sales_count,
         ${money(sql`coalesce(p.net_sales, 0)`)} AS net_sales,
         p.last_sale_at,
+        ${money(sql`coalesce(lw.net_sales, 0)`)} AS last_week_net_sales,
         (SELECT r.status FROM daily_branch_reports r, day
           WHERE r.branch_id = b.id AND r.business_date = day.today - 1) AS yesterday_report_status,
         (SELECT count(*)::int FROM sales s, day WHERE s.branch_id = b.id AND s.status = 'COMPLETED'
@@ -197,6 +208,7 @@ export class DashboardTodayRepository {
           AND s.created_at < coms_business_day_end(day.today - 1)) AS yesterday_sales_count
       FROM scope b
       LEFT JOIN per_branch p ON p.branch_id = b.id
+      LEFT JOIN last_week lw ON lw.branch_id = b.id
       LEFT JOIN LATERAL (
         SELECT rs.id, rs.shift_number, u.full_name AS cashier_name, rs.opened_at
         FROM register_shifts rs LEFT JOIN auth.users u ON u.id = rs.opened_by_user_id
