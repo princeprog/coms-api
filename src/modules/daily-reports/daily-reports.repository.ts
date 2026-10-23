@@ -365,39 +365,45 @@ export class DailyReportsRepository {
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'DRAFT' && report.status !== 'RETURNED')
         throw new ConflictException('This report cannot be submitted');
-      const deliveryExceptions = await validateReportDeliveries(
-        transaction,
-        branchId,
-        report.business_date,
-        exceptions,
-      );
+      const bypassChecklist = process.env.NODE_ENV === 'development';
+      const deliveryExceptions = bypassChecklist
+        ? []
+        : await validateReportDeliveries(
+            transaction,
+            branchId,
+            report.business_date,
+            exceptions,
+          );
       await this.requireActiveBranch(transaction, branchId);
-      const { today } = await this.manilaToday(transaction);
-      if (report.business_date >= today)
-        throw new ConflictException(
-          'Reports can be submitted after the business day has ended',
+      if (!bypassChecklist) {
+        const { today } = await this.manilaToday(transaction);
+        if (report.business_date >= today)
+          throw new ConflictException(
+            'Reports can be submitted after the business day has ended',
+          );
+        const shifts = await blockingShifts(
+          transaction,
+          branchId,
+          report.business_date,
         );
-      const shifts = await blockingShifts(
-        transaction,
-        branchId,
-        report.business_date,
-      );
-      if (shifts.open.length)
-        throw new ConflictException(
-          `Close shift ${shifts.open.join(', ')} before submitting this report`,
-        );
-      if (shifts.unreviewed.length)
-        throw new ConflictException(
-          `A manager must review shift ${shifts.unreviewed.join(', ')} before this report can be submitted`,
-        );
+        if (shifts.open.length)
+          throw new ConflictException(
+            `Close shift ${shifts.open.join(', ')} before submitting this report`,
+          );
+        if (shifts.unreviewed.length)
+          throw new ConflictException(
+            `A manager must review shift ${shifts.unreviewed.join(', ')} before this report can be submitted`,
+          );
+      }
       const reportItems = await transaction
         .selectFrom('daily_branch_report_items')
         .selectAll()
         .where('daily_branch_report_id', '=', reportId)
         .execute();
       if (
-        reportItems.length === 0 ||
-        reportItems.some((item) => item.physical_closing_quantity === null)
+        !bypassChecklist &&
+        (reportItems.length === 0 ||
+          reportItems.some((item) => item.physical_closing_quantity === null))
       )
         throw new ConflictException(
           'Enter a physical closing count for every report item before submission',
@@ -409,7 +415,13 @@ export class DailyReportsRepository {
         report.business_date,
         reportItems.map((item) => item.stock_item_id),
       );
-      await this.refreshReportItems(transaction, reportId, reportItems, totals);
+      if (reportItems.length)
+        await this.refreshReportItems(
+          transaction,
+          reportId,
+          reportItems,
+          totals,
+        );
       await this.refreshSalesSummary(
         transaction,
         reportId,
@@ -435,6 +447,9 @@ export class DailyReportsRepository {
           daily_branch_report_id: reportId,
           event_type: 'SUBMITTED',
           actor_user_id: actorUserId,
+          note: bypassChecklist
+            ? 'Submission checklist bypassed in development.'
+            : null,
         })
         .returning('id')
         .executeTakeFirstOrThrow();
@@ -973,6 +988,7 @@ export class DailyReportsRepository {
       .execute();
     return {
       ...report,
+      submission_checklist_bypassed: process.env.NODE_ENV === 'development',
       items,
       events,
       pending_deliveries,

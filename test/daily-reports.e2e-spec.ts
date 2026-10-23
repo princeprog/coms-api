@@ -10,7 +10,7 @@ import { Test } from '@nestjs/testing';
 import type { Kysely } from 'kysely';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuthGatewayGuard } from '../src/common/guards/auth-gateway.guard';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { AppModule } from '../src/app.module';
@@ -1055,6 +1055,112 @@ describe('daily report routes (e2e)', () => {
     await request(app.getHttpServer())
       .post(`${reportUrl(report.id)}/submit`)
       .expect(409);
+  });
+
+  it('bypasses submission readiness only in development, retaining access and approval checks', async () => {
+    activeActorId = reporterId;
+    const { report } = await createReport(manilaDate());
+    const url = reportUrl(report.id);
+    try {
+      for (const environment of ['production', 'test', undefined]) {
+        vi.stubEnv('NODE_ENV', environment);
+        const detail = await request(app.getHttpServer()).get(url).expect(200);
+        expect(detail.body.submission_checklist_bypassed).toBe(false);
+        await request(app.getHttpServer()).post(`${url}/submit`).expect(409);
+        await request(app.getHttpServer())
+          .post(`${url}/submit`)
+          .send({ submission_checklist_bypassed: true })
+          .expect(400);
+      }
+      vi.stubEnv('NODE_ENV', 'development');
+      for (const actor of [deniedUserId, unassignedUserId]) {
+        activeActorId = actor;
+        await request(app.getHttpServer()).post(`${url}/submit`).expect(403);
+      }
+      activeActorId = reporterId;
+      await db
+        .updateTable('branches')
+        .set({ status: 'inactive' })
+        .where('id', '=', branchId)
+        .execute();
+      await request(app.getHttpServer()).post(`${url}/submit`).expect(403);
+      await db
+        .updateTable('branches')
+        .set({ status: 'active' })
+        .where('id', '=', branchId)
+        .execute();
+      const shift = await db
+        .insertInto('register_shifts')
+        .values({
+          branch_id: branchId,
+          business_date: manilaDate(),
+          shift_number: 1,
+          opened_by_user_id: reporterId,
+          opening_float: '0',
+          open_idempotency_key: randomUUID(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const dispatch = await db
+        .insertInto('dispatches')
+        .values({
+          branch_id: branchId,
+          created_by_user_id: reporterId,
+          idempotency_key: randomUUID(),
+          status: 'IN_TRANSIT',
+          dispatched_at: new Date(),
+          dispatched_by_user_id: reporterId,
+          delivered_by_name: 'Test courier',
+          receive_by: new Date(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      try {
+        const submitted = await request(app.getHttpServer())
+          .post(`${url}/submit`)
+          .expect(200);
+        expect(submitted.body).toMatchObject({
+          status: 'SUBMITTED',
+          submission_checklist_bypassed: true,
+          business_day_ended: false,
+        });
+        expect(
+          submitted.body.items.some(
+            (item: { physical_closing_quantity: string | null }) =>
+              item.physical_closing_quantity === null,
+          ),
+        ).toBe(true);
+        expect(submitted.body.pending_deliveries).toHaveLength(1);
+        expect(submitted.body.shifts[0].status).toBe('OPEN');
+        expect(submitted.body.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              event_type: 'SUBMITTED',
+              note: 'Submission checklist bypassed in development.',
+            }),
+          ]),
+        );
+        activeActorId = reviewerId;
+        await request(app.getHttpServer()).post(`${url}/approve`).expect(409);
+      } finally {
+        await db
+          .deleteFrom('register_shifts')
+          .where('id', '=', shift.id)
+          .execute();
+        await db
+          .deleteFrom('dispatches')
+          .where('id', '=', dispatch.id)
+          .execute();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      activeActorId = reporterId;
+      await db
+        .updateTable('branches')
+        .set({ status: 'active' })
+        .where('id', '=', branchId)
+        .execute();
+    }
   });
 
   it('takes a final supplier delivery through a direct dispatch and daily report approval', async () => {
