@@ -8,28 +8,39 @@
 - `today`: net sales, sales count, average sale, items sold, voids, food cost, gross profit and `cost_coverage_percent` (share of net sales whose recipe cost is known; the cost fields are null without Super Admin or `costs.read`).
 - `last_week_same_time` and `yesterday_same_time`: completed sales from that business day's start up to exactly 7 days / 1 day ago. `changes.net_sales` and `changes.sales_count` compare with the same weekday last week (fairer for restaurant weekly patterns); `changes.net_sales_vs_yesterday` keeps the yesterday view. Null when the earlier period had no sales.
 - `hourly[]`: net sales and sales count per Manila clock hour from the business-day start to now, with `last_week_net_sales` for the same hours last week.
-- `attention[]`: `{ key, count }` for every item the user may see; zero counts included.
-- `branches[]`: open shift (number, cashier, opened at), today's sales and net sales, last sale time, and yesterday's report status — `MISSING` when the branch sold something yesterday and has no report.
+- `workspace`: `overview` for Super Admin/global dashboard readers, `branch` for assigned-branch readers. `access` exposes report, shift, sales-report and dispatch read capabilities for navigation.
+- `attention[]`: `{ key, count, branch_count, oldest_at, amount, example }` for every permitted category, including zero counts. The oldest example carries its record/branch IDs, branch name, optional label and exact quantity/unit. `amount` is the summed cash shortage, expressed as a positive decimal string; stock quantities are never added across different items or units. Empty categories have null details. Category counts and examples come from the same scoped query.
+- `branches[]`: open shift (ID, number, cashier, opened at), today's sales and net sales, last sale time, and yesterday's report status — `MISSING` when the branch sold something yesterday and has no report. Shift IDs require `shifts.read`; report statuses require `daily_reports.read`. Returned reports come first, then submitted reports, then yesterday's unfinished reports. Ties retain register/sales ordering.
+- `report_progress[]`: today's and yesterday's report per active/operating branch, only with `daily_reports.read`. Includes date, report ID, status, saved total/count-completed items, open/unreviewed shifts, pending deliveries, pending arrived counts and whether the business day has ended. Missing reports have null item totals; existing empty reports have zero. Counts use saved report membership, so later daily-count policy changes do not rewrite progress. Pending deliveries need counting or an explanation; arrived counts require review. These are checklist indicators, not a promise that submission or approval will succeed.
+- `submission_checklist_bypassed`: true only in API development mode, used to label the checklist consistently with the report workspace.
 - `last_7_days[]` (today − 6 to today) and `top_products_today[]` (top 5 by net sales).
 
 ## Attention items
 
-| Key | Counts | Permission |
-| --- | --- | --- |
-| deliveries_overdue | Dispatches past their receive-by time and not counted | dispatches.read |
-| deliveries_in_transit | Dispatches awaiting a count, not yet due | dispatches.read |
-| late_counts_to_review | Late counts waiting for review | dispatches.read |
-| open_discrepancies | Open dispatch discrepancies | dispatches.read |
-| dispatches_draft | Dispatches drafted but not sent | dispatches.dispatch |
-| shifts_to_review | Closed shifts not yet reviewed | shifts.read |
-| shifts_open_past_day | Shifts still open from an earlier business day | shifts.read |
-| cash_shortages | Closed shifts short of cash in the last 7 business days | shifts.read |
-| stock_below_zero | Branch stock rows below zero | inventory.read |
-| branch_stock_low | Branch items at or below their reorder level, counting stock on the way (see stock-levels.md) | inventory.read |
-| commissary_stock_low | Commissary items at or below their reorder level; 0 when the dashboard is filtered to a branch | inventory.commissary_read |
-| reports_to_review / reports_returned | Daily reports submitted / returned | daily_reports.read |
-| reports_missing | Branches that sold yesterday without a report | daily_reports.read |
-| products_incomplete_costs | Active products without a recipe or with uncosted stock (all branches) | costs.read |
+| Key                                  | Counts                                                                                         | Permission                |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------- |
+| deliveries_overdue                   | Dispatches past their receive-by time and not counted                                          | dispatches.read           |
+| deliveries_in_transit                | Dispatches awaiting a count, not yet due                                                       | dispatches.read           |
+| late_counts_to_review                | Late counts waiting for review                                                                 | dispatches.read           |
+| open_discrepancies                   | Open dispatch discrepancies                                                                    | dispatches.read           |
+| dispatches_draft                     | Dispatches drafted but not sent                                                                | dispatches.dispatch       |
+| shifts_to_review                     | Closed shifts not yet reviewed                                                                 | shifts.read               |
+| shifts_open_past_day                 | Shifts still open from an earlier business day                                                 | shifts.read               |
+| cash_shortages                       | Closed shifts short of cash in the last 7 business days                                        | shifts.read               |
+| stock_below_zero                     | Branch stock rows below zero                                                                   | inventory.read            |
+| commissary_stock_below_zero          | Commissary stock rows below zero; zero with null details when filtered to a branch             | inventory.commissary_read |
+| branch_stock_low                     | Branch items at or below their reorder level, counting stock on the way (see stock-levels.md)  | inventory.read            |
+| commissary_stock_low                 | Commissary items at or below their reorder level; 0 when the dashboard is filtered to a branch | inventory.commissary_read |
+| reports_to_review / reports_returned | Daily reports submitted / returned                                                             | daily_reports.read        |
+| reports_missing                      | Branches that sold yesterday without a report                                                  | daily_reports.read        |
+| products_incomplete_costs            | Active products without a recipe or with uncosted stock (all branches)                         | costs.read                |
 
 Receiving states reuse the Dispatches page rule (`receivingStatus`), so counts match its Overdue, Awaiting count and Review views. The older `/dashboard/overview` and `/branches/:id/dashboard` endpoints are unchanged.
 
+## Dashboard navigation and refresh
+
+Branch readers see their register/report board first. Global readers see sales and alerts first, followed by the full-width branch board; top products is secondary. Each branch has one permission-aware action menu for today's/yesterday's report, current shift or shift list, deliveries, and sales report. Missing-report links open the branch/date-filtered report directory, where authorized users can create a report. Existing-report links open that report directly.
+
+Alerts retain the full category link and add an oldest-record link (or an item search for stock). Stock links show the matching item across balances, since Inventory does not currently offer a below-zero-only filter. Sales-report links preserve the dashboard branch. Failed background refreshes retain the previous data and timestamp, with a visible retry notice. A branch change loads that branch independently; previous-branch figures are never relabeled as the new scope.
+
+No schema migration or inventory/report mutation is involved. Deploy the API before the app because the app validates the added progress/capability fields. Focused integration coverage uses disposable databases, including missing versus empty reports, saved count membership, branch isolation, permission revocation, cash totals, commissary deficits and report prioritization.

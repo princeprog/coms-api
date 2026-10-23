@@ -2,8 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { sql, type Kysely, type RawBuilder } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
-import { receivingStatus } from '../dispatches/receiving-policy';
-import { onTheWaySql } from '../inventory/stock-position';
+import { attentionSummary } from './dashboard-attention.repository';
+import { reportProgress } from './dashboard-report-progress.repository';
 
 /** Branch IDs the caller may see; null means every branch. */
 export type TodayScope = string[] | null;
@@ -14,6 +14,7 @@ export const ATTENTION_KEYS = [
   'shifts_open_past_day',
   'cash_shortages',
   'stock_below_zero',
+  'commissary_stock_below_zero',
   'branch_stock_low',
   'commissary_stock_low',
   'reports_missing',
@@ -129,63 +130,12 @@ export class DashboardTodayRepository {
     return result.rows[0];
   }
 
-  async attention(scope: TodayScope) {
-    const result = await sql<Record<AttentionKey, number>>`
-      WITH ${this.scope(scope)},
-      receiving AS (
-        SELECT ${receivingStatus} AS state FROM dispatches d
-        JOIN scope b ON b.id = d.branch_id
-      )
-      SELECT
-        (SELECT count(*)::int FROM receiving WHERE state = 'OVERDUE') AS deliveries_overdue,
-        (SELECT count(*)::int FROM receiving WHERE state = 'AWAITING_COUNT') AS deliveries_in_transit,
-        (SELECT count(*)::int FROM receiving WHERE state = 'REVIEW') AS late_counts_to_review,
-        (SELECT count(*)::int FROM dispatch_discrepancies dd
-          JOIN dispatches d ON d.id = dd.dispatch_id JOIN scope b ON b.id = d.branch_id
-          WHERE dd.status = 'OPEN') AS open_discrepancies,
-        (SELECT count(*)::int FROM dispatches d JOIN scope b ON b.id = d.branch_id
-          WHERE d.status = 'DRAFT') AS dispatches_draft,
-        (SELECT count(*)::int FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id
-          WHERE rs.status = 'CLOSED') AS shifts_to_review,
-        (SELECT count(*)::int FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id, day
-          WHERE rs.status = 'OPEN' AND rs.business_date < day.today) AS shifts_open_past_day,
-        (SELECT count(*)::int FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id, day
-          WHERE rs.status IN ('CLOSED', 'REVIEWED') AND rs.cash_difference < 0
-            AND rs.business_date > day.today - 7) AS cash_shortages,
-        (SELECT count(*)::int FROM branch_inventory bi JOIN scope b ON b.id = bi.branch_id
-          WHERE bi.quantity_on_hand < 0) AS stock_below_zero,
-        (SELECT count(*)::int FROM stock_levels sl
-          JOIN scope b ON b.id = sl.branch_id AND b.status = 'active'
-          JOIN stock_items si ON si.id = sl.stock_item_id AND si.is_active
-          LEFT JOIN branch_inventory bi
-            ON bi.branch_id = sl.branch_id AND bi.stock_item_id = sl.stock_item_id
-          WHERE sl.inventory_scope = 'BRANCH'
-            AND coalesce(bi.quantity_on_hand, 0)
-              + ${onTheWaySql(sql.ref('sl.branch_id'), sql.ref('sl.stock_item_id'))}
-              <= sl.reorder_level) AS branch_stock_low,
-        (SELECT count(*)::int FROM stock_levels sl
-          JOIN stock_items si ON si.id = sl.stock_item_id AND si.is_active
-          LEFT JOIN commissary_inventory ci ON ci.stock_item_id = sl.stock_item_id
-          WHERE sl.inventory_scope = 'COMMISSARY'
-            AND coalesce(ci.quantity_on_hand, 0) <= sl.reorder_level) AS commissary_stock_low,
-        (SELECT count(*)::int FROM daily_branch_reports r JOIN scope b ON b.id = r.branch_id
-          WHERE r.status = 'SUBMITTED') AS reports_to_review,
-        (SELECT count(*)::int FROM daily_branch_reports r JOIN scope b ON b.id = r.branch_id
-          WHERE r.status = 'RETURNED') AS reports_returned,
-        (SELECT count(*)::int FROM scope b, day
-          WHERE b.status = 'active'
-            AND EXISTS (SELECT 1 FROM sales s WHERE s.branch_id = b.id AND s.status = 'COMPLETED'
-              AND s.created_at >= coms_business_day_start(day.today - 1)
-              AND s.created_at < coms_business_day_end(day.today - 1))
-            AND NOT EXISTS (SELECT 1 FROM daily_branch_reports r
-              WHERE r.branch_id = b.id AND r.business_date = day.today - 1)) AS reports_missing,
-        (SELECT count(*)::int FROM products p WHERE p.is_active AND (
-          NOT EXISTS (SELECT 1 FROM product_ingredients r WHERE r.product_id = p.id)
-          OR EXISTS (SELECT 1 FROM product_ingredients r
-            LEFT JOIN stock_item_costs c ON c.stock_item_id = r.stock_item_id
-            WHERE r.product_id = p.id AND c.stock_item_id IS NULL))) AS products_incomplete_costs
-    `.execute(this.db);
-    return result.rows[0];
+  attention(scope: TodayScope) {
+    return attentionSummary(this.db, this.scope(scope));
+  }
+
+  reportProgress(scope: TodayScope) {
+    return reportProgress(this.db, this.scope(scope));
   }
 
   /** Register, sales and yesterday's report for each branch. */
@@ -194,6 +144,7 @@ export class DashboardTodayRepository {
       branch_id: string;
       branch_name: string;
       status: string;
+      shift_id: string | null;
       shift_number: number | null;
       cashier_name: string | null;
       opened_at: Date | null;
@@ -218,7 +169,7 @@ export class DashboardTodayRepository {
         FROM today_sales GROUP BY branch_id
       )
       SELECT b.id AS branch_id, b.branch_name, b.status,
-        shift.shift_number, shift.cashier_name, shift.opened_at,
+        shift.id AS shift_id, shift.shift_number, shift.cashier_name, shift.opened_at,
         coalesce(p.sales_count, 0) AS sales_count,
         ${money(sql`coalesce(p.net_sales, 0)`)} AS net_sales,
         p.last_sale_at,
@@ -230,7 +181,7 @@ export class DashboardTodayRepository {
       FROM scope b
       LEFT JOIN per_branch p ON p.branch_id = b.id
       LEFT JOIN LATERAL (
-        SELECT rs.shift_number, u.full_name AS cashier_name, rs.opened_at
+        SELECT rs.id, rs.shift_number, u.full_name AS cashier_name, rs.opened_at
         FROM register_shifts rs LEFT JOIN auth.users u ON u.id = rs.opened_by_user_id
         WHERE rs.branch_id = b.id AND rs.status = 'OPEN'
         ORDER BY rs.opened_at DESC LIMIT 1

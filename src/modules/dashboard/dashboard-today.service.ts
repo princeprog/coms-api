@@ -20,6 +20,7 @@ const ATTENTION_PERMISSION: Record<AttentionKey, PermissionKey> = {
   shifts_open_past_day: 'shifts.read',
   cash_shortages: 'shifts.read',
   stock_below_zero: 'inventory.read',
+  commissary_stock_below_zero: 'inventory.commissary_read',
   branch_stock_low: 'inventory.read',
   commissary_stock_low: 'inventory.commissary_read',
   reports_to_review: 'daily_reports.read',
@@ -61,6 +62,7 @@ export class DashboardTodayService {
       topProducts,
       options,
       hours,
+      progress,
     ] = await Promise.all([
       this.repository.businessDate(),
       this.repository.totals(scope),
@@ -74,6 +76,9 @@ export class DashboardTodayService {
           : access.branchIds,
       ),
       this.repository.hourly(scope),
+      can('daily_reports.read')
+        ? this.repository.reportProgress(scope)
+        : Promise.resolve([]),
     ]);
     const branch = branchId
       ? options.find((option) => option.id === branchId)
@@ -88,7 +93,34 @@ export class DashboardTodayService {
       cost_coverage_percent,
       ...today
     } = totals;
+    const priorities = new Map<string, number>();
+    for (const row of progress) {
+      const weight =
+        row.status === 'RETURNED'
+          ? 4
+          : row.status === 'SUBMITTED'
+            ? 3
+            : row.period === 'yesterday' &&
+                (row.status === 'DRAFT' ||
+                  (row.status === 'MISSING' && row.had_sales))
+              ? 2
+              : 0;
+      priorities.set(
+        row.branch_id,
+        Math.max(priorities.get(row.branch_id) ?? 0, weight),
+      );
+    }
     return {
+      workspace:
+        superAdmin || can('dashboard.global_read') ? 'overview' : 'branch',
+      access: {
+        reports: can('daily_reports.read'),
+        shifts: can('shifts.read'),
+        sales: can('sales_report.read'),
+        dispatches: can('dispatches.read'),
+      },
+      submission_checklist_bypassed: process.env.NODE_ENV === 'development',
+      report_progress: progress,
       business_date: day.today,
       as_of: day.as_of,
       scope_label: branch
@@ -125,17 +157,37 @@ export class DashboardTodayService {
       },
       attention: ATTENTION_KEYS.filter((key) =>
         can(ATTENTION_PERMISSION[key]),
-      ).map((key) => ({
-        key,
-        // Commissary stock is not part of a single branch's view.
-        count: key === 'commissary_stock_low' && branchId ? 0 : attention[key],
-      })),
-      branches: branches.map(({ yesterday_sales_count: sold, ...row }) => ({
-        ...row,
-        // A missing report only matters when the branch sold something.
-        yesterday_report_status:
-          row.yesterday_report_status ?? (sold > 0 ? 'MISSING' : null),
-      })),
+      ).map((key) => {
+        // Suppress the details as well as the count outside commissary scope.
+        const item =
+          key.startsWith('commissary_') && branchId
+            ? undefined
+            : attention.find((row) => row.key === key);
+        return (
+          item ?? {
+            key,
+            count: 0,
+            branch_count: 0,
+            oldest_at: null,
+            amount: null,
+            example: null,
+          }
+        );
+      }),
+      branches: branches
+        .map(({ yesterday_sales_count: sold, ...row }) => ({
+          ...row,
+          shift_id: can('shifts.read') ? row.shift_id : null,
+          // A missing report only matters when the branch sold something.
+          yesterday_report_status: can('daily_reports.read')
+            ? (row.yesterday_report_status ?? (sold > 0 ? 'MISSING' : null))
+            : null,
+        }))
+        .sort(
+          (a, b) =>
+            (priorities.get(b.branch_id) ?? 0) -
+            (priorities.get(a.branch_id) ?? 0),
+        ),
       last_7_days: days.map((row) => ({
         ...row,
         food_cost: showCosts ? row.food_cost : null,

@@ -186,6 +186,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       };
       const rice = await stock('Today rice', '50');
       const box = await stock('Today box', '6');
+      await db
+        .insertInto('commissary_inventory')
+        .values({
+          stock_item_id: rice,
+          quantity_on_hand: '-3',
+        })
+        .execute();
       const product = async (product_name: string, price: string) => {
         const id = (
           await db
@@ -373,6 +380,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         cash_shortages: 1,
         // Sales deducted rice and boxes below zero at branch A.
         stock_below_zero: 2,
+        commissary_stock_below_zero: 1,
         // No reorder levels are set in this fixture.
         branch_stock_low: 0,
         commissary_stock_low: 0,
@@ -404,6 +412,38 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         quantity: '2',
         net_sales: '300.00',
       });
+      expect(body.workspace).toBe('overview');
+      const shortage = body.attention.find(
+        (item: { key: string }) => item.key === 'cash_shortages',
+      );
+      expect(shortage).toMatchObject({
+        amount: '20.00',
+        branch_count: 1,
+        example: { branch_id: branchA, branch_name: 'Today TDY-A' },
+      });
+      const deficit = body.attention.find(
+        (item: { key: string }) => item.key === 'commissary_stock_below_zero',
+      );
+      expect(deficit.example).toMatchObject({
+        label: 'Today rice',
+        quantity: '-3',
+        unit: 'kg',
+      });
+      expect(
+        body.report_progress.find(
+          (r: { branch_id: string; period: string }) =>
+            r.branch_id === branchA && r.period === 'yesterday',
+        ),
+      ).toMatchObject({
+        status: 'MISSING',
+        report_id: null,
+        total_items: null,
+        counted_items: null,
+        open_shifts: 0,
+        unreviewed_shifts: 1,
+        pending_deliveries: 2,
+        day_ended: true,
+      });
     });
 
     it('limits a branch manager to their branch and hides costs', async () => {
@@ -423,6 +463,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const items = counts(body.attention);
       expect(items).not.toHaveProperty('products_incomplete_costs');
       expect(items).not.toHaveProperty('dispatches_draft');
+      expect(items).not.toHaveProperty('commissary_stock_below_zero');
+      expect(body.workspace).toBe('branch');
+      expect(
+        body.report_progress.every(
+          (r: { branch_id: string }) => r.branch_id === branchA,
+        ),
+      ).toBe(true);
       expect(body.today.cost_coverage_percent).toBeNull();
       expect(items).toMatchObject({
         deliveries_overdue: 1,
@@ -442,7 +489,139 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect(counts(filtered.body.attention)).toMatchObject({
         deliveries_overdue: 1,
         shifts_open_past_day: 1,
+        commissary_stock_below_zero: 0,
       });
+      expect(
+        filtered.body.attention.find(
+          (item: { key: string }) => item.key === 'commissary_stock_below_zero',
+        ).example,
+      ).toBeNull();
+      expect(
+        body.attention.find(
+          (item: { key: string }) => item.key === 'deliveries_overdue',
+        ).example.branch_id,
+      ).toBe(branchA);
+    });
+
+    it('counts saved report items, including excluded items and empty reports, and prioritizes corrections', async () => {
+      const stocks = await db
+        .selectFrom('stock_items')
+        .select('id')
+        .orderBy('id')
+        .limit(2)
+        .execute();
+      const report = await db
+        .insertInto('daily_branch_reports')
+        .values({
+          branch_id: branchA,
+          business_date: sql<Date>`coms_business_date(now())`,
+          idempotency_key: randomUUID(),
+          created_by_user_id: manager,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await db
+        .insertInto('daily_branch_report_items')
+        .values(
+          stocks.map((stock, index) => ({
+            daily_branch_report_id: report.id,
+            stock_item_id: stock.id,
+            opening_quantity: '0',
+            receipt_quantity: '0',
+            sale_consumption_quantity: '0',
+            sale_void_reversal_quantity: '0',
+            ledger_adjustment_quantity: '0',
+            ledger_closing_quantity: '0',
+            expected_closing_quantity: '0',
+            physical_closing_quantity: index === 0 ? '0' : null,
+          })),
+        )
+        .execute();
+      await db
+        .updateTable('stock_items')
+        .set({ daily_count_required: false })
+        .where('id', '=', stocks[0].id)
+        .execute();
+      await db
+        .insertInto('daily_branch_reports')
+        .values({
+          branch_id: branchB,
+          business_date: sql<Date>`coms_business_date(now()) - 1`,
+          status: 'RETURNED',
+          idempotency_key: randomUUID(),
+          created_by_user_id: owner,
+          submitted_at: new Date(),
+          submitted_by_user_id: manager,
+          reviewed_at: new Date(),
+          reviewed_by_user_id: owner,
+          return_reason: 'Recheck the closing count',
+        })
+        .execute();
+      const body = (await as(owner).get('/dashboard/today').expect(200)).body;
+      expect(
+        body.report_progress.find(
+          (r: { report_id: string }) => r.report_id === report.id,
+        ),
+      ).toMatchObject({
+        status: 'DRAFT',
+        total_items: 2,
+        counted_items: 1,
+        open_shifts: 1,
+        day_ended: false,
+      });
+      expect(
+        body.report_progress.find(
+          (r: { branch_id: string; period: string }) =>
+            r.branch_id === branchB && r.period === 'yesterday',
+        ),
+      ).toMatchObject({
+        status: 'RETURNED',
+        total_items: 0,
+        counted_items: 0,
+      });
+      expect(body.branches[0].branch_id).toBe(branchB);
+    });
+
+    it('does not disclose report progress or deep links after read permissions are removed', async () => {
+      const { role_id } = await db
+        .selectFrom('auth.users')
+        .select('role_id')
+        .where('id', '=', manager)
+        .executeTakeFirstOrThrow();
+      const grants = await db
+        .selectFrom('auth.role_permissions as rp')
+        .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+        .select(['rp.role_id', 'rp.permission_id'])
+        .where('rp.role_id', '=', role_id!)
+        .where('p.module_key', 'in', ['daily_reports', 'shifts'])
+        .execute();
+      try {
+        await db
+          .deleteFrom('auth.role_permissions')
+          .where('role_id', '=', role_id!)
+          .where(
+            'permission_id',
+            'in',
+            grants.map((g) => g.permission_id),
+          )
+          .execute();
+        const body = (await as(manager).get('/dashboard/today').expect(200))
+          .body;
+        expect(body.report_progress).toEqual([]);
+        expect(body.access).toMatchObject({ reports: false, shifts: false });
+        expect(body.branches[0]).toMatchObject({
+          yesterday_report_status: null,
+          shift_id: null,
+        });
+        expect(
+          body.attention.some(
+            (item: { key: string }) =>
+              item.key.startsWith('reports_') || item.key.startsWith('shifts_'),
+          ),
+        ).toBe(false);
+      } finally {
+        await db.insertInto('auth.role_permissions').values(grants).execute();
+      }
     });
   },
 );
