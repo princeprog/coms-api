@@ -17,6 +17,7 @@ import type { AccessContext } from '../src/modules/access-control/access-control
 import { AppModule } from '../src/app.module';
 import { DATABASE } from '../src/database/database.module';
 import type { DB } from '../src/database/db';
+import { InventoryRepository } from '../src/modules/inventory/inventory.repository';
 
 type TestRequest = {
   user?: { id: string };
@@ -515,7 +516,9 @@ describe('dispatch routes (e2e)', () => {
         items: Array<Record<string, string> & { stock_item_id: string }>;
       }) =>
         [flourId, oilId].map((stockId) => {
-          const item = body.items.find((line) => line.stock_item_id === stockId)!;
+          const item = body.items.find(
+            (line) => line.stock_item_id === stockId,
+          )!;
           return [
             item.quantity_received,
             item.quantity_variance,
@@ -576,7 +579,10 @@ describe('dispatch routes (e2e)', () => {
       .where('dispatch_shortage_closure_item_id', 'is not', null)
       .execute();
     expect(
-      returned.map((row) => [row.movement_type, normalizeDecimal(String(row.quantity_delta))]),
+      returned.map((row) => [
+        row.movement_type,
+        normalizeDecimal(String(row.quantity_delta)),
+      ]),
     ).toEqual([['DISPATCH_RETURN', '0.25']]);
     expect((await resolve('LOST', '0.25')).status).toBe(409);
     expect(
@@ -643,7 +649,10 @@ describe('dispatch routes (e2e)', () => {
       );
     expect(sent.status).toBe(201);
     dispatchIds.push(sent.body.id);
-    const lines = sent.body.items as Array<{ id: string; stock_item_id: string }>;
+    const lines = sent.body.items as Array<{
+      id: string;
+      stock_item_id: string;
+    }>;
     const flour = lines.find((line) => line.stock_item_id === flourId)!;
     const oil = lines.find((line) => line.stock_item_id === oilId)!;
     const flourBefore = await optionalBranchBalance(branchId, flourId);
@@ -718,12 +727,10 @@ describe('dispatch routes (e2e)', () => {
         });
     expect((await resolve('NOT_LOADED', flour.id, '1')).status).toBe(400);
     await setCommissaryBalance(flourId, '0.5');
-    expect((await resolve('SURPLUS', flour.id, '1')).status).toBe(409);
-    await setCommissaryBalance(flourId, '45');
     const surplus = await resolve('SURPLUS', flour.id, '1');
     expect(surplus.status).toBe(201);
     expect(surplus.body.status).toBe('PARTIALLY_RECEIVED');
-    expect(await commissaryBalance(flourId)).toBe('44');
+    expect(await commissaryBalance(flourId)).toBe('-0.5');
     const lost = await resolve('LOST', oil.id, '3');
     expect(lost.status).toBe(201);
     expect(lost.body).toMatchObject({
@@ -747,6 +754,134 @@ describe('dispatch routes (e2e)', () => {
         ).status,
       ).toBe(404);
   });
+
+  it.each([
+    { balance: '5', expected: '-5', correction: '5' },
+    { balance: '0', expected: '-10', correction: '10' },
+    { balance: '-2', expected: '-12', correction: '12' },
+    { balance: null, expected: '-10', correction: '10' },
+  ])(
+    'resolves a 10-unit surplus once with commissary balance $balance',
+    async ({ balance, expected, correction }) => {
+      const name = `Surplus ${balance ?? 'missing'} ${suffix}`;
+      const stockItemId = await createStockItem(name);
+      stockItemIds.push(stockItemId);
+      await setCommissaryBalance(stockItemId, '40');
+      const sent = await request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', randomUUID())
+        .send(
+          sendPayload([
+            { stock_item_id: stockItemId, quantity_dispatched: '35' },
+          ]),
+        );
+      expect(sent.status).toBe(201);
+      dispatchIds.push(sent.body.id);
+      const itemId = sent.body.items[0].id as string;
+      currentUserId = receiverUserId;
+      try {
+        const counted = await request(app.getHttpServer())
+          .post(`/dispatches/${sent.body.id}/receive`)
+          .set('Idempotency-Key', randomUUID())
+          .send({
+            items: [{ dispatch_item_id: itemId, quantity_received: '45' }],
+          });
+        expect(counted.status).toBe(201);
+      } finally {
+        currentUserId = actorUserId;
+      }
+      if (balance === null) {
+        await db
+          .deleteFrom('commissary_inventory')
+          .where('stock_item_id', '=', stockItemId)
+          .execute();
+      } else {
+        await setCommissaryBalance(stockItemId, balance);
+      }
+      const key = randomUUID();
+      const resolve = () =>
+        request(app.getHttpServer())
+          .post(`/dispatches/${sent.body.id}/shortage-closures`)
+          .set('Idempotency-Key', key)
+          .send({
+            outcome: 'SURPLUS',
+            reason: 'Extra stock confirmed with the courier.',
+            items: [{ dispatch_item_id: itemId, quantity_closed: '10' }],
+          });
+      const responses = await Promise.all([resolve(), resolve()]);
+      expect(responses.map((response) => response.status)).toEqual([201, 201]);
+      expect(responses[0].body).toMatchObject({
+        status: 'CLOSED_WITH_SHORTAGE',
+        discrepancy: { status: 'RESOLVED' },
+      });
+      expect(await commissaryBalance(stockItemId)).toBe(expected);
+      expect(await branchBalance(branchId, stockItemId)).toBe('45');
+      const movements = await db
+        .selectFrom('inventory_movements as im')
+        .innerJoin(
+          'dispatch_shortage_closure_items as ci',
+          'ci.id',
+          'im.dispatch_shortage_closure_item_id',
+        )
+        .innerJoin(
+          'dispatch_shortage_closures as c',
+          'c.id',
+          'ci.shortage_closure_id',
+        )
+        .select([
+          'im.quantity_delta',
+          'im.actor_user_id',
+          'c.reason',
+          'c.outcome',
+        ])
+        .where('ci.dispatch_item_id', '=', itemId)
+        .execute();
+      expect(movements).toEqual([
+        {
+          quantity_delta: '-10',
+          actor_user_id: actorUserId,
+          reason: 'Extra stock confirmed with the courier.',
+          outcome: 'SURPLUS',
+        },
+      ]);
+      const repository = new InventoryRepository(db);
+      const inventory = await repository.listCommissary({
+        search: name,
+        page: 1,
+        page_size: 10,
+      });
+      expect(inventory.items[0]).toMatchObject({
+        quantity_on_hand: expected,
+        stock_status: 'BELOW_ZERO',
+      });
+      const next = await request(app.getHttpServer())
+        .post('/dispatches/send')
+        .set('Idempotency-Key', randomUUID())
+        .send(
+          sendPayload([
+            { stock_item_id: stockItemId, quantity_dispatched: '1' },
+          ]),
+        );
+      expect(next.status).toBe(400);
+      expect(next.body.message).toMatch(/insufficient commissary inventory/i);
+      expect(await commissaryBalance(stockItemId)).toBe(expected);
+      const adjustment = {
+        scope: 'COMMISSARY' as const,
+        branchId: null,
+        stockItemId,
+        actorUserId,
+        reason: 'Verified missing opening stock.',
+        idempotencyKey: randomUUID(),
+        quantityDelta: correction,
+      };
+      await expect(
+        repository.postAdjustment({ ...adjustment, quantityDelta: '-1' }),
+      ).rejects.toThrow('Insufficient inventory for adjustment');
+      await repository.postAdjustment(adjustment);
+      expect(await commissaryBalance(stockItemId)).toBe('0');
+      expect(await branchBalance(branchId, stockItemId)).toBe('45');
+    },
+  );
 
   it('sends multiple exact decimal lines atomically and replays concurrent requests after receipt', async () => {
     await setCommissaryBalance(stockItemIds[0], '10');

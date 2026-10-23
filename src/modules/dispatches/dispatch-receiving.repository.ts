@@ -10,7 +10,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { sql, type Kysely, type SqlBool, type Transaction } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
 import type {
@@ -535,36 +535,22 @@ export class DispatchReceivingRepository {
     actorUserId: string,
   ) {
     const { line, quantity } = entry;
-    if (outcome === 'NOT_LOADED') {
-      await transaction
-        .insertInto('commissary_inventory')
-        .values({ stock_item_id: line.stock_item_id, quantity_on_hand: '0' })
-        .onConflict((conflict) => conflict.column('stock_item_id').doNothing())
-        .execute();
-      await transaction
-        .updateTable('commissary_inventory')
-        .set({
-          quantity_on_hand: sql`quantity_on_hand + ${quantity}`,
-          updated_at: sql<Date>`now()`,
-        })
-        .where('stock_item_id', '=', line.stock_item_id)
-        .executeTakeFirstOrThrow();
-    } else {
-      const balance = await transaction
-        .updateTable('commissary_inventory')
-        .set({
-          quantity_on_hand: sql`quantity_on_hand - ${quantity}`,
-          updated_at: sql<Date>`now()`,
-        })
-        .where('stock_item_id', '=', line.stock_item_id)
-        .where(sql<SqlBool>`quantity_on_hand >= ${quantity}`)
-        .returning('quantity_on_hand')
-        .executeTakeFirst();
-      if (!balance)
-        throw new ConflictException(
-          `Commissary stock for ${line.stock_item_name} is lower than the confirmed surplus. Correct the commissary count first.`,
-        );
-    }
+    const delta = outcome === 'NOT_LOADED' ? quantity : negate(quantity);
+    await transaction
+      .insertInto('commissary_inventory')
+      .values({ stock_item_id: line.stock_item_id, quantity_on_hand: '0' })
+      .onConflict((conflict) => conflict.column('stock_item_id').doNothing())
+      .execute();
+    // Surplus confirms a past delivery, so preserve the full deduction even if
+    // stock records are incomplete. Inventory exposes the deficit as Below zero.
+    await transaction
+      .updateTable('commissary_inventory')
+      .set({
+        quantity_on_hand: sql`quantity_on_hand + ${delta}`,
+        updated_at: sql<Date>`now()`,
+      })
+      .where('stock_item_id', '=', line.stock_item_id)
+      .executeTakeFirstOrThrow();
     await transaction
       .insertInto('inventory_movements')
       .values({
@@ -573,7 +559,7 @@ export class DispatchReceivingRepository {
         stock_item_id: line.stock_item_id,
         movement_type:
           outcome === 'NOT_LOADED' ? 'DISPATCH_RETURN' : 'DISPATCH',
-        quantity_delta: outcome === 'NOT_LOADED' ? quantity : negate(quantity),
+        quantity_delta: delta,
         actor_user_id: actorUserId,
         dispatch_shortage_closure_item_id: entry.closureItemId,
       })
