@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nestjs",
+  "regions": ["syd1"],
+  "functions": {
+    "src/main.ts": {
+      "includeFiles": "src/assets/**"
+    }
+  }
+}
