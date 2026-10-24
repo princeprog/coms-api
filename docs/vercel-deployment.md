@@ -12,7 +12,7 @@ Configure these variables in Vercel's **Production** environment:
 | `NODE_ENV`                 | `production`                                                  |
 | `NODE_OPTIONS`             | `--experimental-require-module`                               |
 | `DATABASE_URL`             | Supabase session-pooler connection string, stored as a secret |
-| `WEB_ORIGIN`               | `https://coms-app-sigma.vercel.app`                           |
+| `WEB_ORIGIN`               | `https://coms-emmaschickenhouse.vercel.app`                   |
 | `JWT_ACCESS_SECRET`        | Independently generated 64-character hex secret               |
 | `JWT_REFRESH_SECRET`       | A different generated 64-character hex secret                 |
 | `COMS_AUTH_GATEWAY_SECRET` | A third generated secret, shared with coms-app                |
