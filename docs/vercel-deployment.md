@@ -3,7 +3,7 @@
 Deploy this repository as the existing `coms-api` Vercel project using the
 NestJS framework preset and Node.js 24.x. The entrypoint is `src/main.ts`;
 no catch-all rewrite or separate API handler is needed. Functions run in
-Sydney, beside the current Supabase database. PDF assets are included explicitly.
+Sydney, beside the current Supabase database. Nest copies PDF assets during the build.
 
 Configure these variables in Vercel's **Production** environment:
 
