@@ -10,12 +10,7 @@ import { itemFingerprint } from './dispatches.repository.utils';
 export class DispatchLateCountRepository {
   constructor(private readonly notifications: NotificationWriterRepository) {}
 
-  async prepare(
-    tx: Transaction<DB>,
-    input: ReceiveInput,
-    branchId: string,
-    deliveryDate: string,
-  ) {
+  async findRetry(tx: Transaction<DB>, input: ReceiveInput) {
     const existing = await tx
       .selectFrom('dispatch_late_counts')
       .selectAll()
@@ -25,7 +20,8 @@ export class DispatchLateCountRepository {
       if (
         existing.dispatch_id !== input.id ||
         existing.counted_by_user_id !== input.actor_user_id ||
-        storedBusinessDate(existing.delivery_date) !== deliveryDate ||
+        (input.delivery_date !== undefined &&
+          storedBusinessDate(existing.delivery_date) !== input.delivery_date) ||
         existing.late_reason !== (input.late_reason ?? '') ||
         existing.note !== input.note ||
         itemFingerprint(
@@ -44,6 +40,15 @@ export class DispatchLateCountRepository {
       if (input.review_case_id !== existing.id || existing.status !== 'PENDING')
         throw new ConflictException('This count is no longer awaiting review');
     }
+    return null;
+  }
+
+  async prepare(
+    tx: Transaction<DB>,
+    input: ReceiveInput,
+    branchId: string,
+    deliveryDate: string,
+  ) {
     const pending = await tx
       .selectFrom('dispatch_late_counts')
       .select('id')

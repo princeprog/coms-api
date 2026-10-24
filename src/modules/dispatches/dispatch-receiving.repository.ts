@@ -56,6 +56,13 @@ export class DispatchReceivingRepository {
         );
         if (previous)
           return this.returnForReceiptRetry(transaction, previous, input);
+        // A retry must retain the saved date, even after midnight or the deadline.
+        const savedCount = await this.lateCounts.findRetry(transaction, input);
+        if (savedCount) {
+          const details = await this.queries.findDetails(transaction, input.id);
+          if (!details) throw new NotFoundException('Dispatch not found');
+          return { ...details, receiving_outcome: 'REVIEW_REQUIRED' as const };
+        }
         const previousEvent = await this.queries.findEventByIdempotencyKey(
           transaction,
           input.idempotency_key,

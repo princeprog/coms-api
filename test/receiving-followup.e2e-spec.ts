@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { AuthGatewayGuard } from '../src/common/guards/auth-gateway.guard';
 import { AuthGuard } from '../src/common/guards/auth.guard';
@@ -374,6 +374,89 @@ describe('receiving follow-up (disposable database)', () => {
     expect(res.body.delivery_exceptions[0].dispatch_id).toBe(sent.body.id);
     await removeReport(id);
   });
+  it('automatically uses the submission date and preserves a posted receipt on next-day retry', async () => {
+    const sent = await send();
+    const earlier = await yesterday();
+    await db
+      .updateTable('dispatches')
+      .set({
+        dispatched_at: sql<Date>`${earlier}::date::timestamp AT TIME ZONE 'Asia/Manila'`,
+      })
+      .where('id', '=', sent.body.id)
+      .execute();
+    const key = randomUUID();
+    const received = await count(sent.body.id, key);
+    expect(received.status).toBe(201);
+    const day = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    expect(received.body.delivery_date).toBe(
+      day.format(new Date(received.body.counted_at)),
+    );
+    expect(received.body.delivery_date).not.toBe(earlier);
+    const tomorrow = Date.now() + 86400000;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(tomorrow);
+    try {
+      const retry = await count(sent.body.id, key);
+      expect(retry.status).toBe(201);
+      expect(retry.body.delivery_date).toBe(received.body.delivery_date);
+      expect(retry.body.counted_at).toBe(received.body.counted_at);
+      expect(retry.body.receipts).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an automatic date and pending review stable across midnight and deadline changes', async () => {
+    const sent = await send();
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const reportId = await report(today, 'SUBMITTED');
+    const detail = (await api().get(`/dispatches/${sent.body.id}`).expect(200))
+      .body;
+    const payload = {
+      items: detail.items.map((item: { id: string }) => ({
+        dispatch_item_id: item.id,
+        quantity_received: '4',
+      })),
+    };
+    const key = randomUUID();
+    const submit = (body = payload) =>
+      api()
+        .post(`/dispatches/${sent.body.id}/receive`)
+        .set('x-test-user', receiverId)
+        .set('Idempotency-Key', key)
+        .send(body);
+    const held = await submit().expect(201);
+    expect(held.body.receiving_outcome).toBe('REVIEW_REQUIRED');
+    const tomorrow = Date.now() + 2 * 86400000;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(tomorrow);
+    try {
+      const retry = await submit().expect(201);
+      expect(retry.body.late_counts).toEqual(held.body.late_counts);
+      expect(retry.body.receipts).toHaveLength(0);
+      expect(retry.body.counted_at).toBeNull();
+      await submit({
+        items: payload.items.map((item: { dispatch_item_id: string }) => ({
+          ...item,
+          quantity_received: '3',
+        })),
+      }).expect(409);
+    } finally {
+      vi.useRealTimers();
+      await removeReport(reportId);
+    }
+  });
+
   it('holds a late count, blocks approval, and posts exactly once after returning the report', async () => {
     const date = await yesterday();
     const sent = await send();
