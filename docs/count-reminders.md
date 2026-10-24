@@ -27,3 +27,13 @@ For a code rollback, retain the additive schema while reminder history exists an
 - Frontend dispatch/notification tests, types, lint, production build, and `node test/count-reminder-browser.cjs` (loopback fixtures, keyboard, retry, cooldown, history, inbox navigation, row action, light/dark/mobile).
 
 Verification on 2026-10-24 used a disposable local PostgreSQL cluster. No production migration or deployment was performed.
+
+## Local migration repair — 2026-10-24
+
+The local API was subsequently started against `localhost:5432/coms-db`, which still had only 43 applied migrations. Reminder requests failed with PostgreSQL check violation `23514` on `dispatch_events_type_reference_consistent` because the database did not yet allow `COUNT_REMINDER_SENT`.
+
+A full custom-format backup was saved outside the repositories and vault under `Documents/COMS Backups`, checksummed, and restored into a disposable database. The pending migration and actual reminder repository operation were verified on that restored copy before applying exactly one migration with `pnpm migrate:up` to local `coms-db`.
+
+All 44 migrations are now applied locally. The affected dispatch's reminder operation successfully created its activity and recipient records inside a verification transaction that was then rolled back. Inventory movements were unchanged, and no test notification or cooldown persisted. Regenerated Kysely types were unchanged. Supabase and deployed applications were not modified.
+
+Before running new API code against a database, inspect `pnpm migrate:list` for pending migrations and follow the migration backup/verification workflow. This feature requires its migration before the API can write reminder events.
