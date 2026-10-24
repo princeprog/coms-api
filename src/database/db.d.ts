@@ -350,6 +350,49 @@ export interface DispatchShortageClosures {
   reason: string;
 }
 
+export interface ExpenseCategories {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  name: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ExpenseEvents {
+  action: string;
+  actor_user_id: string;
+  after_values: Json;
+  before_values: Json | null;
+  created_at: Generated<Timestamp>;
+  expense_id: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  reason: string | null;
+  request_payload: Json;
+}
+
+export interface Expenses {
+  amount: Numeric;
+  branch_id: string | null;
+  cash_movement_id: string | null;
+  cash_source: string | null;
+  category_id: string;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  description: string;
+  expense_date: Timestamp;
+  id: Generated<string>;
+  inventory_scope: string;
+  notes: string | null;
+  payee: string | null;
+  payment_method: string;
+  reference: string | null;
+  revision: Generated<number>;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  updated_by_user_id: string;
+}
+
 export interface InventoryMovements {
   actor_user_id: string;
   branch_id: string | null;
@@ -769,6 +812,9 @@ export interface DB {
   dispatch_shortage_closure_items: DispatchShortageClosureItems;
   dispatch_shortage_closures: DispatchShortageClosures;
   dispatches: Dispatches;
+  expense_categories: ExpenseCategories;
+  expense_events: ExpenseEvents;
+  expenses: Expenses;
   inventory_movements: InventoryMovements;
   menu_request_events: MenuRequestEvents;
   menu_requests: MenuRequests;

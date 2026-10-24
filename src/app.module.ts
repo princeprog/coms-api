@@ -26,6 +26,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { CostsModule } from './modules/costs/costs.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SalesReportModule } from './modules/sales-report/sales-report.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
 
@@ -67,6 +68,7 @@ export const ObserveInstrument = observe?.ObserveInstrument;
     CostsModule,
     AuditModule,
     SalesReportModule,
+    ExpensesModule,
   ],
   controllers: [AppController],
   providers: [

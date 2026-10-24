@@ -336,6 +336,41 @@ export const PERMISSION_CATALOG = [
     description: 'View costs and profit for assigned branches',
   },
   {
+    module_key: 'expenses',
+    action_key: 'read',
+    description: 'View expenses for assigned branches',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'global_read',
+    description: 'View expenses for all branches',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'commissary_read',
+    description: 'View commissary expenses and stock purchase values',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'create',
+    description: 'Record operating expenses',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'update',
+    description: 'Correct operating expenses with history',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'void',
+    description: 'Void operating expenses with a reason',
+  },
+  {
+    module_key: 'expenses',
+    action_key: 'categories_manage',
+    description: 'Manage expense categories',
+  },
+  {
     module_key: 'costs',
     action_key: 'global_read',
     description: 'View costs and profit for all branches',
