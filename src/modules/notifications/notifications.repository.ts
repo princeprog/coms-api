@@ -104,7 +104,10 @@ export class NotificationsRepository {
   async unreadCount(access: AccessContext) {
     return this.visible(this.db, access)
       .where('nr.read_at', 'is', null)
-      .select(sql<number>`count(*)::int`.as('unread_count'))
+      .select([
+        sql<number>`count(*)::int`.as('unread_count'),
+        sql<Date | null>`max(nr.created_at)`.as('latest_unread_at'),
+      ])
       .executeTakeFirstOrThrow();
   }
 

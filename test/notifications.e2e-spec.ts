@@ -223,7 +223,7 @@ describe('notifications (disposable database)', () => {
     const count = await request(app.getHttpServer())
       .get('/notifications/unread-count')
       .expect(200);
-    expect(count.body).toEqual({ unread_count: 0 });
+    expect(count.body).toEqual({ unread_count: 0, latest_unread_at: null });
   });
   it('notifies receivers once for concurrent sends, without leaking quantities or alerting other branches', async () => {
     const key = randomUUID();
@@ -242,6 +242,14 @@ describe('notifications (disposable database)', () => {
       read_at: null,
     });
     expect(result.items[0]).not.toHaveProperty('quantity_dispatched');
+    const count = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('x-test-user', receiverId)
+      .expect(200);
+    expect(count.body).toEqual({
+      unread_count: result.total,
+      latest_unread_at: result.items[0].created_at,
+    });
     expect((await inbox(otherId)).total).toBe(0);
     expect((await inbox(userId)).total).toBe(0);
     const before = result.total;
