@@ -30,3 +30,18 @@ access for both `anon` and `authenticated` was verified absent.
 Backup and baseline files are under `Documents/COMS Backups/` and are not
 committed. Never replay the historical `auth` migrations directly on Supabase.
 Subsequent schema changes must use new forward migrations.
+
+The security advisor then identified mutable search paths on five COMS
+functions and public execution privileges on the provider's `rls_auto_enable`
+event-trigger function. Function metadata was backed up before setting each
+COMS function's search path to `public, pg_temp` and revoking `PUBLIC`, `anon`
+and `authenticated` execution on `rls_auto_enable()`. Its event trigger remains
+intact. Business-date calculation passed afterward. The advisor now reports
+only informational RLS-without-policy notices, intentional because clients
+access COMS through Nest rather than the Supabase Data API.
+
+Production verification passed for the API root, authenticated account and
+dashboard reads, secure HttpOnly cookie refresh and logout, frontend dashboard,
+reports and stock-item pages, notification counts, and a real PDF export.
+Short-lived verification token families were removed afterward. The existing
+administrator password was preserved; it was not collected or changed.
