@@ -1,3 +1,4 @@
+import { DispatchCountRemindersService } from './dispatch-count-reminders.service';
 import {
   Body,
   Controller,
@@ -37,6 +38,7 @@ export class DispatchesController {
   constructor(
     private readonly service: DispatchesService,
     private readonly restock: DispatchRestockService,
+    private readonly reminders: DispatchCountRemindersService,
   ) {}
 
   @Get()
@@ -98,6 +100,16 @@ export class DispatchesController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.service.dispatch(id, dto, access, idempotencyKey);
+  }
+
+  @Post(':id/count-reminders')
+  @RequirePermission('dispatches.dispatch')
+  remindCount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAccessContext() access: AccessContext,
+    @Headers('idempotency-key') key: string | undefined,
+  ) {
+    return this.reminders.send(id, access, key);
   }
 
   @Post(':id/receive')

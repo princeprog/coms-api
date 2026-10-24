@@ -1,3 +1,5 @@
+import { DispatchCountRemindersRepository } from './dispatch-count-reminders.repository';
+import { DispatchCountRemindersService } from './dispatch-count-reminders.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
@@ -15,6 +17,8 @@ import { DispatchRestockService } from './dispatch-restock.service';
   imports: [AuthModule, NotificationsModule],
   controllers: [DispatchesController],
   providers: [
+    DispatchCountRemindersRepository,
+    DispatchCountRemindersService,
     DispatchLateCountRepository,
     DispatchesRepository,
     DispatchDraftsRepository,

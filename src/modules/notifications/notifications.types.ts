@@ -1,4 +1,5 @@
 export const notificationKinds = [
+  'DISPATCH_COUNT_REMINDER',
   'DISPATCH_SENT',
   'DISPATCH_DISCREPANCY',
   'DISPATCH_RESOLVED',
@@ -19,6 +20,11 @@ export const notificationPolicy: Record<
     review: boolean;
   }
 > = {
+  DISPATCH_COUNT_REMINDER: {
+    module: 'dispatches',
+    actions: ['receive'],
+    review: false,
+  },
   SHIFT_NEEDS_REVIEW: { module: 'shifts', actions: ['review'], review: true },
   DISPATCH_OVERDUE: {
     module: 'dispatches',

@@ -1,3 +1,4 @@
+import { countReminderMetadata } from './count-reminder-metadata';
 import {
   paginatedResult,
   paginationOffset,
@@ -101,6 +102,7 @@ export class DispatchesRepository {
         'd.counted_at',
         'd.receive_by',
         receivingStatus.as('receiving_status'),
+        countReminderMetadata.as('count_reminder'),
         'd.created_at',
         'd.updated_at',
         sql<string | null>`(
@@ -249,6 +251,7 @@ export class DispatchesRepository {
         'd.counted_at',
         'd.receive_by',
         receivingStatus.as('receiving_status'),
+        countReminderMetadata.as('count_reminder'),
         'd.created_at',
         'd.updated_at',
       ])
