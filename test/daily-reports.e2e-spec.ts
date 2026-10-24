@@ -73,7 +73,7 @@ describe('daily report routes (e2e)', () => {
 
   async function createUser(roleId: string, purpose: string): Promise<string> {
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `daily-report-${purpose}-${randomUUID()}@example.com`,
         full_name: `Daily Report ${purpose}`,
@@ -89,7 +89,7 @@ describe('daily report routes (e2e)', () => {
 
   async function createRole(purpose: string): Promise<string> {
     const role = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `DR_${purpose}_${suffix}`,
         role_name: `Daily Reports ${purpose} ${suffix}`,
@@ -182,7 +182,7 @@ describe('daily report routes (e2e)', () => {
       'dispatches.receive',
     ]);
     const permissions = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select(['id', 'module_key', 'action_key'])
       .where('module_key', 'in', [
         'daily_reports',
@@ -195,7 +195,7 @@ describe('daily report routes (e2e)', () => {
         workflowPermissionKeys.has(`${module_key}.${action_key}`),
     );
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values(
         workflowPermissions.map(({ id }) => ({
           role_id: reportRoleId,
@@ -207,7 +207,7 @@ describe('daily report routes (e2e)', () => {
     reporterId = await createUser(reportRoleId, 'Reporter');
     reviewerId = await createUser(reportRoleId, 'Reviewer');
     const superAdminRole = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', 'SUPER_ADMIN')
       .where('is_system', '=', true)
@@ -227,7 +227,7 @@ describe('daily report routes (e2e)', () => {
       .executeTakeFirstOrThrow();
     branchId = branch.id;
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values([
         { user_id: reporterId, branch_id: branchId },
         { user_id: reviewerId, branch_id: branchId },
@@ -245,7 +245,7 @@ describe('daily report routes (e2e)', () => {
       .executeTakeFirstOrThrow();
     flowBranchId = flowBranch.id;
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values([
         { user_id: reporterId, branch_id: flowBranchId },
         { user_id: reviewerId, branch_id: flowBranchId },
@@ -564,7 +564,7 @@ describe('daily report routes (e2e)', () => {
           .where('branch_id', '=', branchId)
           .execute();
         await db
-          .deleteFrom('auth.branch_users')
+          .deleteFrom('coms_auth.branch_users')
           .where('branch_id', '=', branchId)
           .execute();
         await db.deleteFrom('branches').where('id', '=', branchId).execute();
@@ -575,7 +575,7 @@ describe('daily report routes (e2e)', () => {
           .where('branch_id', '=', flowBranchId)
           .execute();
         await db
-          .deleteFrom('auth.branch_users')
+          .deleteFrom('coms_auth.branch_users')
           .where('branch_id', '=', flowBranchId)
           .execute();
         await db
@@ -612,13 +612,19 @@ describe('daily report routes (e2e)', () => {
         await db.deleteFrom('products').where('id', '=', productId).execute();
       if (roleIds.length)
         await db
-          .deleteFrom('auth.role_permissions')
+          .deleteFrom('coms_auth.role_permissions')
           .where('role_id', 'in', roleIds)
           .execute();
       if (userIds.length)
-        await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+        await db
+          .deleteFrom('coms_auth.users')
+          .where('id', 'in', userIds)
+          .execute();
       if (roleIds.length)
-        await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+        await db
+          .deleteFrom('coms_auth.roles')
+          .where('id', 'in', roleIds)
+          .execute();
     }
     if (app) await app.close();
   });

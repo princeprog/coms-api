@@ -6,16 +6,13 @@ import { Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+// Keyed by table name: the schema is "auth" at this migration and "coms_auth"
+// after the later schema rename, so snapshots compare rows across both.
 const legacyColumns = {
-  'auth.users': ['created_at', 'updated_at'],
-  'auth.sessions': ['created_at', 'expires_at', 'revoked_at'],
-  'auth.token_families': ['created_at', 'expires_at', 'revoked_at'],
-  'auth.refresh_tokens': [
-    'created_at',
-    'expires_at',
-    'consumed_at',
-    'revoked_at',
-  ],
+  users: ['created_at', 'updated_at'],
+  sessions: ['created_at', 'expires_at', 'revoked_at'],
+  token_families: ['created_at', 'expires_at', 'revoked_at'],
+  refresh_tokens: ['created_at', 'expires_at', 'consumed_at', 'revoked_at'],
 };
 const migration = '20261020213119_use_timestamptz_for_auth_times';
 const predecessor = '20261020202353_dispatch_receiving_followup';
@@ -76,14 +73,14 @@ describe
       }
     });
 
-    async function snapshot(converted = false) {
+    async function snapshot(converted = false, schema = 'auth') {
       const result: Record<string, unknown> = {};
       for (const [table, columns] of Object.entries(legacyColumns)) {
         const normalized = converted
           ? sql`to_jsonb(t) || jsonb_build_object(${sql.join(columns.flatMap((column) => [sql`${column}::text`, sql`${sql.ref(column)} AT TIME ZONE 'Asia/Manila'`]))})`
           : sql`to_jsonb(t)`;
         result[table] = (
-          await sql`SELECT ${normalized} AS row FROM ${sql.table(table)} t ORDER BY id`.execute(
+          await sql`SELECT ${normalized} AS row FROM ${sql.table(`${schema}.${table}`)} t ORDER BY id`.execute(
             db,
           )
         ).rows;
@@ -149,18 +146,18 @@ describe
       expect((await migrator.migrateDown()).error).toBeUndefined();
       expect(await snapshot()).toEqual(before);
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
-      expect(await snapshot(true)).toEqual(before);
+      expect(await snapshot(true, 'coms_auth')).toEqual(before);
     }, 30000);
 
     it('stores equal offset inputs as one instant and retains expiry ordering in different sessions', async () => {
       const user = await db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select('id')
         .executeTakeFirstOrThrow();
       for (const zone of ['UTC', 'Asia/Manila', 'America/Los_Angeles']) {
         await sql`SELECT set_config('TimeZone', ${zone}, false)`.execute(db);
         const row = await db
-          .insertInto('auth.token_families')
+          .insertInto('coms_auth.token_families')
           .values({
             user_id: user.id,
             created_at: '2027-01-01T00:30:00+08:00',
@@ -174,7 +171,7 @@ describe
         );
         const result = await sql<{
           valid: boolean;
-        }>`SELECT created_at = '2026-12-31T16:30:00Z'::timestamptz AND expires_at > created_at AS valid FROM auth.token_families WHERE id=${row.id}`.execute(
+        }>`SELECT created_at = '2026-12-31T16:30:00Z'::timestamptz AND expires_at > created_at AS valid FROM coms_auth.token_families WHERE id=${row.id}`.execute(
           db,
         );
         expect(result.rows[0].valid).toBe(true);
@@ -187,7 +184,7 @@ describe
         table_name: string;
         column_name: string;
         data_type: string;
-      }>`SELECT table_schema,table_name,column_name,data_type FROM information_schema.columns WHERE table_schema IN ('auth','public')`.execute(
+      }>`SELECT table_schema,table_name,column_name,data_type FROM information_schema.columns WHERE table_schema IN ('coms_auth','public')`.execute(
         db,
       );
       expect(
@@ -200,7 +197,8 @@ describe
           expect(
             columns.rows.find(
               (row) =>
-                `${row.table_schema}.${row.table_name}` === table &&
+                row.table_schema === 'coms_auth' &&
+                row.table_name === table &&
                 row.column_name === column,
             )?.data_type,
           ).toBe('timestamp with time zone');

@@ -6,7 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Selectable, Transaction } from 'kysely';
-import type { AuthTokenFamilies, DB } from '../../database/db';
+import type { ComsAuthTokenFamilies, DB } from '../../database/db';
 import {
   ACCESS_TOKEN_TYPE,
   getAuthConfig,
@@ -267,7 +267,7 @@ export class AuthService {
   private async issueTokenPair(
     trx: Transaction<DB>,
     userId: string,
-    family: Selectable<AuthTokenFamilies>,
+    family: Selectable<ComsAuthTokenFamilies>,
   ): Promise<TokenPair> {
     const config = getAuthConfig();
     const now = Math.floor(Date.now() / 1000);

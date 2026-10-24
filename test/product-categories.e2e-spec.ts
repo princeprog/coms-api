@@ -107,14 +107,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       async function user(code: string | null) {
         const role = code
           ? await db
-              .selectFrom('auth.roles')
+              .selectFrom('coms_auth.roles')
               .select('id')
               .where('code', '=', code)
               .executeTakeFirstOrThrow()
           : null;
         return (
           await db
-            .insertInto('auth.users')
+            .insertInto('coms_auth.users')
             .values({
               role_id: role?.id ?? null,
               full_name: code ?? 'Unassigned',
@@ -153,7 +153,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           .executeTakeFirstOrThrow()
       ).id;
       await db
-        .insertInto('auth.branch_users')
+        .insertInto('coms_auth.branch_users')
         .values({ branch_id: branch, user_id: manager })
         .execute();
       const module = await Test.createTestingModule({ imports: [AppModule] })

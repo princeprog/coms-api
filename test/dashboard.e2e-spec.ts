@@ -52,7 +52,7 @@ describe('dashboard routes (e2e)', () => {
 
   async function createUser(roleId: string, label: string) {
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `dashboard-${label}-${randomUUID()}@example.com`,
         full_name: `Dashboard ${label}`,
@@ -148,23 +148,23 @@ describe('dashboard routes (e2e)', () => {
 
     const [branchManagerRole, cashierRole, superAdminRole] = await Promise.all([
       db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'BRANCH_MANAGER')
         .executeTakeFirstOrThrow(),
       db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'CASHIER')
         .executeTakeFirstOrThrow(),
       db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'SUPER_ADMIN')
         .executeTakeFirstOrThrow(),
     ]);
     const customRole = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `DASHBOARD_TEST_${suffix}`,
         role_name: `Dashboard Test ${suffix}`,
@@ -182,7 +182,7 @@ describe('dashboard routes (e2e)', () => {
     superAdminId = await createUser(superAdminRole.id, 'super-admin');
     activeUserId = branchManagerId;
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values([
         { user_id: branchManagerId, branch_id: assignedBranchId },
         { user_id: cashierId, branch_id: assignedBranchId },
@@ -327,9 +327,15 @@ describe('dashboard routes (e2e)', () => {
       if (branchIds.length)
         await db.deleteFrom('branches').where('id', 'in', branchIds).execute();
       if (userIds.length)
-        await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+        await db
+          .deleteFrom('coms_auth.users')
+          .where('id', 'in', userIds)
+          .execute();
       if (roleIds.length)
-        await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+        await db
+          .deleteFrom('coms_auth.roles')
+          .where('id', 'in', roleIds)
+          .execute();
     }
     await app?.close();
   });
@@ -379,7 +385,7 @@ describe('dashboard routes (e2e)', () => {
       .expect(403);
 
     const globalGrant = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select('id')
       .where('module_key', '=', 'dashboard')
       .where('action_key', '=', 'global_read')
@@ -416,7 +422,7 @@ describe('dashboard routes (e2e)', () => {
       .get('/dashboard/overview?from=2026-09-22&to=2026-09-28')
       .expect(403);
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values({ role_id: customRoleId, permission_id: globalGrant.id })
       .execute();
     const customGlobalOverview = await request(app.getHttpServer())

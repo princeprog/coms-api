@@ -46,86 +46,6 @@ export interface AuditEvents {
   occurred_at: Generated<Timestamp>;
 }
 
-export interface AuthBranchUsers {
-  assigned_at: Generated<Timestamp>;
-  branch_id: string;
-  id: Generated<string>;
-  user_id: string;
-}
-
-export interface AuthPermissions {
-  action_key: string;
-  description: string;
-  id: Generated<Int8>;
-  module_key: string;
-}
-
-export interface AuthRateLimitBuckets {
-  count: number;
-  key_hash: string;
-  reset_at: Timestamp;
-  scope: string;
-}
-
-export interface AuthRefreshTokens {
-  consumed_at: Timestamp | null;
-  created_at: Generated<Timestamp>;
-  expires_at: Timestamp;
-  family_id: string;
-  id: Generated<string>;
-  replaced_by_id: string | null;
-  revoked_at: Timestamp | null;
-  token_hash: string;
-}
-
-export interface AuthRolePermissions {
-  created_at: Generated<Timestamp>;
-  permission_id: Int8;
-  role_id: Int8;
-}
-
-export interface AuthRoles {
-  code: string;
-  created_at: Generated<Timestamp>;
-  id: Generated<Int8>;
-  is_active: Generated<boolean>;
-  is_predefined: Generated<boolean>;
-  is_system: Generated<boolean>;
-  role_name: string;
-  updated_at: Generated<Timestamp>;
-}
-
-export interface AuthSessions {
-  created_at: Generated<Timestamp>;
-  expires_at: Timestamp;
-  id: Generated<string>;
-  revoked_at: Timestamp | null;
-  token_hash: string;
-  user_id: string;
-}
-
-export interface AuthTokenFamilies {
-  created_at: Generated<Timestamp>;
-  expires_at: Timestamp;
-  id: Generated<string>;
-  revoked_at: Timestamp | null;
-  user_id: string;
-}
-
-export interface AuthUsers {
-  contact_number: string;
-  created_at: Generated<Timestamp>;
-  email: string;
-  full_name: string;
-  hashed_password: string;
-  id: Generated<string>;
-  is_active: Generated<boolean>;
-  must_change_password: Generated<boolean>;
-  password_changed_at: Timestamp | null;
-  role_id: Int8 | null;
-  updated_at: Generated<Timestamp>;
-}
-
 export interface Branches {
   address: string | null;
   branch_name: string;
@@ -176,6 +96,86 @@ export interface BusinessDayRules {
 export interface CommissaryInventory {
   quantity_on_hand: Generated<Numeric>;
   stock_item_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ComsAuthBranchUsers {
+  assigned_at: Generated<Timestamp>;
+  branch_id: string;
+  id: Generated<string>;
+  user_id: string;
+}
+
+export interface ComsAuthPermissions {
+  action_key: string;
+  description: string;
+  id: Generated<Int8>;
+  module_key: string;
+}
+
+export interface ComsAuthRateLimitBuckets {
+  count: number;
+  key_hash: string;
+  reset_at: Timestamp;
+  scope: string;
+}
+
+export interface ComsAuthRefreshTokens {
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  family_id: string;
+  id: Generated<string>;
+  replaced_by_id: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+}
+
+export interface ComsAuthRolePermissions {
+  created_at: Generated<Timestamp>;
+  permission_id: Int8;
+  role_id: Int8;
+}
+
+export interface ComsAuthRoles {
+  code: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  is_active: Generated<boolean>;
+  is_predefined: Generated<boolean>;
+  is_system: Generated<boolean>;
+  role_name: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ComsAuthSessions {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+  user_id: string;
+}
+
+export interface ComsAuthTokenFamilies {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  revoked_at: Timestamp | null;
+  user_id: string;
+}
+
+export interface ComsAuthUsers {
+  contact_number: string;
+  created_at: Generated<Timestamp>;
+  email: string;
+  full_name: string;
+  hashed_password: string;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  must_change_password: Generated<boolean>;
+  password_changed_at: Timestamp | null;
+  role_id: Int8 | null;
   updated_at: Generated<Timestamp>;
 }
 
@@ -740,21 +740,21 @@ export interface Suppliers {
 
 export interface DB {
   audit_events: AuditEvents;
-  'auth.branch_users': AuthBranchUsers;
-  'auth.permissions': AuthPermissions;
-  'auth.rate_limit_buckets': AuthRateLimitBuckets;
-  'auth.refresh_tokens': AuthRefreshTokens;
-  'auth.role_permissions': AuthRolePermissions;
-  'auth.roles': AuthRoles;
-  'auth.sessions': AuthSessions;
-  'auth.token_families': AuthTokenFamilies;
-  'auth.users': AuthUsers;
   branch_inventory: BranchInventory;
   branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
   branches: Branches;
   business_day_rules: BusinessDayRules;
   commissary_inventory: CommissaryInventory;
+  'coms_auth.branch_users': ComsAuthBranchUsers;
+  'coms_auth.permissions': ComsAuthPermissions;
+  'coms_auth.rate_limit_buckets': ComsAuthRateLimitBuckets;
+  'coms_auth.refresh_tokens': ComsAuthRefreshTokens;
+  'coms_auth.role_permissions': ComsAuthRolePermissions;
+  'coms_auth.roles': ComsAuthRoles;
+  'coms_auth.sessions': ComsAuthSessions;
+  'coms_auth.token_families': ComsAuthTokenFamilies;
+  'coms_auth.users': ComsAuthUsers;
   daily_branch_report_events: DailyBranchReportEvents;
   daily_branch_report_items: DailyBranchReportItems;
   daily_branch_reports: DailyBranchReports;

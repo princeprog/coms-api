@@ -92,7 +92,7 @@ describe('inventory routes (e2e)', () => {
     db = app.get<Kysely<DB>>(DATABASE);
 
     const actor = await db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select('id')
       .limit(1)
       .executeTakeFirstOrThrow();
@@ -121,7 +121,7 @@ describe('inventory routes (e2e)', () => {
 
     const roleToken = suffix.replaceAll('-', '').slice(0, 12).toUpperCase();
     const branchRole = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `INV_BRANCH_${roleToken}`,
         role_name: `Inventory Branch ${suffix}`,
@@ -129,7 +129,7 @@ describe('inventory routes (e2e)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     const commissaryRole = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `INV_COMMISSARY_${roleToken}`,
         role_name: `Inventory Commissary ${suffix}`,
@@ -139,7 +139,7 @@ describe('inventory routes (e2e)', () => {
     roleIds.push(branchRole.id, commissaryRole.id);
 
     const inventoryPermissions = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select(['id', 'action_key'])
       .where('module_key', '=', 'inventory')
       .where('action_key', 'in', [
@@ -155,7 +155,7 @@ describe('inventory routes (e2e)', () => {
     if (permissionIds.size !== 4)
       throw new Error('Inventory permission catalog is incomplete');
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values([
         {
           role_id: branchRole.id,
@@ -177,7 +177,7 @@ describe('inventory routes (e2e)', () => {
       .execute();
 
     const superAdminRole = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', 'SUPER_ADMIN')
       .where('is_system', '=', true)
@@ -191,7 +191,7 @@ describe('inventory routes (e2e)', () => {
       superAdminUserId,
     );
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ user_id: branchManagerUserId, branch_id: branchId })
       .execute();
     scopedStockItemId = await createStockItem(`Scoped inventory ${suffix}`);
@@ -256,10 +256,16 @@ describe('inventory routes (e2e)', () => {
       await db.deleteFrom('branches').where('id', '=', otherBranchId).execute();
     }
     if (userIds.length) {
-      await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+      await db
+        .deleteFrom('coms_auth.users')
+        .where('id', 'in', userIds)
+        .execute();
     }
     if (roleIds.length) {
-      await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+      await db
+        .deleteFrom('coms_auth.roles')
+        .where('id', 'in', roleIds)
+        .execute();
     }
     await Promise.all([app.close(), accessApp.close(), guardedApp.close()]);
   });
@@ -738,7 +744,7 @@ describe('inventory routes (e2e)', () => {
 
   async function createUser(roleId: string, label: string): Promise<string> {
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `inventory-${label}-${suffix}@example.invalid`,
         full_name: `Inventory ${label} ${suffix}`,

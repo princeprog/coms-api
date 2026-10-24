@@ -65,7 +65,7 @@ async function main() {
     const hash = await hashPassword(password);
     const user = await db.transaction().execute(async (trx) => {
       const updated = await trx
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({
           hashed_password: hash,
           must_change_password: true,
@@ -77,7 +77,7 @@ async function main() {
         .executeTakeFirst();
       if (!updated) throw new Error('No account uses that email.');
       await trx
-        .updateTable('auth.token_families')
+        .updateTable('coms_auth.token_families')
         .set({ revoked_at: sql<Date>`clock_timestamp()` })
         .where('user_id', '=', updated.id)
         .where('revoked_at', 'is', null)

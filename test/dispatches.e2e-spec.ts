@@ -108,7 +108,7 @@ describe('dispatch routes (e2e)', () => {
 
     actorUserId = (
       await db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select('id')
         .limit(1)
         .executeTakeFirstOrThrow()
@@ -116,13 +116,13 @@ describe('dispatch routes (e2e)', () => {
     currentUserId = actorUserId;
 
     const cashierRole = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', 'CASHIER')
       .executeTakeFirstOrThrow();
     deniedUserId = (
       await db
-        .insertInto('auth.users')
+        .insertInto('coms_auth.users')
         .values({
           email: `dispatch-denied-${suffix}@example.com`,
           full_name: 'Dispatch permission test',
@@ -136,7 +136,7 @@ describe('dispatch routes (e2e)', () => {
     userIdsToDelete.push(deniedUserId);
     receiverUserId = (
       await db
-        .insertInto('auth.users')
+        .insertInto('coms_auth.users')
         .values({
           email: `dispatch-receiver-${suffix}@example.com`,
           full_name: 'Dispatch receiver test',
@@ -274,7 +274,7 @@ describe('dispatch routes (e2e)', () => {
         .execute();
     if (userIdsToDelete.length)
       await db
-        .deleteFrom('auth.users')
+        .deleteFrom('coms_auth.users')
         .where('id', 'in', userIdsToDelete)
         .execute();
     await Promise.all([

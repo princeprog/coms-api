@@ -88,7 +88,7 @@ describe('supplier receipt routes (e2e)', () => {
     db = app.get<Kysely<DB>>(DATABASE);
 
     const actor = await db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select('id')
       .limit(1)
       .executeTakeFirstOrThrow();

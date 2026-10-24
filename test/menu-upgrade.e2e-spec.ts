@@ -16,6 +16,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1' || !backup)(
   () => {
     const name = 'coms_menu_upgrade_test_' + randomUUID().replaceAll('-', '');
     let admin: Pool, db: Kysely<DB>, migrator: Migrator;
+    // These checks run before the coms_auth rename, so the auth tables are
+    // queried untyped rather than against the current schema types.
+    const legacy = () => db as unknown as Kysely<any>;
     let branch: string,
       product: string,
       stock: string,
@@ -60,26 +63,29 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1' || !backup)(
         }),
       });
       actor = (
-        await db.selectFrom('auth.users').select('id').executeTakeFirstOrThrow()
+        await legacy()
+          .selectFrom('auth.users')
+          .select('id')
+          .executeTakeFirstOrThrow()
       ).id;
       role = (
-        await db
+        await legacy()
           .insertInto('auth.roles')
           .values({ code: 'MENU_CUSTOM_TEST', role_name: 'Menu custom test' })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
-      const read = await db
+      const read = await legacy()
         .selectFrom('auth.permissions')
         .select('id')
         .where('module_key', '=', 'products')
         .where('action_key', '=', 'read')
         .executeTakeFirstOrThrow();
-      await db
+      await legacy()
         .insertInto('auth.role_permissions')
         .values({ role_id: role, permission_id: read.id })
         .execute();
-      oldGrants = await db
+      oldGrants = await legacy()
         .selectFrom('auth.role_permissions')
         .select('permission_id')
         .where('role_id', '=', role)
@@ -210,7 +216,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1' || !backup)(
           .execute(),
       ).toEqual(oldConsumption);
       expect(
-        await db
+        await legacy()
           .selectFrom('auth.role_permissions')
           .select('permission_id')
           .where('role_id', '=', role)
@@ -231,20 +237,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1' || !backup)(
         .set({ has_takeaway: true })
         .where('id', '=', branch)
         .execute();
-      const permission = await db
+      const permission = await legacy()
         .selectFrom('auth.permissions')
         .select('id')
         .where('module_key', '=', 'menu_requests')
         .where('action_key', '=', 'read')
         .executeTakeFirstOrThrow();
-      await db
+      await legacy()
         .insertInto('auth.role_permissions')
         .values({ role_id: role, permission_id: permission.id })
         .execute();
       await expect(
         db.transaction().execute((tx) => rollbackPermissions(tx)),
       ).rejects.toBeInstanceOf(Error);
-      await db
+      await legacy()
         .deleteFrom('auth.role_permissions')
         .where('role_id', '=', role)
         .where('permission_id', '=', permission.id)

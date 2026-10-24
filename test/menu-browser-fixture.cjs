@@ -124,13 +124,13 @@ async function start() {
     ['cashier', 'CASHIER'],
   ]) {
     const role = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', code)
       .executeTakeFirstOrThrow();
     users[label] = (
       await db
-        .insertInto('auth.users')
+        .insertInto('coms_auth.users')
         .values({
           email: label + '@menu-browser.invalid',
           full_name: 'Synthetic ' + label,
@@ -166,12 +166,12 @@ async function start() {
   ).id;
   for (const user_id of Object.values(users))
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ branch_id: branch, user_id })
       .execute();
   for (const user_id of [users.central, users.cashier])
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ branch_id: takeawayBranch, user_id })
       .execute();
   const stock = (
@@ -230,7 +230,10 @@ async function start() {
         .insertInto('products')
         .values({
           product_name,
-          category_id: db.selectFrom('product_categories').select('id').where('name', '=', 'Rice meals'),
+          category_id: db
+            .selectFrom('product_categories')
+            .select('id')
+            .where('name', '=', 'Rice meals'),
           description: 'Synthetic browser fixture',
           price: label === 'meal' ? '120.001' : '135.005',
           recipe_revision: 1,

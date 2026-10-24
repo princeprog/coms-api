@@ -153,7 +153,7 @@ async function main(): Promise<void> {
 
   try {
     const existing = await db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select(['email', 'contact_number'])
       .where((expressionBuilder) =>
         expressionBuilder.or([
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
 
     const hashedPassword = await hashPassword(account.password);
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: account.email,
         full_name: account.fullName,

@@ -27,7 +27,7 @@ export async function requireSellingShift(
       coalesce(opener.full_name, 'Another cashier') AS cashier_name,
       coms_business_day_end(shift.business_date) <= now() AS day_ended
     FROM register_shifts AS shift
-    LEFT JOIN auth.users AS opener ON opener.id = shift.opened_by_user_id
+    LEFT JOIN coms_auth.users AS opener ON opener.id = shift.opened_by_user_id
     WHERE shift.branch_id = ${branchId} AND shift.status = 'OPEN'
     FOR SHARE OF shift
   `.execute(transaction);
@@ -93,7 +93,11 @@ export function reportShiftSummaries(
 ) {
   return executor
     .selectFrom('register_shifts as shift')
-    .innerJoin('auth.users as opener', 'opener.id', 'shift.opened_by_user_id')
+    .innerJoin(
+      'coms_auth.users as opener',
+      'opener.id',
+      'shift.opened_by_user_id',
+    )
     .select([
       'shift.id',
       'shift.shift_number',

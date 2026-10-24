@@ -56,7 +56,7 @@ export class CsvExportService {
     const unique = [...new Set(ids.filter((id): id is string => !!id))];
     if (!unique.length) return new Map<string, string>();
     const users = await this.db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select(['id', 'full_name'])
       .where('id', 'in', unique)
       .execute();

@@ -74,15 +74,15 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('audit history', () => {
     const role = async (code: string, keys: string[]) => {
       const id = (
         await db
-          .insertInto('auth.roles')
+          .insertInto('coms_auth.roles')
           .values({ code, role_name: code })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
       for (const key of keys) {
         const [m, a] = key.split('.');
-        await sql`INSERT INTO auth.role_permissions (role_id, permission_id)
-          SELECT ${id}, id FROM auth.permissions WHERE module_key = ${m} AND action_key = ${a}`.execute(
+        await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
+          SELECT ${id}, id FROM coms_auth.permissions WHERE module_key = ${m} AND action_key = ${a}`.execute(
           db,
         );
       }
@@ -91,7 +91,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('audit history', () => {
     const user = async (label: string, roleId: string) =>
       (
         await db
-          .insertInto('auth.users')
+          .insertInto('coms_auth.users')
           .values({
             email: `${label}@audit.invalid`,
             full_name: 'Audit ' + label,
@@ -104,7 +104,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('audit history', () => {
       ).id;
     const superRole = (
       await db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'SUPER_ADMIN')
         .executeTakeFirstOrThrow()
@@ -243,7 +243,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('audit history', () => {
     const before = (await db.selectFrom('audit_events').select('id').execute())
       .length;
     await db
-      .updateTable('auth.users')
+      .updateTable('coms_auth.users')
       .set({ hashed_password: 'another-hash' })
       .where('id', '=', noAccess)
       .execute();

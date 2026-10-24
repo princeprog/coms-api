@@ -120,7 +120,7 @@ async function start() {
   const password = crypto.randomBytes(24).toString('hex');
   const { hashPassword } = require('../dist/modules/auth/password-hashing');
   await db
-    .insertInto('auth.users')
+    .insertInto('coms_auth.users')
     .values({
       email,
       full_name: 'Browser Test',

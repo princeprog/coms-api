@@ -52,7 +52,7 @@ export class SupplierReceiptsRepository {
       .where('sr.receipt_kind', '=', 'SUPPLIER_DELIVERY')
       .innerJoin('suppliers as s', 's.id', 'sr.supplier_id')
       .innerJoin(
-        'auth.users as recorder',
+        'coms_auth.users as recorder',
         'recorder.id',
         'sr.recorded_by_user_id',
       )

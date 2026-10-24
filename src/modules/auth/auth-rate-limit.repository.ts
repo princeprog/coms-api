@@ -19,7 +19,7 @@ export class AuthRateLimitRepository {
   ): Promise<RateDecision> {
     const key = createHash('sha256').update(identifier).digest('hex');
     const result = await sql<{ count: number; retry_after: number }>`
-      INSERT INTO auth.rate_limit_buckets AS bucket (scope, key_hash, count, reset_at)
+      INSERT INTO coms_auth.rate_limit_buckets AS bucket (scope, key_hash, count, reset_at)
       VALUES (${scope}, ${key}, 1, clock_timestamp() + interval '1 minute')
       ON CONFLICT (scope, key_hash) DO UPDATE SET
         count = CASE WHEN bucket.reset_at <= clock_timestamp() THEN 1 ELSE least(bucket.count + 1, ${limit + 1}) END,
@@ -35,7 +35,7 @@ export class AuthRateLimitRepository {
       };
     const retry = await sql<{ retry_after: number }>`
       SELECT greatest(1, ceil(extract(epoch FROM reset_at - clock_timestamp())))::integer AS retry_after
-      FROM auth.rate_limit_buckets WHERE scope = ${scope} AND key_hash = ${key}
+      FROM coms_auth.rate_limit_buckets WHERE scope = ${scope} AND key_hash = ${key}
     `.execute(db);
     return {
       allowed: false,
@@ -44,8 +44,8 @@ export class AuthRateLimitRepository {
   }
 
   async cleanup(): Promise<void> {
-    await sql`DELETE FROM auth.rate_limit_buckets WHERE ctid IN (
-      SELECT ctid FROM auth.rate_limit_buckets WHERE reset_at < clock_timestamp() - interval '1 minute'
+    await sql`DELETE FROM coms_auth.rate_limit_buckets WHERE ctid IN (
+      SELECT ctid FROM coms_auth.rate_limit_buckets WHERE reset_at < clock_timestamp() - interval '1 minute'
       ORDER BY reset_at LIMIT 100 FOR UPDATE SKIP LOCKED
     )`.execute(this.db);
   }

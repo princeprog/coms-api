@@ -88,14 +88,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('stock levels', () => {
 
     const role = async (code: string, permissions: string[]) => {
       const created = await db
-        .insertInto('auth.roles')
+        .insertInto('coms_auth.roles')
         .values({ code, role_name: code })
         .returning('id')
         .executeTakeFirstOrThrow();
       for (const key of permissions) {
         const [module_key, action_key] = key.split('.');
-        await sql`INSERT INTO auth.role_permissions (role_id, permission_id)
-          SELECT ${created.id}, id FROM auth.permissions
+        await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
+          SELECT ${created.id}, id FROM coms_auth.permissions
           WHERE module_key = ${module_key} AND action_key = ${action_key}`.execute(
           db,
         );
@@ -105,7 +105,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('stock levels', () => {
     const user = async (label: string, roleId: string) =>
       (
         await db
-          .insertInto('auth.users')
+          .insertInto('coms_auth.users')
           .values({
             email: label + '@levels.invalid',
             full_name: 'Levels ' + label,
@@ -120,7 +120,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('stock levels', () => {
       'owner',
       (
         await db
-          .selectFrom('auth.roles')
+          .selectFrom('coms_auth.roles')
           .select('id')
           .where('code', '=', 'SUPER_ADMIN')
           .executeTakeFirstOrThrow()
@@ -158,7 +158,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('stock levels', () => {
     branchA = await newBranch('LVL-A');
     branchB = await newBranch('LVL-B');
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values([
         { branch_id: branchA, user_id: commissary },
         { branch_id: branchA, user_id: dispatcher },

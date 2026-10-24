@@ -104,7 +104,7 @@ describe('register shifts and business day (disposable database)', () => {
 
     const makeRole = async (label: string, keys: string[]) => {
       const role = await db
-        .insertInto('auth.roles')
+        .insertInto('coms_auth.roles')
         .values({
           code: `SHIFT_${label}_${suffix}`.toUpperCase(),
           role_name: `Shift ${label} ${suffix}`,
@@ -113,12 +113,12 @@ describe('register shifts and business day (disposable database)', () => {
         .executeTakeFirstOrThrow();
       roleIds.push(role.id);
       const permissions = await db
-        .selectFrom('auth.permissions')
+        .selectFrom('coms_auth.permissions')
         .select('id')
         .where(sql<string>`module_key || '.' || action_key`, 'in', keys)
         .execute();
       await db
-        .insertInto('auth.role_permissions')
+        .insertInto('coms_auth.role_permissions')
         .values(
           permissions.map(({ id }) => ({
             role_id: role.id,
@@ -146,7 +146,7 @@ describe('register shifts and business day (disposable database)', () => {
     const makeUser = async (name: string, roleId: string | null) => {
       users[name] = (
         await db
-          .insertInto('auth.users')
+          .insertInto('coms_auth.users')
           .values({
             email: `shift-${name}-${suffix}@example.invalid`,
             full_name: `Shift ${name}`,
@@ -187,7 +187,7 @@ describe('register shifts and business day (disposable database)', () => {
     };
     access.admin = { permissions: [], superAdmin: true, branches: () => [] };
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values(
         ['ana', 'ben', 'mia'].flatMap((name) =>
           both().map((branch) => ({ user_id: users[name], branch_id: branch })),
@@ -243,7 +243,7 @@ describe('register shifts and business day (disposable database)', () => {
         .where('branch_id', 'in', branches)
         .execute();
       await db
-        .deleteFrom('auth.branch_users')
+        .deleteFrom('coms_auth.branch_users')
         .where('branch_id', 'in', branches)
         .execute();
       await db.deleteFrom('products').where('id', '=', productId).execute();
@@ -253,14 +253,17 @@ describe('register shifts and business day (disposable database)', () => {
         .execute();
       await db.deleteFrom('branches').where('id', 'in', branches).execute();
       await db
-        .deleteFrom('auth.users')
+        .deleteFrom('coms_auth.users')
         .where('id', 'in', Object.values(users))
         .execute();
       await db
-        .deleteFrom('auth.role_permissions')
+        .deleteFrom('coms_auth.role_permissions')
         .where('role_id', 'in', roleIds)
         .execute();
-      await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+      await db
+        .deleteFrom('coms_auth.roles')
+        .where('id', 'in', roleIds)
+        .execute();
       await sql`DELETE FROM business_day_rules WHERE effective_from <> '2000-01-01'`.execute(
         db,
       );

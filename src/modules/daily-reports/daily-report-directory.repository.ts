@@ -49,12 +49,12 @@ export class DailyReportDirectoryRepository {
       scoped(true)
         .innerJoin('branches as branch', 'branch.id', 'report.branch_id')
         .leftJoin(
-          'auth.users as submitter',
+          'coms_auth.users as submitter',
           'submitter.id',
           'report.submitted_by_user_id',
         )
         .leftJoin(
-          'auth.users as reviewer',
+          'coms_auth.users as reviewer',
           'reviewer.id',
           'report.reviewed_by_user_id',
         )

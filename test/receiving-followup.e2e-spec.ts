@@ -24,6 +24,10 @@ import {
   up,
   down,
 } from '../src/database/migrations/20261020202353_dispatch_receiving_followup';
+import {
+  down as comsAuthDown,
+  up as comsAuthUp,
+} from '../src/database/migrations/20261024171507_rename_auth_schema_to_coms_auth';
 
 describe('receiving follow-up (disposable database)', () => {
   let app: INestApplication<App>;
@@ -36,7 +40,7 @@ describe('receiving follow-up (disposable database)', () => {
   let stockId: string;
   async function staff(name: string, permissions: string[], branch: string) {
     const role = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `N_${randomUUID().slice(0, 8).toUpperCase()}`,
         role_name: `${name} ${randomUUID()}`,
@@ -44,16 +48,16 @@ describe('receiving follow-up (disposable database)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     const grants = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select('id')
       .where(sql<string>`module_key || '.' || action_key`, 'in', permissions)
       .execute();
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values(grants.map(({ id }) => ({ role_id: role.id, permission_id: id })))
       .execute();
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `${randomUUID()}@example.test`,
         full_name: name,
@@ -64,7 +68,7 @@ describe('receiving follow-up (disposable database)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ user_id: user.id, branch_id: branch })
       .execute();
     return user.id;
@@ -117,12 +121,12 @@ describe('receiving follow-up (disposable database)', () => {
     await app.init();
     db = app.get(DATABASE);
     const role = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', 'SUPER_ADMIN')
       .executeTakeFirstOrThrow();
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `${randomUUID()}@example.test`,
         full_name: 'Notification reviewer',
@@ -547,10 +551,13 @@ describe('receiving follow-up (disposable database)', () => {
       .select(sql<number>`count(*)::int`.as('total'))
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
+      // Older migrations name the auth schema, so undo the rename first.
+      await comsAuthDown(tx);
       await shiftsDown(tx);
       await down(tx);
       await up(tx);
       await shiftsUp(tx);
+      await comsAuthUp(tx);
     });
     expect(
       await db

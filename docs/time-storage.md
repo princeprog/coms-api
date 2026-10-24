@@ -8,7 +8,7 @@ The report expression `business_date::timestamp AT TIME ZONE 'Asia/Manila'` inte
 
 ## Upgrade
 
-Migration `20261020213119_use_timestamptz_for_auth_times` converts the remaining 12 legacy columns in `auth.users`, `auth.sessions`, `auth.token_families` and `auth.refresh_tokens`. All 74 operational/access timestamps already used `timestamptz`.
+Migration `20261020213119_use_timestamptz_for_auth_times` converts the remaining 12 legacy columns in `coms_auth.users`, `coms_auth.sessions`, `coms_auth.token_families` and `coms_auth.refresh_tokens`. All 74 operational/access timestamps already used `timestamptz`.
 
 The migration uses an explicit source zone, independent of the migration connection's TimeZone. The default is `Asia/Manila`, based on verified local UTC+8 database defaults and Node writers. For another installation, audit historical database and application writer zones first, then set `COMS_LEGACY_TIMESTAMP_TIME_ZONE` to the verified IANA zone if different. Mixed writer zones require a separate data reconciliation; one override cannot recover lost offsets. Invalid zone names abort before any conversion.
 
@@ -30,7 +30,6 @@ Kysely applies the migration in a transaction. It preserves values, precision, n
 ## Verification
 
 Tests exercise a populated upgrade, invalid-zone atomic failure, up/down/up preservation, microseconds, indexes/defaults/nullability, explicit offsets, UTC/Manila/Los Angeles sessions, fresh authentication migrations and a schema-wide guard against future timezone-less columns. Date-only fields retain their types. No production migration is performed by these tests.
-
 
 ## Local verification - 2026-10-20
 

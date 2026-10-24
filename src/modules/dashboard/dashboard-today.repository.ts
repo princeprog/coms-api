@@ -211,7 +211,7 @@ export class DashboardTodayRepository {
       LEFT JOIN last_week lw ON lw.branch_id = b.id
       LEFT JOIN LATERAL (
         SELECT rs.id, rs.shift_number, u.full_name AS cashier_name, rs.opened_at
-        FROM register_shifts rs LEFT JOIN auth.users u ON u.id = rs.opened_by_user_id
+        FROM register_shifts rs LEFT JOIN coms_auth.users u ON u.id = rs.opened_by_user_id
         WHERE rs.branch_id = b.id AND rs.status = 'OPEN'
         ORDER BY rs.opened_at DESC LIMIT 1
       ) shift ON true

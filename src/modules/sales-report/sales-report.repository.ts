@@ -282,7 +282,7 @@ export class SalesReportRepository {
 
   async userName(userId: string) {
     const user = await this.db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select('full_name')
       .where('id', '=', userId)
       .executeTakeFirst();

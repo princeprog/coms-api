@@ -164,7 +164,7 @@ export class DashboardExceptionsRepository {
         coalesce(sa.void_count, 0) AS void_count,
         round(coalesce(sa.void_amount, 0), 2)::numeric(14,2)::text AS void_amount,
         count(*) OVER ()::int AS total
-      FROM people p JOIN auth.users u ON u.id = p.user_id
+      FROM people p JOIN coms_auth.users u ON u.id = p.user_id
       LEFT JOIN shift_totals st ON st.user_id = p.user_id
       LEFT JOIN sale_totals sa ON sa.user_id = p.user_id
       ORDER BY coalesce(st.short_shifts, 0) DESC, coalesce(st.short_amount, 0) DESC,

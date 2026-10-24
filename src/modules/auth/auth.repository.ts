@@ -18,14 +18,14 @@ export class AuthRepository {
   }
   findByEmail(email: string) {
     return this.db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .selectAll()
       .where('email', '=', email)
       .executeTakeFirst();
   }
   findUser(id: string, db: Connection = this.db) {
     return db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select([
         'id',
         'email',
@@ -38,7 +38,7 @@ export class AuthRepository {
   }
   findUserForSession(id: string, db: Connection = this.db, lock = false) {
     const query = db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select([
         'id',
         'email',
@@ -53,7 +53,7 @@ export class AuthRepository {
   }
   updatePassword(trx: Transaction<DB>, userId: string, hash: string) {
     return trx
-      .updateTable('auth.users')
+      .updateTable('coms_auth.users')
       .set({
         hashed_password: hash,
         must_change_password: false,
@@ -65,7 +65,7 @@ export class AuthRepository {
   }
   revokeUserFamilies(trx: Transaction<DB>, userId: string) {
     return trx
-      .updateTable('auth.token_families')
+      .updateTable('coms_auth.token_families')
       .set({ revoked_at: sql<Date>`clock_timestamp()` })
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
@@ -73,7 +73,7 @@ export class AuthRepository {
   }
   createFamily(trx: Transaction<DB>, userId: string, ttl: number) {
     return trx
-      .insertInto('auth.token_families')
+      .insertInto('coms_auth.token_families')
       .values({
         user_id: userId,
         expires_at: new Date(Date.now() + ttl * 1000),
@@ -83,14 +83,14 @@ export class AuthRepository {
   }
   findFamily(id: string, db: Connection = this.db, lock = false) {
     const query = db
-      .selectFrom('auth.token_families')
+      .selectFrom('coms_auth.token_families')
       .selectAll()
       .where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
   findRefresh(trx: Transaction<DB>, hash: string) {
     return trx
-      .selectFrom('auth.refresh_tokens')
+      .selectFrom('coms_auth.refresh_tokens')
       .selectAll()
       .where('token_hash', '=', hash)
       .forUpdate()
@@ -104,7 +104,7 @@ export class AuthRepository {
     expires: Date,
   ) {
     return db
-      .insertInto('auth.refresh_tokens')
+      .insertInto('coms_auth.refresh_tokens')
       .values({
         id,
         family_id: familyId,
@@ -115,7 +115,7 @@ export class AuthRepository {
   }
   consumeRefresh(trx: Transaction<DB>, id: string, successorId: string) {
     return trx
-      .updateTable('auth.refresh_tokens')
+      .updateTable('coms_auth.refresh_tokens')
       .set({
         consumed_at: sql<Date>`clock_timestamp()`,
         replaced_by_id: successorId,
@@ -125,7 +125,7 @@ export class AuthRepository {
   }
   revokeFamily(id: string, db: Connection = this.db) {
     return db
-      .updateTable('auth.token_families')
+      .updateTable('coms_auth.token_families')
       .set({ revoked_at: sql<Date>`clock_timestamp()` })
       .where('id', '=', id)
       .where('revoked_at', 'is', null)

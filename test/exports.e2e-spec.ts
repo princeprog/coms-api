@@ -72,7 +72,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
     const user = async (label: string, roleId: string) =>
       (
         await db
-          .insertInto('auth.users')
+          .insertInto('coms_auth.users')
           .values({
             email: `${label}@export.invalid`,
             full_name: 'Export ' + label,
@@ -85,20 +85,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
       ).id;
     const superRole = (
       await db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'SUPER_ADMIN')
         .executeTakeFirstOrThrow()
     ).id;
     const limitedRole = (
       await db
-        .insertInto('auth.roles')
+        .insertInto('coms_auth.roles')
         .values({ code: 'NO_COSTS', role_name: 'No costs' })
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id;
-    await sql`INSERT INTO auth.role_permissions (role_id, permission_id)
-      SELECT ${limitedRole}, id FROM auth.permissions
+    await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
+      SELECT ${limitedRole}, id FROM coms_auth.permissions
       WHERE module_key = 'stock_items' AND action_key = 'read'`.execute(db);
     superAdmin = await user('admin', superRole);
     noCosts = await user('limited', limitedRole);

@@ -33,8 +33,8 @@ export class StaffRepository {
   ) {
     const pattern = search?.trim() ? containsSearchPattern(search) : undefined;
     let records = this.db
-      .selectFrom('auth.users as u')
-      .leftJoin('auth.roles as r', 'r.id', 'u.role_id')
+      .selectFrom('coms_auth.users as u')
+      .leftJoin('coms_auth.roles as r', 'r.id', 'u.role_id')
       .select([
         'u.id',
         'u.email',
@@ -49,11 +49,11 @@ export class StaffRepository {
       .limit(pageSize)
       .offset(paginationOffset({ page, page_size: pageSize }));
     let count = this.db
-      .selectFrom('auth.users as u')
+      .selectFrom('coms_auth.users as u')
       .select((eb) => eb.fn.countAll<number>().as('total'));
     if (branchId) {
       const branchUserIds = this.db
-        .selectFrom('auth.branch_users as bu')
+        .selectFrom('coms_auth.branch_users as bu')
         .innerJoin('branches as b', 'b.id', 'bu.branch_id')
         .select('bu.user_id')
         .where('bu.branch_id', '=', branchId)
@@ -110,8 +110,8 @@ export class StaffRepository {
     requiredBranchId?: string,
   ) {
     let memberQuery = connection
-      .selectFrom('auth.users as u')
-      .leftJoin('auth.roles as r', 'r.id', 'u.role_id')
+      .selectFrom('coms_auth.users as u')
+      .leftJoin('coms_auth.roles as r', 'r.id', 'u.role_id')
       .select([
         'u.id',
         'u.email',
@@ -125,7 +125,7 @@ export class StaffRepository {
       .where('u.id', '=', id);
     if (requiredBranchId) {
       const usersInBranch = connection
-        .selectFrom('auth.branch_users as bu')
+        .selectFrom('coms_auth.branch_users as bu')
         .innerJoin('branches as b', 'b.id', 'bu.branch_id')
         .select('bu.user_id')
         .where('bu.branch_id', '=', requiredBranchId)
@@ -156,7 +156,7 @@ export class StaffRepository {
           await this.assertAssignableRole(trx, input.role_id);
         await this.assertActiveBranches(trx, input.branch_ids);
         const user = await trx
-          .insertInto('auth.users')
+          .insertInto('coms_auth.users')
           .values({
             email: input.email,
             full_name: input.full_name,
@@ -175,7 +175,7 @@ export class StaffRepository {
           .executeTakeFirstOrThrow();
         if (input.branch_ids.length)
           await trx
-            .insertInto('auth.branch_users')
+            .insertInto('coms_auth.branch_users')
             .values(
               input.branch_ids.map((branch_id) => ({
                 user_id: user.id,
@@ -209,7 +209,7 @@ export class StaffRepository {
         await this.lockUser(trx, id);
         if (branchId) await this.assertUserInBranch(trx, id, branchId);
         await trx
-          .updateTable('auth.users')
+          .updateTable('coms_auth.users')
           .set({ ...patch, updated_at: sql<Date>`now()` })
           .where('id', '=', id)
           .execute();
@@ -236,7 +236,7 @@ export class StaffRepository {
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
       if (roleId !== null) await this.assertAssignableRole(trx, roleId);
       const changed = await trx
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ role_id: roleId, updated_at: sql<Date>`now()` })
         .where('id', '=', id)
         .returning(['id'])
@@ -275,17 +275,17 @@ export class StaffRepository {
         assignedBranchIds = [...new Set([...outsideScope, ...branchIds])];
       }
       const previous = await trx
-        .selectFrom('auth.branch_users')
+        .selectFrom('coms_auth.branch_users')
         .select('branch_id')
         .where('user_id', '=', id)
         .execute();
       await trx
-        .deleteFrom('auth.branch_users')
+        .deleteFrom('coms_auth.branch_users')
         .where('user_id', '=', id)
         .execute();
       if (assignedBranchIds.length)
         await trx
-          .insertInto('auth.branch_users')
+          .insertInto('coms_auth.branch_users')
           .values(
             assignedBranchIds.map((branch_id) => ({
               user_id: id,
@@ -308,7 +308,7 @@ export class StaffRepository {
           ).map((branch) => [branch.id, branch.branch_name]),
         );
         const user = await trx
-          .selectFrom('auth.users')
+          .selectFrom('coms_auth.users')
           .select('full_name')
           .where('id', '=', id)
           .executeTakeFirst();
@@ -331,7 +331,7 @@ export class StaffRepository {
       if (branchId) await this.assertUserInBranch(trx, id, branchId);
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
       const member = await trx
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ is_active: false, updated_at: sql<Date>`now()` })
         .where('id', '=', id)
         .returning(['id'])
@@ -353,7 +353,7 @@ export class StaffRepository {
       if (branchId) await this.assertUserInBranch(trx, id, branchId);
       await this.assertProtectedAdminTarget(trx, id, actorIsSuperAdmin);
       const member = await trx
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({
           hashed_password: hash,
           must_change_password: true,
@@ -377,7 +377,7 @@ export class StaffRepository {
 
   private revokeSessions(trx: Transaction<DB>, userId: string) {
     return trx
-      .updateTable('auth.token_families')
+      .updateTable('coms_auth.token_families')
       .set({ revoked_at: sql<Date>`clock_timestamp()` })
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
@@ -389,7 +389,7 @@ export class StaffRepository {
     roleId: string,
   ): Promise<void> {
     const role = await trx
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select(['id', 'code', 'is_system', 'is_active'])
       .where('id', '=', roleId)
       .forUpdate()
@@ -410,8 +410,8 @@ export class StaffRepository {
   ): Promise<void> {
     if (actorIsSuperAdmin) return;
     const target = await trx
-      .selectFrom('auth.users as u')
-      .innerJoin('auth.roles as r', 'r.id', 'u.role_id')
+      .selectFrom('coms_auth.users as u')
+      .innerJoin('coms_auth.roles as r', 'r.id', 'u.role_id')
       .select(['r.code', 'r.is_system'])
       .where('u.id', '=', userId)
       .executeTakeFirst();
@@ -442,7 +442,7 @@ export class StaffRepository {
 
   private async lockUser(trx: Transaction<DB>, id: string): Promise<void> {
     const user = await trx
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select('id')
       .where('id', '=', id)
       .forUpdate()
@@ -456,7 +456,7 @@ export class StaffRepository {
     branchId: string,
   ): Promise<void> {
     const branch = await trx
-      .selectFrom('auth.branch_users as bu')
+      .selectFrom('coms_auth.branch_users as bu')
       .innerJoin('branches as b', 'b.id', 'bu.branch_id')
       .select('bu.user_id')
       .where('bu.user_id', '=', userId)
@@ -472,7 +472,7 @@ export class StaffRepository {
   ): Promise<Map<string, string[]>> {
     if (userIds.length === 0) return new Map();
     const assignments = await connection
-      .selectFrom('auth.branch_users as bu')
+      .selectFrom('coms_auth.branch_users as bu')
       .innerJoin('branches as b', 'b.id', 'bu.branch_id')
       .select(['bu.user_id', 'bu.branch_id'])
       .where('bu.user_id', 'in', userIds)

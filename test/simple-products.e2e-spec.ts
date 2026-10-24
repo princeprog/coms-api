@@ -113,13 +113,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       ).id;
       async function user(code: string, index: number) {
         const role = await db
-          .selectFrom('auth.roles')
+          .selectFrom('coms_auth.roles')
           .select('id')
           .where('code', '=', code)
           .executeTakeFirstOrThrow();
         return (
           await db
-            .insertInto('auth.users')
+            .insertInto('coms_auth.users')
             .values({
               role_id: role.id,
               full_name: code,
@@ -157,7 +157,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           .executeTakeFirstOrThrow()
       ).id;
       await db
-        .insertInto('auth.branch_users')
+        .insertInto('coms_auth.branch_users')
         .values([
           { branch_id: branch, user_id: manager },
           { branch_id: branch, user_id: central },

@@ -43,7 +43,7 @@ async function main() {
     const result = await migrator.migrateToLatest();
     if (result.error) throw result.error;
     await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: 'dispatch-test@example.test',
         full_name: 'Disposable test operator',

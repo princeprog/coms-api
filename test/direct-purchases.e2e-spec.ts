@@ -81,7 +81,10 @@ describe('direct purchases (disposable DB only)', () => {
     await app.init();
     db = app.get(DATABASE);
     actor = (
-      await db.selectFrom('auth.users').select('id').executeTakeFirstOrThrow()
+      await db
+        .selectFrom('coms_auth.users')
+        .select('id')
+        .executeTakeFirstOrThrow()
     ).id;
     item = (
       await db
@@ -300,7 +303,7 @@ describe('direct purchases (disposable DB only)', () => {
       (await request(app.getHttpServer()).get('/direct-purchases')).status,
     ).toBe(200);
     const naive =
-      await sql`SELECT 1 FROM information_schema.columns WHERE table_schema IN ('auth','public') AND data_type='timestamp without time zone'`.execute(
+      await sql`SELECT 1 FROM information_schema.columns WHERE table_schema IN ('coms_auth','public') AND data_type='timestamp without time zone'`.execute(
         db,
       );
     expect(naive.rows).toHaveLength(0);

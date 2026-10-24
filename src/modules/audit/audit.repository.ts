@@ -79,7 +79,7 @@ export class AuditRepository {
         : [],
       ids.role.size
         ? this.db
-            .selectFrom('auth.roles')
+            .selectFrom('coms_auth.roles')
             .select(['id', 'role_name as name'])
             .where('id', 'in', [...ids.role])
             .execute()

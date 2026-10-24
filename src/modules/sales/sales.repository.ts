@@ -58,7 +58,7 @@ export class SalesRepository {
       .execute(async (tx) => {
         let filtered = tx
           .selectFrom('sales as s')
-          .leftJoin('auth.users as u', 'u.id', 's.cashier_user_id')
+          .leftJoin('coms_auth.users as u', 'u.id', 's.cashier_user_id')
           .where('s.branch_id', '=', branchId);
         if (query.status)
           filtered = filtered.where('s.status', '=', query.status);
@@ -830,7 +830,7 @@ export class SalesRepository {
   ) {
     const sale = await executor
       .selectFrom('sales as s')
-      .leftJoin('auth.users as u', 'u.id', 's.cashier_user_id')
+      .leftJoin('coms_auth.users as u', 'u.id', 's.cashier_user_id')
       .selectAll('s')
       .select('u.full_name as cashier_name')
       .where('s.branch_id', '=', branchId)
@@ -855,7 +855,7 @@ export class SalesRepository {
         .execute(),
       executor
         .selectFrom('sale_events as e')
-        .leftJoin('auth.users as u', 'u.id', 'e.actor_user_id')
+        .leftJoin('coms_auth.users as u', 'u.id', 'e.actor_user_id')
         .select([
           'e.id',
           'e.event_type',

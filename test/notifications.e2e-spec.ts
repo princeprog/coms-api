@@ -28,6 +28,10 @@ import {
   up,
   down,
 } from '../src/database/migrations/20261020193411_notifications';
+import {
+  down as comsAuthDown,
+  up as comsAuthUp,
+} from '../src/database/migrations/20261024171507_rename_auth_schema_to_coms_auth';
 
 describe('notifications (disposable database)', () => {
   let app: INestApplication<App>;
@@ -40,7 +44,7 @@ describe('notifications (disposable database)', () => {
   let stockId: string;
   async function staff(name: string, permissions: string[], branch: string) {
     const role = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `N_${randomUUID().slice(0, 8).toUpperCase()}`,
         role_name: name,
@@ -48,16 +52,16 @@ describe('notifications (disposable database)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     const grants = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select('id')
       .where(sql<string>`module_key || '.' || action_key`, 'in', permissions)
       .execute();
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values(grants.map(({ id }) => ({ role_id: role.id, permission_id: id })))
       .execute();
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `${randomUUID()}@example.test`,
         full_name: name,
@@ -68,7 +72,7 @@ describe('notifications (disposable database)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ user_id: user.id, branch_id: branch })
       .execute();
     return user.id;
@@ -121,12 +125,12 @@ describe('notifications (disposable database)', () => {
     await app.init();
     db = app.get(DATABASE);
     const role = await db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select('id')
       .where('code', '=', 'SUPER_ADMIN')
       .executeTakeFirstOrThrow();
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `${randomUUID()}@example.test`,
         full_name: 'Notification reviewer',
@@ -321,7 +325,7 @@ describe('notifications (disposable database)', () => {
       branchId,
     );
     await db
-      .updateTable('auth.users')
+      .updateTable('coms_auth.users')
       .set({ is_active: false })
       .where('id', '=', inactive)
       .execute();
@@ -467,7 +471,7 @@ describe('notifications (disposable database)', () => {
   it('rechecks branch, read permission, role and account access', async () => {
     const [item] = (await inbox(receiverId)).items;
     await db
-      .deleteFrom('auth.branch_users')
+      .deleteFrom('coms_auth.branch_users')
       .where('user_id', '=', receiverId)
       .execute();
     expect((await inbox(receiverId)).total).toBe(0);
@@ -483,16 +487,16 @@ describe('notifications (disposable database)', () => {
       ).body.unread_count,
     ).toBe(0);
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ user_id: receiverId, branch_id: branchId })
       .execute();
     const user = await db
-      .selectFrom('auth.users')
+      .selectFrom('coms_auth.users')
       .select('role_id')
       .where('id', '=', receiverId)
       .executeTakeFirstOrThrow();
     await db
-      .updateTable('auth.roles')
+      .updateTable('coms_auth.roles')
       .set({ is_active: false })
       .where('id', '=', user.role_id!)
       .execute();
@@ -501,12 +505,12 @@ describe('notifications (disposable database)', () => {
       .set('x-test-user', receiverId)
       .expect(403);
     await db
-      .updateTable('auth.roles')
+      .updateTable('coms_auth.roles')
       .set({ is_active: true })
       .where('id', '=', user.role_id!)
       .execute();
     await db
-      .updateTable('auth.users')
+      .updateTable('coms_auth.users')
       .set({ is_active: false })
       .where('id', '=', receiverId)
       .execute();
@@ -515,17 +519,17 @@ describe('notifications (disposable database)', () => {
       .set('x-test-user', receiverId)
       .expect(401);
     await db
-      .updateTable('auth.users')
+      .updateTable('coms_auth.users')
       .set({ is_active: true })
       .where('id', '=', receiverId)
       .execute();
     const readGrants = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select('id')
       .where('action_key', '=', 'read')
       .execute();
     await db
-      .deleteFrom('auth.role_permissions')
+      .deleteFrom('coms_auth.role_permissions')
       .where('role_id', '=', user.role_id!)
       .where(
         'permission_id',
@@ -683,6 +687,8 @@ describe('notifications (disposable database)', () => {
       .select(sql<number>`count(*)::int`.as('total'))
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
+      // Older migrations name the auth schema, so undo the rename first.
+      await comsAuthDown(tx);
       await shiftsDown(tx);
       await followupDown(tx);
       await down(tx);
@@ -693,6 +699,7 @@ describe('notifications (disposable database)', () => {
       await up(tx);
       await followupUp(tx);
       await shiftsUp(tx);
+      await comsAuthUp(tx);
     });
     expect(
       await db

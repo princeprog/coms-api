@@ -387,9 +387,9 @@ const snapshotTables = [
   'commissary_inventory',
   'branch_inventory',
   'inventory_movements',
-  'auth.users',
-  'auth.roles',
-  'auth.branch_users',
+  'coms_auth.users',
+  'coms_auth.roles',
+  'coms_auth.branch_users',
 ] as const;
 async function snapshot(tx: Transaction<DB>) {
   const result = new Map<string, Set<string>>();
@@ -498,8 +498,8 @@ async function main() {
         tx,
       );
       const admins = await tx
-        .selectFrom('auth.users as u')
-        .innerJoin('auth.roles as r', 'r.id', 'u.role_id')
+        .selectFrom('coms_auth.users as u')
+        .innerJoin('coms_auth.roles as r', 'r.id', 'u.role_id')
         .select('u.id')
         .where('u.is_active', '=', true)
         .where('r.is_active', '=', true)

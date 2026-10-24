@@ -25,17 +25,17 @@ export class NotificationWriterRepository {
     const policy = notificationPolicy[input.kind];
     await sql`INSERT INTO notification_recipients (event_id, user_id)
       SELECT ${event.id}::uuid, u.id
-      FROM auth.users u JOIN auth.roles r ON r.id = u.role_id
+      FROM coms_auth.users u JOIN coms_auth.roles r ON r.id = u.role_id
       WHERE u.is_active AND r.is_active AND u.id IS DISTINCT FROM ${input.actor_user_id ?? null}::uuid
       AND (
         (r.is_system AND r.code = 'SUPER_ADMIN' AND ${policy.review})
         OR (
           NOT (r.is_system AND r.code = 'SUPER_ADMIN')
-          AND EXISTS (SELECT 1 FROM auth.branch_users bu JOIN branches b ON b.id = bu.branch_id
+          AND EXISTS (SELECT 1 FROM coms_auth.branch_users bu JOIN branches b ON b.id = bu.branch_id
             WHERE bu.user_id = u.id AND b.id = ${input.branch_id}::uuid AND b.status = 'active')
-          AND EXISTS (SELECT 1 FROM auth.role_permissions rp JOIN auth.permissions p ON p.id = rp.permission_id
+          AND EXISTS (SELECT 1 FROM coms_auth.role_permissions rp JOIN coms_auth.permissions p ON p.id = rp.permission_id
             WHERE rp.role_id = r.id AND p.module_key = ${policy.module} AND p.action_key = 'read')
-          AND EXISTS (SELECT 1 FROM auth.role_permissions rp JOIN auth.permissions p ON p.id = rp.permission_id
+          AND EXISTS (SELECT 1 FROM coms_auth.role_permissions rp JOIN coms_auth.permissions p ON p.id = rp.permission_id
             WHERE rp.role_id = r.id AND p.module_key = ${policy.module} AND p.action_key IN (${sql.join(policy.actions)}))
         )
       ) ON CONFLICT (event_id, user_id) DO NOTHING`.execute(transaction);

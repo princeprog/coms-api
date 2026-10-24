@@ -15,7 +15,7 @@ export class ReceiptExportRepository {
       .innerJoin('supplier_receipts as r', 'r.id', 'line.supplier_receipt_id')
       .innerJoin('stock_items as si', 'si.id', 'line.stock_item_id')
       .innerJoin(
-        'auth.users as recorder',
+        'coms_auth.users as recorder',
         'recorder.id',
         'r.recorded_by_user_id',
       )

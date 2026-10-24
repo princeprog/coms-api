@@ -87,14 +87,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
 
       const role = async (code: string, permissions: string[]) => {
         const created = await db
-          .insertInto('auth.roles')
+          .insertInto('coms_auth.roles')
           .values({ code, role_name: code })
           .returning('id')
           .executeTakeFirstOrThrow();
         for (const key of permissions) {
           const [module_key, action_key] = key.split('.');
-          await sql`INSERT INTO auth.role_permissions (role_id, permission_id)
-          SELECT ${created.id}, id FROM auth.permissions
+          await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
+          SELECT ${created.id}, id FROM coms_auth.permissions
           WHERE module_key = ${module_key} AND action_key = ${action_key}`.execute(
             db,
           );
@@ -104,7 +104,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const user = async (label: string, roleId: string) =>
         (
           await db
-            .insertInto('auth.users')
+            .insertInto('coms_auth.users')
             .values({
               email: `${label}@today.invalid`,
               full_name: 'Today ' + label,
@@ -117,7 +117,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         ).id;
       const superRole = (
         await db
-          .selectFrom('auth.roles')
+          .selectFrom('coms_auth.roles')
           .select('id')
           .where('code', '=', 'SUPER_ADMIN')
           .executeTakeFirstOrThrow()
@@ -155,7 +155,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       branchA = await newBranch('TDY-A');
       branchB = await newBranch('TDY-B');
       await db
-        .insertInto('auth.branch_users')
+        .insertInto('coms_auth.branch_users')
         .values([
           { branch_id: branchA, user_id: cashierA },
           { branch_id: branchB, user_id: cashierB },
@@ -596,20 +596,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
 
     it('does not disclose report progress or deep links after read permissions are removed', async () => {
       const { role_id } = await db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select('role_id')
         .where('id', '=', manager)
         .executeTakeFirstOrThrow();
       const grants = await db
-        .selectFrom('auth.role_permissions as rp')
-        .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+        .selectFrom('coms_auth.role_permissions as rp')
+        .innerJoin('coms_auth.permissions as p', 'p.id', 'rp.permission_id')
         .select(['rp.role_id', 'rp.permission_id'])
         .where('rp.role_id', '=', role_id!)
         .where('p.module_key', 'in', ['daily_reports', 'shifts'])
         .execute();
       try {
         await db
-          .deleteFrom('auth.role_permissions')
+          .deleteFrom('coms_auth.role_permissions')
           .where('role_id', '=', role_id!)
           .where(
             'permission_id',
@@ -632,7 +632,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           ),
         ).toBe(false);
       } finally {
-        await db.insertInto('auth.role_permissions').values(grants).execute();
+        await db
+          .insertInto('coms_auth.role_permissions')
+          .values(grants)
+          .execute();
       }
     });
 
@@ -811,20 +814,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       );
 
       const { role_id } = await db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select('role_id')
         .where('id', '=', manager)
         .executeTakeFirstOrThrow();
       const grants = await db
-        .selectFrom('auth.role_permissions as rp')
-        .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+        .selectFrom('coms_auth.role_permissions as rp')
+        .innerJoin('coms_auth.permissions as p', 'p.id', 'rp.permission_id')
         .select(['rp.role_id', 'rp.permission_id'])
         .where('rp.role_id', '=', role_id!)
         .where('p.module_key', '=', 'shifts')
         .execute();
       try {
         await db
-          .deleteFrom('auth.role_permissions')
+          .deleteFrom('coms_auth.role_permissions')
           .where('role_id', '=', role_id!)
           .where(
             'permission_id',
@@ -840,7 +843,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         expect(limited.branches[0].weeks[3].cash_short_shifts).toBeNull();
         expect(limited.branches[0].weeks[3].cash_short_amount).toBeNull();
       } finally {
-        await db.insertInto('auth.role_permissions').values(grants).execute();
+        await db
+          .insertInto('coms_auth.role_permissions')
+          .values(grants)
+          .execute();
       }
     });
   },

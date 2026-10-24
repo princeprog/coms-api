@@ -948,7 +948,11 @@ export class DailyReportsRepository {
         .execute(),
       executor
         .selectFrom('daily_branch_report_events as event')
-        .innerJoin('auth.users as actor', 'actor.id', 'event.actor_user_id')
+        .innerJoin(
+          'coms_auth.users as actor',
+          'actor.id',
+          'event.actor_user_id',
+        )
         .select([
           'event.id',
           'event.event_type',

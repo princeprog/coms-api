@@ -26,7 +26,7 @@ export class RolesRepository {
   async list() {
     const [roles, grants] = await Promise.all([
       this.db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select([
           'id',
           'code',
@@ -38,8 +38,8 @@ export class RolesRepository {
         .orderBy('role_name')
         .execute(),
       this.db
-        .selectFrom('auth.role_permissions as rp')
-        .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+        .selectFrom('coms_auth.role_permissions as rp')
+        .innerJoin('coms_auth.permissions as p', 'p.id', 'rp.permission_id')
         .select(['rp.role_id', 'p.module_key', 'p.action_key'])
         .execute(),
     ]);
@@ -61,7 +61,7 @@ export class RolesRepository {
 
   findById(id: RoleId) {
     return this.db
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select(['id', 'code', 'is_system'])
       .where('id', '=', id)
       .executeTakeFirst();
@@ -75,7 +75,7 @@ export class RolesRepository {
     try {
       return await this.db.transaction().execute(async (trx) => {
         const role = await trx
-          .insertInto('auth.roles')
+          .insertInto('coms_auth.roles')
           .values({
             code: input.code,
             role_name: input.role_name.trim(),
@@ -108,7 +108,7 @@ export class RolesRepository {
         if (!role) return null;
         this.assertCustomRole(role);
         return trx
-          .updateTable('auth.roles')
+          .updateTable('coms_auth.roles')
           .set({ role_name: roleName.trim(), updated_at: sql<Date>`now()` })
           .where('id', '=', id)
           .returning([
@@ -144,7 +144,7 @@ export class RolesRepository {
       if (!role) return null;
       this.assertCustomRole(role);
       const assigned = await trx
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select((eb) => eb.fn.countAll<number>().as('count'))
         .where('role_id', '=', id)
         .executeTakeFirstOrThrow();
@@ -153,7 +153,7 @@ export class RolesRepository {
           'Reassign staff from this role before deactivating it',
         );
       return trx
-        .updateTable('auth.roles')
+        .updateTable('coms_auth.roles')
         .set({ is_active: false, updated_at: sql<Date>`now()` })
         .where('id', '=', id)
         .returning([
@@ -173,7 +173,7 @@ export class RolesRepository {
     id: RoleId,
   ): Promise<RoleRow | undefined> {
     return trx
-      .selectFrom('auth.roles')
+      .selectFrom('coms_auth.roles')
       .select(['id', 'code', 'role_name', 'is_system', 'is_active'])
       .where('id', '=', id)
       .forUpdate()
@@ -192,7 +192,7 @@ export class RolesRepository {
   ): Promise<void> {
     const permissionIds = permissionKeys.length
       ? await trx
-          .selectFrom('auth.permissions')
+          .selectFrom('coms_auth.permissions')
           .select(['id', 'module_key', 'action_key'])
           .execute()
       : [];
@@ -204,19 +204,19 @@ export class RolesRepository {
     if (selected.length !== permissionKeys.length)
       throw new ConflictException('Permission catalog is out of sync');
     const before = await trx
-      .selectFrom('auth.role_permissions as rp')
-      .innerJoin('auth.permissions as p', 'p.id', 'rp.permission_id')
+      .selectFrom('coms_auth.role_permissions as rp')
+      .innerJoin('coms_auth.permissions as p', 'p.id', 'rp.permission_id')
       .select(sql<string>`p.module_key || '.' || p.action_key`.as('key'))
       .where('rp.role_id', '=', roleId)
       .execute();
     await trx
-      .deleteFrom('auth.role_permissions')
+      .deleteFrom('coms_auth.role_permissions')
       .where('role_id', '=', roleId)
       .where(
         'permission_id',
         'in',
         trx
-          .selectFrom('auth.permissions')
+          .selectFrom('coms_auth.permissions')
           .select('id')
           .where(sql<string>`module_key || '.' || action_key`, 'in', [
             ...EDITABLE_PERMISSION_KEYS,
@@ -225,7 +225,7 @@ export class RolesRepository {
       .execute();
     if (selected.length)
       await trx
-        .insertInto('auth.role_permissions')
+        .insertInto('coms_auth.role_permissions')
         .values(
           selected.map(({ id }) => ({ role_id: roleId, permission_id: id })),
         )
@@ -236,7 +236,7 @@ export class RolesRepository {
     const { added, removed } = listDiff(editableBefore, permissionKeys);
     if (added.length || removed.length) {
       const role = await trx
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('role_name')
         .where('id', '=', roleId)
         .executeTakeFirst();

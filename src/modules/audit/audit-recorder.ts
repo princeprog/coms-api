@@ -29,7 +29,7 @@ export async function recordAudit(
       branch_id, changes, metadata
     ) VALUES (
       ${actor}::uuid,
-      (SELECT full_name FROM auth.users WHERE id = ${actor}::uuid),
+      (SELECT full_name FROM coms_auth.users WHERE id = ${actor}::uuid),
       ${event.action}, ${event.entityType}, ${event.entityId ?? null},
       ${event.entityLabel ?? null}, ${event.branchId ?? null}::uuid,
       ${JSON.stringify(event.changes ?? {})}::jsonb,

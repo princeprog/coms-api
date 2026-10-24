@@ -18,7 +18,7 @@ export class DirectPurchasesRepository {
   async list(input: DirectPurchaseQueryDto) {
     let query = this.db
       .selectFrom('supplier_receipts as r')
-      .innerJoin('auth.users as u', 'u.id', 'r.recorded_by_user_id')
+      .innerJoin('coms_auth.users as u', 'u.id', 'r.recorded_by_user_id')
       .where('r.receipt_kind', '=', 'DIRECT_PURCHASE');
     if (input.search?.trim()) {
       const pattern = containsSearchPattern(input.search.trim());

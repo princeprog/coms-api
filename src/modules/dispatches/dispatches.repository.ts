@@ -78,9 +78,13 @@ export class DispatchesRepository {
     let records = this.db
       .selectFrom('dispatches as d')
       .innerJoin('branches as b', 'b.id', 'd.branch_id')
-      .innerJoin('auth.users as creator', 'creator.id', 'd.created_by_user_id')
+      .innerJoin(
+        'coms_auth.users as creator',
+        'creator.id',
+        'd.created_by_user_id',
+      )
       .leftJoin(
-        'auth.users as dispatcher',
+        'coms_auth.users as dispatcher',
         'dispatcher.id',
         'd.dispatched_by_user_id',
       )
@@ -203,13 +207,21 @@ export class DispatchesRepository {
     const dispatch = await executor
       .selectFrom('dispatches as d')
       .innerJoin('branches as b', 'b.id', 'd.branch_id')
-      .innerJoin('auth.users as creator', 'creator.id', 'd.created_by_user_id')
+      .innerJoin(
+        'coms_auth.users as creator',
+        'creator.id',
+        'd.created_by_user_id',
+      )
       .leftJoin(
-        'auth.users as dispatcher',
+        'coms_auth.users as dispatcher',
         'dispatcher.id',
         'd.dispatched_by_user_id',
       )
-      .leftJoin('auth.users as counter', 'counter.id', 'd.counted_by_user_id')
+      .leftJoin(
+        'coms_auth.users as counter',
+        'counter.id',
+        'd.counted_by_user_id',
+      )
       .select([
         'd.id',
         'd.branch_id',
@@ -284,7 +296,7 @@ export class DispatchesRepository {
       this.listShortageDetails(executor, id),
       executor
         .selectFrom('dispatch_events as de')
-        .innerJoin('auth.users as actor', 'actor.id', 'de.actor_user_id')
+        .innerJoin('coms_auth.users as actor', 'actor.id', 'de.actor_user_id')
         .select([
           'de.id',
           'de.event_type',
@@ -315,8 +327,8 @@ export class DispatchesRepository {
                recount_actor.full_name AS recount_requested_by_name,
                dd.recount_requested_at, dd.resolved_at
         FROM dispatch_discrepancies AS dd
-        JOIN auth.users AS reporter ON reporter.id = dd.reported_by_user_id
-        LEFT JOIN auth.users AS recount_actor
+        JOIN coms_auth.users AS reporter ON reporter.id = dd.reported_by_user_id
+        LEFT JOIN coms_auth.users AS recount_actor
           ON recount_actor.id = dd.recount_requested_by_user_id
         WHERE dd.dispatch_id = ${id}
         ORDER BY dd.reported_at DESC, dd.id DESC
@@ -336,7 +348,7 @@ export class DispatchesRepository {
                actor.full_name AS actor_name, de.note, de.created_at
         FROM dispatch_discrepancy_events AS de
         JOIN dispatch_discrepancies AS dd ON dd.id = de.discrepancy_id
-        JOIN auth.users AS actor ON actor.id = de.actor_user_id
+        JOIN coms_auth.users AS actor ON actor.id = de.actor_user_id
         WHERE dd.dispatch_id = ${id}
         ORDER BY de.created_at, de.id
       `
@@ -417,7 +429,7 @@ export class DispatchesRepository {
     const rows = await executor
       .selectFrom('dispatch_receipts as dr')
       .innerJoin(
-        'auth.users as receiver',
+        'coms_auth.users as receiver',
         'receiver.id',
         'dr.received_by_user_id',
       )
@@ -501,7 +513,11 @@ export class DispatchesRepository {
   private async listShortageDetails(executor: DbExecutor, dispatchId: string) {
     const rows = await executor
       .selectFrom('dispatch_shortage_closures as dsc')
-      .innerJoin('auth.users as closer', 'closer.id', 'dsc.closed_by_user_id')
+      .innerJoin(
+        'coms_auth.users as closer',
+        'closer.id',
+        'dsc.closed_by_user_id',
+      )
       .leftJoin(
         'dispatch_shortage_closure_items as dsci',
         'dsci.shortage_closure_id',

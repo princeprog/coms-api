@@ -104,7 +104,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await migrator.migrateDown()).error).toBeUndefined();
       expect((await migrator.migrateToLatest()).error).toBeUndefined();
       await sql`
-        INSERT INTO auth.users (email, full_name, contact_number, hashed_password)
+        INSERT INTO coms_auth.users (email, full_name, contact_number, hashed_password)
         VALUES (
           ${credentials.email},
           'Auth Test',
@@ -150,9 +150,9 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       services = apps.map((app) => app.get(AuthService));
     }, 30000);
     beforeEach(async () => {
-      await db.deleteFrom('auth.rate_limit_buckets').execute();
-      await db.deleteFrom('auth.refresh_tokens').execute();
-      await db.deleteFrom('auth.token_families').execute();
+      await db.deleteFrom('coms_auth.rate_limit_buckets').execute();
+      await db.deleteFrom('coms_auth.refresh_tokens').execute();
+      await db.deleteFrom('coms_auth.token_families').execute();
     });
     afterAll(async () => {
       for (const app of apps) await app.close();
@@ -181,7 +181,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         await services[0].authenticateAccess(first.tokens.accessToken),
       ).not.toBeNull();
       const rows = await db
-        .selectFrom('auth.refresh_tokens')
+        .selectFrom('coms_auth.refresh_tokens')
         .selectAll()
         .execute();
       expect(rows).toHaveLength(2);
@@ -210,7 +210,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         results.filter((result) => result.status === 'rejected'),
       ).toHaveLength(1);
       const family = await db
-        .selectFrom('auth.token_families')
+        .selectFrom('coms_auth.token_families')
         .selectAll()
         .executeTakeFirstOrThrow();
       expect(family.revoked_at).not.toBeNull();
@@ -227,7 +227,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         status: 429,
       });
       const bucket = await db
-        .selectFrom('auth.rate_limit_buckets')
+        .selectFrom('coms_auth.rate_limit_buckets')
         .selectAll()
         .where('scope', '=', 'refresh')
         .executeTakeFirstOrThrow();
@@ -242,7 +242,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     it('rejects family expiry and legacy sessions', async () => {
       const first = await services[0].login(credentials);
       await db
-        .updateTable('auth.token_families')
+        .updateTable('coms_auth.token_families')
         .set({ expires_at: new Date(0) })
         .execute();
       expect(
@@ -340,7 +340,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       for (const reply of replies.filter((reply) => reply.status === 429))
         expect(Number(reply.headers['retry-after'])).toBeGreaterThan(0);
       const rows = await db
-        .selectFrom('auth.rate_limit_buckets')
+        .selectFrom('coms_auth.rate_limit_buckets')
         .selectAll()
         .execute();
       expect(rows.find((row) => row.scope === 'login')?.count).toBe(11);
@@ -357,7 +357,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       );
       expect(replies.filter((reply) => reply.allowed)).toHaveLength(10);
       await db
-        .updateTable('auth.rate_limit_buckets')
+        .updateTable('coms_auth.rate_limit_buckets')
         .set({ reset_at: new Date(0) })
         .execute();
       expect(
@@ -401,7 +401,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       });
 
       await db
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ role_id: created.id })
         .where('email', '=', credentials.email)
         .execute();
@@ -409,7 +409,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         status: 409,
       });
       await db
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ role_id: null })
         .where('email', '=', credentials.email)
         .execute();
@@ -578,7 +578,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         password,
       });
       const superAdmin = await db
-        .selectFrom('auth.roles')
+        .selectFrom('coms_auth.roles')
         .select('id')
         .where('code', '=', 'SUPER_ADMIN')
         .executeTakeFirstOrThrow();
@@ -586,12 +586,12 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         new StaffRepository(db).assignRole(member.id, superAdmin.id, false),
       ).rejects.toMatchObject({ status: 403 });
       const existingAdmin = await db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select('id')
         .where('email', '=', credentials.email)
         .executeTakeFirstOrThrow();
       await db
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ role_id: superAdmin.id })
         .where('id', '=', existingAdmin.id)
         .execute();
@@ -602,7 +602,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         staffRepository.deactivate(existingAdmin.id, false),
       ).rejects.toMatchObject({ status: 403 });
       await db
-        .updateTable('auth.users')
+        .updateTable('coms_auth.users')
         .set({ role_id: null })
         .where('id', '=', existingAdmin.id)
         .execute();
@@ -682,7 +682,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     });
     it('bounds cleanup and preserves live windows', async () => {
       await db
-        .insertInto('auth.rate_limit_buckets')
+        .insertInto('coms_auth.rate_limit_buckets')
         .values(
           Array.from({ length: 120 }, (_, i) => ({
             scope: 'login',
@@ -696,7 +696,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       await repository.consume('capacity', 'live', 600);
       await repository.cleanup();
       const rows = await db
-        .selectFrom('auth.rate_limit_buckets')
+        .selectFrom('coms_auth.rate_limit_buckets')
         .selectAll()
         .execute();
       expect(rows).toHaveLength(21);

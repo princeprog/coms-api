@@ -46,7 +46,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     });
     const flags = (id: string) =>
       db
-        .selectFrom('auth.users')
+        .selectFrom('coms_auth.users')
         .select(['must_change_password', 'password_changed_at'])
         .where('id', '=', id)
         .executeTakeFirstOrThrow();
@@ -54,7 +54,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       Number(
         (
           await db
-            .selectFrom('auth.token_families')
+            .selectFrom('coms_auth.token_families')
             .select((eb) => eb.fn.countAll().as('n'))
             .where('user_id', '=', id)
             .where('revoked_at', 'is', null)
@@ -63,7 +63,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       );
     const family = (id: string) =>
       db
-        .insertInto('auth.token_families')
+        .insertInto('coms_auth.token_families')
         .values({ user_id: id, expires_at: new Date(Date.now() + 3_600_000) })
         .execute();
 
@@ -98,20 +98,20 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const roleId = async (code: string) =>
         (
           await db
-            .selectFrom('auth.roles')
+            .selectFrom('coms_auth.roles')
             .select('id')
             .where('code', '=', code)
             .executeTakeFirstOrThrow()
         ).id;
       const resetter = (
         await db
-          .insertInto('auth.roles')
+          .insertInto('coms_auth.roles')
           .values({ code: 'RESETTER', role_name: 'Resetter' })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
-      await sql`INSERT INTO auth.role_permissions (role_id, permission_id)
-        SELECT ${resetter}, id FROM auth.permissions
+      await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
+        SELECT ${resetter}, id FROM coms_auth.permissions
         WHERE (module_key, action_key) IN (('staff','read'),('staff','password_reset'))`.execute(
         db,
       );
@@ -119,7 +119,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const user = async (label: string, role: string) =>
         (
           await db
-            .insertInto('auth.users')
+            .insertInto('coms_auth.users')
             .values({
               email: `${label}@recovery.invalid`,
               full_name: label,
@@ -142,7 +142,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           .executeTakeFirstOrThrow()
       ).id;
       await db
-        .insertInto('auth.branch_users')
+        .insertInto('coms_auth.branch_users')
         .values([
           { branch_id: branch, user_id: manager },
           { branch_id: branch, user_id: cashier },
@@ -202,12 +202,10 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect(blocked.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
       expect((await as(cashier).get('/auth/me')).status).toBe(200);
 
-      const wrong = await as(cashier)
-        .post('/auth/password')
-        .send({
-          current_password: 'not-the-password',
-          new_password: 'brand-new-password-9',
-        });
+      const wrong = await as(cashier).post('/auth/password').send({
+        current_password: 'not-the-password',
+        new_password: 'brand-new-password-9',
+      });
       expect(wrong.status).toBe(400);
       const same = await as(cashier).post('/auth/password').send({
         current_password: reset.body.temporary_password,

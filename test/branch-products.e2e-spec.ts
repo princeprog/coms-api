@@ -62,7 +62,7 @@ describe('branch product routes (e2e)', () => {
     db = app.get<Kysely<DB>>(DATABASE);
 
     const role = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `BRANCH_PRODUCT_TEST_${suffix.replaceAll('-', '').slice(0, 12).toUpperCase()}`,
         role_name: `Branch Product Test ${suffix}`,
@@ -71,7 +71,7 @@ describe('branch product routes (e2e)', () => {
       .executeTakeFirstOrThrow();
     roleIds.push(role.id);
     const deniedRole = await db
-      .insertInto('auth.roles')
+      .insertInto('coms_auth.roles')
       .values({
         code: `BRANCH_PRODUCT_DENIED_${suffix.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
         role_name: `Branch Product Denied ${suffix}`,
@@ -85,7 +85,7 @@ describe('branch product routes (e2e)', () => {
     userIds.push(actorUserId, deniedUserId);
 
     const permissions = await db
-      .selectFrom('auth.permissions')
+      .selectFrom('coms_auth.permissions')
       .select('id')
       .where('module_key', '=', 'branch_products')
       .where('action_key', 'in', [
@@ -96,7 +96,7 @@ describe('branch product routes (e2e)', () => {
       ])
       .execute();
     await db
-      .insertInto('auth.role_permissions')
+      .insertInto('coms_auth.role_permissions')
       .values(
         permissions.map(({ id }) => ({ role_id: role.id, permission_id: id })),
       )
@@ -123,7 +123,7 @@ describe('branch product routes (e2e)', () => {
     branchId = await createBranch(`Branch Product ${suffix}`);
     otherBranchId = await createBranch(`Other Branch Product ${suffix}`);
     await db
-      .insertInto('auth.branch_users')
+      .insertInto('coms_auth.branch_users')
       .values({ user_id: actorUserId, branch_id: branchId })
       .execute();
 
@@ -184,7 +184,7 @@ describe('branch product routes (e2e)', () => {
   afterAll(async () => {
     if (db && branchIds.length)
       await db
-        .deleteFrom('auth.branch_users')
+        .deleteFrom('coms_auth.branch_users')
         .where('branch_id', 'in', branchIds)
         .execute();
     if (db && branchIds.length)
@@ -216,9 +216,15 @@ describe('branch product routes (e2e)', () => {
     if (db && branchIds.length)
       await db.deleteFrom('branches').where('id', 'in', branchIds).execute();
     if (db && userIds.length)
-      await db.deleteFrom('auth.users').where('id', 'in', userIds).execute();
+      await db
+        .deleteFrom('coms_auth.users')
+        .where('id', 'in', userIds)
+        .execute();
     if (db && roleIds.length)
-      await db.deleteFrom('auth.roles').where('id', 'in', roleIds).execute();
+      await db
+        .deleteFrom('coms_auth.roles')
+        .where('id', 'in', roleIds)
+        .execute();
     await Promise.all([app?.close(), deniedApp?.close()]);
   });
 
@@ -303,7 +309,7 @@ describe('branch product routes (e2e)', () => {
   });
   async function createUser(roleId: string, label: string): Promise<string> {
     const user = await db
-      .insertInto('auth.users')
+      .insertInto('coms_auth.users')
       .values({
         email: `branch-product-${label}-${suffix}@example.invalid`,
         full_name: `Branch Product ${label} ${suffix}`,

@@ -43,10 +43,18 @@ export class ShiftsRepository {
     return executor
       .selectFrom('register_shifts as shift')
       .innerJoin('branches as branch', 'branch.id', 'shift.branch_id')
-      .innerJoin('auth.users as opener', 'opener.id', 'shift.opened_by_user_id')
-      .leftJoin('auth.users as closer', 'closer.id', 'shift.closed_by_user_id')
+      .innerJoin(
+        'coms_auth.users as opener',
+        'opener.id',
+        'shift.opened_by_user_id',
+      )
       .leftJoin(
-        'auth.users as reviewer',
+        'coms_auth.users as closer',
+        'closer.id',
+        'shift.closed_by_user_id',
+      )
+      .leftJoin(
+        'coms_auth.users as reviewer',
         'reviewer.id',
         'shift.reviewed_by_user_id',
       )
@@ -250,7 +258,7 @@ export class ShiftsRepository {
           throw new NotFoundException('Active branch not found');
         const open = await transaction
           .selectFrom('register_shifts as shift')
-          .innerJoin('auth.users as u', 'u.id', 'shift.opened_by_user_id')
+          .innerJoin('coms_auth.users as u', 'u.id', 'shift.opened_by_user_id')
           .select(['shift.id', 'u.full_name'])
           .where('shift.branch_id', '=', input.branchId)
           .where('shift.status', '=', 'OPEN')
@@ -545,7 +553,7 @@ export class ShiftsRepository {
       `.execute(executor),
       executor
         .selectFrom('register_shift_cash_movements as m')
-        .innerJoin('auth.users as u', 'u.id', 'm.actor_user_id')
+        .innerJoin('coms_auth.users as u', 'u.id', 'm.actor_user_id')
         .select([
           'm.id',
           'm.direction',
@@ -573,7 +581,7 @@ export class ShiftsRepository {
         FROM sale_events AS e
         JOIN sales AS s ON s.id = e.sale_id
         LEFT JOIN payment_methods AS pm ON pm.id = s.payment_method_id
-        JOIN auth.users AS u ON u.id = e.actor_user_id
+        JOIN coms_auth.users AS u ON u.id = e.actor_user_id
         WHERE e.refund_shift_id = ${shiftId} AND e.event_type = 'VOIDED'
         ORDER BY e.created_at, e.id
       `.execute(executor),
