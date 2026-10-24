@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import {
   change,
@@ -14,7 +15,29 @@ import {
 } from './sales-report-format';
 import type { SalesReport } from './sales-report.service';
 
-const ASSETS = join(__dirname, '..', '..', 'assets');
+const REGULAR_FONT = join(
+  __dirname,
+  '..',
+  '..',
+  'assets',
+  'fonts',
+  'NotoSans-Regular.ttf',
+);
+const BOLD_FONT = join(
+  __dirname,
+  '..',
+  '..',
+  'assets',
+  'fonts',
+  'NotoSans-Bold.ttf',
+);
+const LOGO = join(
+  __dirname,
+  '..',
+  '..',
+  'assets',
+  'emmas-chicken-house-logo.png',
+);
 const MARGIN = 40;
 const INK = '#111827';
 const MUTED = '#6B7280';
@@ -30,13 +53,16 @@ export function renderSalesReportPdf(
   meta: { generatedBy: string; generatedAt: Date },
 ): Promise<Buffer> {
   const doc = new PDFDocument({
+    // Avoid PDFKit's dynamically loaded Helvetica module in serverless bundles.
+    font: REGULAR_FONT,
     size: 'A4',
     margin: MARGIN,
     bufferPages: true,
     info: { Title: `Sales report – ${periodLabel(report)}`, Author: 'COMS' },
   });
-  doc.registerFont('regular', join(ASSETS, 'fonts', 'NotoSans-Regular.ttf'));
-  doc.registerFont('bold', join(ASSETS, 'fonts', 'NotoSans-Bold.ttf'));
+  // Explicit reads also make these assets discoverable by deployment file tracing.
+  doc.registerFont('regular', readFileSync(REGULAR_FONT));
+  doc.registerFont('bold', readFileSync(BOLD_FONT));
   const chunks: Buffer[] = [];
   doc.on('data', (chunk: Buffer) => chunks.push(chunk));
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -52,7 +78,7 @@ export function renderSalesReportPdf(
   const costs = report.show_costs;
 
   // Header
-  doc.image(join(ASSETS, 'emmas-chicken-house-logo.png'), MARGIN, MARGIN, {
+  doc.image(readFileSync(LOGO), MARGIN, MARGIN, {
     height: 40,
   });
   doc

@@ -38,3 +38,14 @@ choice; a successful API root response does not verify database readiness.
 Deploy the API before coms-app, then verify the API root, sign-in, protected
 pages and refresh-cookie relay. Environment changes require a new deployment.
 Keep the existing deployment protection settings when inspecting previews.
+
+On Vercel, overdue-delivery reminders run during notification inbox/count
+requests, at most once per minute per instance, and finish before the response.
+The database's branch/day uniqueness prevents duplicate reminders across
+instances. Local long-running servers retain their one-minute timer. Vercel
+functions do not provide a continuously running background scheduler.
+
+PDF export starts with the bundled Noto Sans font and explicitly reads its
+assets so file tracing includes them. Nest Observe is optional: configure both
+`NEST_OBSERVE_APP_KEY` and `NEST_OBSERVE_APP_SECRET` to enable it. Placeholder
+credentials no longer start an external telemetry worker.

@@ -29,7 +29,10 @@ import { SalesReportModule } from './modules/sales-report/sales-report.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
 
-export const { ObserveModule, ObserveInstrument } = createObserveModule();
+const observeKey = process.env.NEST_OBSERVE_APP_KEY;
+const observeSecret = process.env.NEST_OBSERVE_APP_SECRET;
+const observe = observeKey && observeSecret ? createObserveModule() : undefined;
+export const ObserveInstrument = observe?.ObserveInstrument;
 
 @Module({
   imports: [
@@ -38,13 +41,15 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     NotificationsModule,
     PaymentMethodsModule,
     ProductCategoriesModule,
-    // Distributed tracing, auto-correlated logs, request/job metrics, error
-    // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
-    ObserveModule.forRoot({
-      appKey: 'YOUR_APP_KEY',
-      appSecret: 'YOUR_APP_SECRET',
-      serviceId: 'coms-api',
-    }),
+    ...(observe && observeKey && observeSecret
+      ? [
+          observe.ObserveModule.forRoot({
+            appKey: observeKey,
+            appSecret: observeSecret,
+            serviceId: 'coms-api',
+          }),
+        ]
+      : []),
     AuthModule,
     RolesModule,
     BranchesModule,

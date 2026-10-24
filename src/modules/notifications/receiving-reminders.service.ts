@@ -13,15 +13,27 @@ export class ReceivingRemindersService
   private readonly logger = new Logger(ReceivingRemindersService.name);
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
+  private lastRequestSweep = 0;
+  private requestSweep?: Promise<void>;
   constructor(private readonly repository: ReceivingRemindersRepository) {}
   onModuleInit() {
-    if (process.env.NODE_ENV === 'test') return;
+    if (process.env.NODE_ENV === 'test' || process.env.VERCEL === '1') return;
     this.timer = setInterval(() => void this.sweep(), 60_000);
     this.timer.unref();
     void this.sweep();
   }
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+  }
+  async refreshOnRequest() {
+    if (process.env.VERCEL !== '1') return;
+    if (this.requestSweep) return this.requestSweep;
+    if (Date.now() - this.lastRequestSweep < 60_000) return;
+    this.lastRequestSweep = Date.now();
+    this.requestSweep = this.sweep().finally(() => {
+      this.requestSweep = undefined;
+    });
+    return this.requestSweep;
   }
   async sweep() {
     if (this.running) return;
