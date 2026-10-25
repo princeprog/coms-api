@@ -535,6 +535,7 @@ export interface NotificationEvents {
   id: Generated<string>;
   kind: string;
   receiving_source_id: string | null;
+  register_device_id: string | null;
   report_event_id: string | null;
   report_id: string | null;
   shift_id: string | null;

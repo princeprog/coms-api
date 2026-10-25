@@ -10,6 +10,7 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB, Json } from '../../database/db';
 import { recordAudit } from '../audit/audit-recorder';
+import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import {
   createOfflineSnapshot,
   publicOfflineSnapshot,
@@ -35,7 +36,10 @@ function syncRequired() {
 
 @Injectable()
 export class PosOfflineRepository {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    private readonly notifications: NotificationWriterRepository,
+  ) {}
 
   async register(
     branchId: string,
@@ -44,7 +48,7 @@ export class PosOfflineRepository {
     name: string,
   ) {
     return this.db.transaction().execute(async (tx) => {
-      await tx
+      const inserted = await tx
         .insertInto('pos_offline_devices')
         .values({
           id: deviceId,
@@ -53,7 +57,8 @@ export class PosOfflineRepository {
           name: name.trim(),
         })
         .onConflict((c) => c.column('id').doNothing())
-        .execute();
+        .returning('id')
+        .executeTakeFirst();
       const device = await tx
         .selectFrom('pos_offline_devices')
         .selectAll()
@@ -63,8 +68,26 @@ export class PosOfflineRepository {
         throw new ConflictException(
           'This browser is registered to another branch.',
         );
+      // Only a new request asks managers to act; repeated requests stay quiet.
+      if (inserted)
+        await this.notifications.publish(tx, {
+          kind: 'REGISTER_DEVICE_REQUESTED',
+          branch_id: branchId,
+          actor_user_id: userId,
+          register_device_id: deviceId,
+        });
       return device;
     });
+  }
+  async device(branchId: string, id: string) {
+    const device = await this.db
+      .selectFrom('pos_offline_devices')
+      .select(['id', 'name', 'status'])
+      .where('branch_id', '=', branchId)
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!device) throw new NotFoundException('Register device not found');
+    return device;
   }
   devices(branchId: string) {
     return this.db
@@ -81,6 +104,14 @@ export class PosOfflineRepository {
     input: UpdateDeviceDto,
   ) {
     return this.db.transaction().execute(async (tx) => {
+      const previous = await tx
+        .selectFrom('pos_offline_devices')
+        .select('status')
+        .where('branch_id', '=', branchId)
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!previous) throw new NotFoundException('Register device not found');
       const device = await tx
         .updateTable('pos_offline_devices')
         .set({
@@ -106,6 +137,20 @@ export class PosOfflineRepository {
         branchId,
         metadata: { status: device.status, name: device.name },
       });
+      if (input.status && input.status !== previous.status)
+        await this.notifications.publish(
+          tx,
+          {
+            kind:
+              input.status === 'APPROVED'
+                ? 'REGISTER_DEVICE_APPROVED'
+                : 'REGISTER_DEVICE_REVOKED',
+            branch_id: branchId,
+            actor_user_id: userId,
+            register_device_id: id,
+          },
+          { recipientUserIds: [device.requested_by] },
+        );
       return device;
     });
   }

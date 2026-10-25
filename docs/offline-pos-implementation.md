@@ -11,7 +11,7 @@ Implemented in both repositories: additive schema (migration `20261026004254_pos
 1. Set `COMS_OFFLINE_POS_ENABLED=true` in the API environment and restart. Turning it off later blocks new preparation only; prepared registers keep syncing and finalizing.
 2. Deploy the frontend production build over HTTPS. `pnpm build` also generates `public/sw.js` and the offline shell; both must ship with the build.
 3. Grant the Branch Manager role `pos_offline.devices_manage` and `pos_offline.review` (seeded for the predefined role).
-4. On the register: open COMS in Chrome or Edge, install it, sign in as the cashier, open the shift, select Register this browser, and have a manager approve it from Branches → Offline registers.
+4. On the register: open COMS in Chrome or Edge, install it, sign in as the cashier, open the shift and select Register this browser. Branch managers with `pos_offline.devices_manage` and Super Admin get a Register approval requested notification that opens Branches → Offline registers. Approving or revoking notifies the requesting cashier, and the Point of Sale panel shows Not registered, Waiting for approval, Approved or Approval revoked, updating itself while approval is pending.
 5. Each shift: Prepare offline POS after the shift is open. Cash sales then save on the device first and sync when online. Finalize the register before closing the shift.
 
 Recovery: if a device cannot sync, the cashier exports the recovery file and a manager imports it on the Offline registers page. Finishing a session for a lost device requires the complete original export; there is no zero-sale override.

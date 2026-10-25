@@ -17,8 +17,10 @@ export class NotificationWriterRepository {
   async publish(
     transaction: Transaction<DB>,
     input: NotificationInput,
-    options: { excludeUserIds?: string[] } = {},
+    options: { excludeUserIds?: string[]; recipientUserIds?: string[] } = {},
   ) {
+    const policy = notificationPolicy[input.kind];
+    if (policy.direct && !options.recipientUserIds?.length) return 0;
     const event = await transaction
       .insertInto('notification_events')
       .values(input)
@@ -26,7 +28,17 @@ export class NotificationWriterRepository {
       .returning('id')
       .executeTakeFirst();
     if (!event) return 0;
-    const policy = notificationPolicy[input.kind];
+    if (policy.direct) {
+      const direct =
+        await sql`INSERT INTO notification_recipients (event_id, user_id)
+        SELECT ${event.id}::uuid, u.id FROM coms_auth.users u
+        WHERE u.is_active AND u.id IS DISTINCT FROM ${input.actor_user_id ?? null}::uuid
+          AND u.id IN (${sql.join(options.recipientUserIds!.map((id) => sql`${id}::uuid`))})
+        ON CONFLICT (event_id, user_id) DO NOTHING RETURNING user_id`.execute(
+          transaction,
+        );
+      return direct.rows.length;
+    }
     const result =
       await sql`INSERT INTO notification_recipients (event_id, user_id)
       SELECT ${event.id}::uuid, u.id
@@ -40,7 +52,7 @@ export class NotificationWriterRepository {
           AND EXISTS (SELECT 1 FROM coms_auth.branch_users bu JOIN branches b ON b.id = bu.branch_id
             WHERE bu.user_id = u.id AND b.id = ${input.branch_id}::uuid AND b.status = 'active')
           AND EXISTS (SELECT 1 FROM coms_auth.role_permissions rp JOIN coms_auth.permissions p ON p.id = rp.permission_id
-            WHERE rp.role_id = r.id AND p.module_key = ${policy.module} AND p.action_key = 'read')
+            WHERE rp.role_id = r.id AND p.module_key = ${policy.module} AND p.action_key = ${policy.read ?? 'read'})
           AND EXISTS (SELECT 1 FROM coms_auth.role_permissions rp JOIN coms_auth.permissions p ON p.id = rp.permission_id
             WHERE rp.role_id = r.id AND p.module_key = ${policy.module} AND p.action_key IN (${sql.join(policy.actions)}))
         )

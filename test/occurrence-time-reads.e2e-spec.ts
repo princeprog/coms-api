@@ -662,7 +662,10 @@ describe.skipIf(!process.env.COMS_TEST_DATABASE_NAME)(
       const approval = reports.approve(raceBranch.id, report.id, actorId);
       void approval.catch(held.reject);
       const pid = await held.promise;
-      const preparation = new PosOfflineRepository(db)
+      const preparation = new PosOfflineRepository(
+        db,
+        new NotificationWriterRepository(),
+      )
         .prepare(raceBranch.id, actorId, deviceId)
         .then(
           () => null,

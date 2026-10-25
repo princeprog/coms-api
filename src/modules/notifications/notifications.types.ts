@@ -10,17 +10,44 @@ export const notificationKinds = [
   'DISPATCH_LATE_COUNT',
   'SHIFT_NEEDS_REVIEW',
   'DISPATCH_RECEIVED',
+  'REGISTER_DEVICE_REQUESTED',
+  'REGISTER_DEVICE_APPROVED',
+  'REGISTER_DEVICE_REVOKED',
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
 export const notificationPolicy: Record<
   NotificationKind,
   {
-    module: 'dispatches' | 'daily_reports' | 'shifts';
+    module: 'dispatches' | 'daily_reports' | 'shifts' | 'pos_offline';
     actions: string[];
     review: boolean;
+    /** Permission action that grants reading this module; defaults to read. */
+    read?: string;
+    /** Sent only to the users named by the publisher. */
+    direct?: boolean;
   }
 > = {
+  // Branch device managers and Super Admin approve new register browsers.
+  REGISTER_DEVICE_REQUESTED: {
+    module: 'pos_offline',
+    actions: ['devices_manage'],
+    review: true,
+    read: 'devices_manage',
+  },
+  // Decisions go to the cashier who requested the browser.
+  REGISTER_DEVICE_APPROVED: {
+    module: 'pos_offline',
+    actions: [],
+    review: false,
+    direct: true,
+  },
+  REGISTER_DEVICE_REVOKED: {
+    module: 'pos_offline',
+    actions: [],
+    review: false,
+    direct: true,
+  },
   DISPATCH_COUNT_REMINDER: {
     module: 'dispatches',
     actions: ['receive'],

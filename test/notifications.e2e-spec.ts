@@ -36,6 +36,10 @@ import {
   down as receivedDown,
   up as receivedUp,
 } from '../src/database/migrations/20261025174820_dispatch_received_notifications';
+import {
+  down as registerDevicesDown,
+  up as registerDevicesUp,
+} from '../src/database/migrations/20261026013249_register_device_notifications';
 
 describe('notifications (disposable database)', () => {
   let app: INestApplication<App>;
@@ -724,6 +728,7 @@ describe('notifications (disposable database)', () => {
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
       // Older migrations name the auth schema, so undo the rename first.
+      await registerDevicesDown(tx);
       await receivedDown(tx);
       await comsAuthDown(tx);
       await shiftsDown(tx);
@@ -738,6 +743,7 @@ describe('notifications (disposable database)', () => {
       await shiftsUp(tx);
       await comsAuthUp(tx);
       await receivedUp(tx);
+      await registerDevicesUp(tx);
     });
     expect(
       await db

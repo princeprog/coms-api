@@ -71,6 +71,15 @@ export class PosOfflineController {
       input.name,
     );
   }
+  /** The cashier's own browser status, so the register can show approval progress. */
+  @Get('devices/:deviceId')
+  @RequirePermission('sales.create')
+  ownDevice(
+    @Param('branchId', ParseUUIDPipe) branch: string,
+    @Param('deviceId', ParseUUIDPipe) id: string,
+  ) {
+    return this.repository.device(branch, id);
+  }
   @Patch('devices/:deviceId')
   @RequirePermission('pos_offline.devices_manage')
   device(

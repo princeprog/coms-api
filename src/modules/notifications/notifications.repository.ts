@@ -30,6 +30,11 @@ export class NotificationsRepository {
         'rs.id',
         'ne.receiving_source_id',
       )
+      .leftJoin(
+        'pos_offline_devices as device',
+        'device.id',
+        'ne.register_device_id',
+      )
       .where('nr.user_id', '=', access.userId);
     if (!superAdmin) {
       query = query
@@ -49,6 +54,10 @@ export class NotificationsRepository {
               : []),
             ...(access.permissions.includes('shifts.read')
               ? [eb('ne.shift_id', 'is not', null)]
+              : []),
+            ...(access.permissions.includes('pos_offline.devices_manage') ||
+            access.permissions.includes('sales.create')
+              ? [eb('ne.kind', 'like', 'REGISTER_DEVICE_%')]
               : []),
           ]),
         );
@@ -70,6 +79,8 @@ export class NotificationsRepository {
           records = records.where('ne.report_id', 'is not', null);
         if (query.type === 'shifts')
           records = records.where('ne.shift_id', 'is not', null);
+        if (query.type === 'registers')
+          records = records.where('ne.kind', 'like', 'REGISTER_DEVICE_%');
         const total = await records
           .select(sql<number>`count(*)::int`.as('total'))
           .executeTakeFirstOrThrow();
@@ -83,6 +94,8 @@ export class NotificationsRepository {
             'ne.report_id',
             'ne.shift_id',
             'shift.shift_number',
+            'ne.register_device_id',
+            'device.name as register_device_name',
             'rs.overdue_count',
             sql<
               string | null
