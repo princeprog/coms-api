@@ -5,6 +5,7 @@ Notification events and recipients are written in the same transaction as the so
 | Event | Eligible recipients |
 | --- | --- |
 | DISPATCH_SENT | dispatches.read + dispatches.receive |
+| DISPATCH_RECEIVED | dispatches.read + dispatches.dispatch (the sending team), when a branch count posts with no differences; not Super Admin |
 | DISPATCH_DISCREPANCY | dispatches.read + dispatches.shortage_close; protected Super Admin |
 | DISPATCH_RESOLVED | dispatches.read + dispatches.receive |
 | REPORT_SUBMITTED | daily_reports.read + approve or return; protected Super Admin |

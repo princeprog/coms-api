@@ -9,6 +9,7 @@ export const notificationKinds = [
   'DISPATCH_OVERDUE',
   'DISPATCH_LATE_COUNT',
   'SHIFT_NEEDS_REVIEW',
+  'DISPATCH_RECEIVED',
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
@@ -37,6 +38,12 @@ export const notificationPolicy: Record<
     review: false,
   },
   DISPATCH_SENT: { module: 'dispatches', actions: ['receive'], review: false },
+  // Clean counts go to the commissary team that sends dispatches.
+  DISPATCH_RECEIVED: {
+    module: 'dispatches',
+    actions: ['dispatch'],
+    review: false,
+  },
   DISPATCH_DISCREPANCY: {
     module: 'dispatches',
     actions: ['shortage_close'],

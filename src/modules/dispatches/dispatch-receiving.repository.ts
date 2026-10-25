@@ -203,7 +203,7 @@ export class DispatchReceivingRepository {
             })
             .execute();
         }
-        await transaction
+        const receiptEvent = await transaction
           .insertInto('dispatch_events')
           .values({
             dispatch_id: input.id,
@@ -212,7 +212,8 @@ export class DispatchReceivingRepository {
             idempotency_key: input.idempotency_key,
             dispatch_receipt_id: receipt.id,
           })
-          .execute();
+          .returning('id')
+          .executeTakeFirstOrThrow();
         await transaction
           .updateTable('dispatches')
           .set({
@@ -225,9 +226,9 @@ export class DispatchReceivingRepository {
           .where('id', '=', input.id)
           .executeTakeFirstOrThrow();
         await this.queries.refreshStatus(transaction, input.id);
-        if (await this.queries.hasOutstanding(transaction, input.id))
+        if (await this.queries.hasOutstanding(transaction, input.id)) {
           await this.openVariance(transaction, input);
-        else
+        } else {
           await this.resolveDiscrepancyIfComplete(
             transaction,
             input.id,
@@ -236,6 +237,20 @@ export class DispatchReceivingRepository {
             'RESOLVED_RECEIVED',
             'All dispatched quantities were received.',
           );
+          // A clean count: let the sending team know it arrived. A reviewer
+          // posting a late count already knows.
+          await this.notifications.publish(
+            transaction,
+            {
+              kind: 'DISPATCH_RECEIVED',
+              dispatch_event_id: receiptEvent.id,
+              dispatch_id: input.id,
+              branch_id: dispatch.branch_id,
+              actor_user_id: input.actor_user_id,
+            },
+            { excludeUserIds: input.reviewer_id ? [input.reviewer_id] : [] },
+          );
+        }
 
         if (input.review_case_id)
           await transaction

@@ -32,6 +32,10 @@ import {
   down as comsAuthDown,
   up as comsAuthUp,
 } from '../src/database/migrations/20261024171507_rename_auth_schema_to_coms_auth';
+import {
+  down as receivedDown,
+  up as receivedUp,
+} from '../src/database/migrations/20261025174820_dispatch_received_notifications';
 
 describe('notifications (disposable database)', () => {
   let app: INestApplication<App>;
@@ -357,17 +361,39 @@ describe('notifications (disposable database)', () => {
     expect((await inbox(sender)).total).toBe(0);
     expect((await inbox(reader)).total).toBe(0);
     const before = (await inbox(reviewerId)).total;
-    await request(app.getHttpServer())
-      .post(`/dispatches/${sent.body.id}/receive`)
-      .set('x-test-user', receiverId)
-      .set('Idempotency-Key', randomUUID())
-      .send({
-        items: [
-          { dispatch_item_id: sent.body.items[0].id, quantity_received: '1' },
-        ],
-      })
-      .expect(201);
+    const receiveKey = randomUUID();
+    const receive = () =>
+      request(app.getHttpServer())
+        .post(`/dispatches/${sent.body.id}/receive`)
+        .set('x-test-user', receiverId)
+        .set('Idempotency-Key', receiveKey)
+        .send({
+          items: [
+            { dispatch_item_id: sent.body.items[0].id, quantity_received: '1' },
+          ],
+        });
+    expect((await receive()).status).toBe(201);
+    expect([200, 201]).toContain((await receive()).status);
     expect((await inbox(reviewerId)).total).toBe(before);
+    // A clean count tells the sending team once, never the counter or readers.
+    const delivered = (await inbox(sender)).items.filter(
+      (item: { kind: string; dispatch_id: string }) =>
+        item.kind === 'DISPATCH_RECEIVED' && item.dispatch_id === sent.body.id,
+    );
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({ branch_name: 'Quezon City' });
+    expect(
+      (await inbox(receiverId)).items.some(
+        (item: { kind: string }) => item.kind === 'DISPATCH_RECEIVED',
+      ),
+    ).toBe(false);
+    expect((await inbox(reader)).total).toBe(0);
+    // Super Admin only receives review items.
+    expect(
+      (await inbox(userId)).items.some(
+        (item: { kind: string }) => item.kind === 'DISPATCH_RECEIVED',
+      ),
+    ).toBe(false);
   });
   it('supports individual and bulk read states without crossing users', async () => {
     const [item] = (await inbox(receiverId)).items;
@@ -696,6 +722,7 @@ describe('notifications (disposable database)', () => {
       .executeTakeFirstOrThrow();
     await db.transaction().execute(async (tx) => {
       // Older migrations name the auth schema, so undo the rename first.
+      await receivedDown(tx);
       await comsAuthDown(tx);
       await shiftsDown(tx);
       await followupDown(tx);
@@ -708,6 +735,7 @@ describe('notifications (disposable database)', () => {
       await followupUp(tx);
       await shiftsUp(tx);
       await comsAuthUp(tx);
+      await receivedUp(tx);
     });
     expect(
       await db
