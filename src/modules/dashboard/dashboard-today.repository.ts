@@ -28,7 +28,6 @@ export const ATTENTION_KEYS = [
   'shifts_to_review',
   'dispatches_draft',
   'deliveries_in_transit',
-  'products_incomplete_costs',
 ] as const;
 export type AttentionKey = (typeof ATTENTION_KEYS)[number];
 

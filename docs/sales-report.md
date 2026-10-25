@@ -4,7 +4,7 @@ An owner-facing summary of one day, week (Monday–Sunday) or month, with a PDF 
 
 ## Numbers
 
-Sales belong to the business day of `created_at` (`coms_business_day_start/end`), like Costs & profit.
+Sales belong to the business day of `created_at` (`coms_business_day_start/end`).
 
 | Number | Meaning |
 | --- | --- |
@@ -12,7 +12,7 @@ Sales belong to the business day of `created_at` (`coms_business_day_start/end`)
 | Voided sales | Count and amount of sales now voided |
 | Net sales | Completed sales total |
 | Sales, average sale, items sold | Completed sales count, net ÷ count, quantity sold |
-| Food cost, gross profit, food cost %, cost coverage | Same as Costs & profit, from the cost saved on each sale |
+| Food cost, gross profit, food cost %, cost coverage | From the cost saved on each sale (see `docs/costs.md`) |
 | Waste and count variance value | Approved daily reports in the period |
 | Cash over/short | `cash_difference` of closed shifts by business date |
 

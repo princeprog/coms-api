@@ -391,7 +391,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         shifts_to_review: 1,
         dispatches_draft: 1,
         deliveries_in_transit: 1,
-        products_incomplete_costs: 1,
       });
       const a = body.branches.find(
         (b: { branch_id: string }) => b.branch_id === branchA,
@@ -473,7 +472,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         body.branches.map((b: { branch_id: string }) => b.branch_id),
       ).toEqual([branchA]);
       const items = counts(body.attention);
-      expect(items).not.toHaveProperty('products_incomplete_costs');
       expect(items).not.toHaveProperty('dispatches_draft');
       expect(items).not.toHaveProperty('commissary_stock_below_zero');
       expect(body.workspace).toBe('branch');

@@ -23,7 +23,6 @@ import { BranchProductsModule } from './modules/branch-products/branch-products.
 import { SalesModule } from './modules/sales/sales.module';
 import { DailyReportsModule } from './modules/daily-reports/daily-reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
-import { CostsModule } from './modules/costs/costs.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SalesReportModule } from './modules/sales-report/sales-report.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -65,7 +64,6 @@ export const ObserveInstrument = observe?.ObserveInstrument;
     SalesModule,
     DailyReportsModule,
     DashboardModule,
-    CostsModule,
     AuditModule,
     SalesReportModule,
     ExpensesModule,

@@ -26,7 +26,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
   let admin: Pool;
   let db: Kysely<DB>;
   let app: INestApplication;
-  let superAdmin: string, noCosts: string;
+  let superAdmin: string, limited: string;
   let supplier: string, garlic: string, onion: string;
   const as = (actor: string) => ({
     get: (path: string) =>
@@ -93,7 +93,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
     const limitedRole = (
       await db
         .insertInto('coms_auth.roles')
-        .values({ code: 'NO_COSTS', role_name: 'No costs' })
+        .values({ code: 'STOCK_ITEMS_ONLY', role_name: 'Stock items only' })
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id;
@@ -101,7 +101,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
       SELECT ${limitedRole}, id FROM coms_auth.permissions
       WHERE module_key = 'stock_items' AND action_key = 'read'`.execute(db);
     superAdmin = await user('admin', superRole);
-    noCosts = await user('limited', limitedRole);
+    limited = await user('limited', limitedRole);
     supplier = (
       await db
         .insertInto('suppliers')
@@ -158,28 +158,28 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
 
   it('writes a safe spreadsheet file and records the download', async () => {
     const response = await as(superAdmin).get(
-      '/costs/stock-items/export?search=HYPERLINK&page_size=10',
+      '/inventory/commissary/export?search=HYPERLINK&page_size=10',
     );
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toMatch(/^text\/csv/);
-    expect(response.headers['content-disposition']).toBe(
-      'attachment; filename="coms-stock-costs.csv"',
+    expect(response.headers['content-disposition']).toMatch(
+      /^attachment; filename="coms-inventory-commissary[^"]*\.csv"$/,
     );
     expect(response.text.charCodeAt(0)).toBe(0xfeff);
     const [header, row, end] = lines(response.text);
-    expect(header).toMatch(/^Stock item,Category,Unit,Average cost/);
+    expect(header).toMatch(/^Stock item,Category,Unit,On hand/);
     expect(row).toBe(
-      '"\'=HYPERLINK(""x""), onion",Export test,kg,,,,No cost yet',
+      '"\'=HYPERLINK(""x""), onion",Export test,kg,0,,,Out of stock,Yes',
     );
     expect(end).toBe('');
     const [event] = await exportEvents();
     expect(event).toMatchObject({
       actor_user_id: superAdmin,
       entity_type: 'export',
-      entity_label: 'Stock costs',
+      entity_label: 'Commissary inventory',
     });
-    expect(event.metadata).toEqual({
-      file: 'coms-stock-costs.csv',
+    expect(event.metadata).toMatchObject({
+      file: expect.stringMatching(/^coms-inventory-commissary.*\.csv$/),
       rows: 1,
       filters: { search: 'HYPERLINK' },
     });
@@ -195,7 +195,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
       'Export garlic,Export test,kg,0,,,Out of stock,Yes',
       '',
     ]);
-    expect((await as(noCosts).get('/costs/stock-items/export')).status).toBe(
+    expect((await as(limited).get('/inventory/commissary/export')).status).toBe(
       403,
     );
   });
@@ -282,9 +282,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('CSV exports', () => {
       [`/inventory/branches/${branch}/movements/export`, 'Date and time,'],
       ['/inventory/commissary/movements/export', 'Date and time,'],
       ['/direct-purchases/export', 'Purchased on,'],
-      ['/costs/branches/export', 'Branch,Sales'],
-      ['/costs/branch-products/export', 'Product,Units sold'],
-      ['/costs/products/export', 'Product,Category'],
     ];
     for (const [path, header] of exports) {
       const response = await as(superAdmin).get(path);

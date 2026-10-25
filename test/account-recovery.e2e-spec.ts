@@ -197,7 +197,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await flags(cashier)).must_change_password).toBe(true);
       expect(await openFamilies(cashier)).toBe(0);
 
-      const blocked = await as(cashier).get('/costs/products');
+      const blocked = await as(cashier).get('/reports/sales');
       expect(blocked.status).toBe(403);
       expect(blocked.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
       expect((await as(cashier).get('/auth/me')).status).toBe(200);
@@ -222,7 +222,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await flags(cashier)).must_change_password).toBe(false);
       expect(await openFamilies(cashier)).toBe(1);
       expect(
-        (await as(cashier).get('/costs/products')).body.code,
+        (await as(cashier).get('/reports/sales')).body.code,
       ).toBeUndefined();
     });
 

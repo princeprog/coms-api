@@ -7,9 +7,6 @@ Most list pages offer **Export CSV**. The file contains every row that matches t
 | Page | Endpoint | One row per |
 | --- | --- | --- |
 | Sales history | `GET /branches/:branchId/sales/export` | sale |
-| Costs › Profit | `GET /costs/branches/export`, `GET /costs/branch-products/export` | branch (plus total), product |
-| Costs › Product costs | `GET /costs/products/export` | product |
-| Costs › Stock costs | `GET /costs/stock-items/export` | stock item |
 | Inventory | `GET /inventory/commissary/export`, `GET /inventory/branches/:branchId/export` | stock item balance |
 | Inventory movements | `GET /inventory/commissary/movements/export`, `GET /inventory/branches/:branchId/movements/export` | movement |
 | Supplier receiving | `GET /supplier-receipts/export` | delivery line |

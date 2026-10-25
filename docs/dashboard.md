@@ -35,7 +35,6 @@
 | commissary_stock_low                 | Commissary items at or below their reorder level; 0 when the dashboard is filtered to a branch | inventory.commissary_read |
 | reports_to_review / reports_returned | Daily reports submitted / returned                                                             | daily_reports.read        |
 | reports_missing                      | Branches that sold yesterday without a report                                                  | daily_reports.read        |
-| products_incomplete_costs            | Active products without a recipe or with uncosted stock (all branches)                         | costs.read                |
 
 Receiving states reuse the Dispatches page rule (`receivingStatus`), so counts match its Overdue, Awaiting count and Review views. The older `/dashboard/overview` and `/branches/:id/dashboard` endpoints are unchanged.
 

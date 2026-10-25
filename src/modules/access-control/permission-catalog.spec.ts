@@ -12,13 +12,24 @@ describe('role-scoped operations permission catalog', () => {
     expect(permissionKeys).toContain('dispatches.reconcile');
   });
 
+  it('keeps cost visibility without the retired stock-cost editor', () => {
+    const permissionKeys = PERMISSION_CATALOG.map(
+      ({ module_key, action_key }) => `${module_key}.${action_key}`,
+    );
+    expect(permissionKeys).toContain('costs.read');
+    expect(permissionKeys).toContain('costs.global_read');
+    expect(permissionKeys).not.toContain('costs.manage');
+  });
+
   it('exposes direct supplier receiving and no retired request or receipt-post permissions', () => {
     const permissionKeys = PERMISSION_CATALOG.map(
       ({ module_key, action_key }) => `${module_key}.${action_key}`,
     );
     expect(permissionKeys).toContain('supplier_receipts.create');
     expect(permissionKeys).not.toContain('supplier_receipts.post');
-    expect(permissionKeys.filter((key) => key.startsWith('stock_requests.'))).toEqual([]);
+    expect(
+      permissionKeys.filter((key) => key.startsWith('stock_requests.')),
+    ).toEqual([]);
     expect(
       PERMISSION_CATALOG.find(
         ({ module_key, action_key }) =>

@@ -376,11 +376,6 @@ export const PERMISSION_CATALOG = [
     description: 'View costs and profit for all branches',
   },
   {
-    module_key: 'costs',
-    action_key: 'manage',
-    description: 'Set stock item costs',
-  },
-  {
     module_key: 'staff',
     action_key: 'password_reset',
     description: 'Reset staff passwords',

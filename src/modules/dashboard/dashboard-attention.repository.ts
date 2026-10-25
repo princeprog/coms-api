@@ -101,13 +101,6 @@ export async function attentionSummary(
           AND s.created_at < coms_business_day_end(day.today - 1))
         AND NOT EXISTS (SELECT 1 FROM daily_branch_reports r
           WHERE r.branch_id = b.id AND r.business_date = day.today - 1)
-      UNION ALL
-      SELECT 'products_incomplete_costs', NULL, NULL, p.id, p.product_name, NULL, NULL, NULL, NULL
-      FROM products p WHERE p.is_active AND (
-        NOT EXISTS (SELECT 1 FROM product_ingredients r WHERE r.product_id = p.id)
-        OR EXISTS (SELECT 1 FROM product_ingredients r
-          LEFT JOIN stock_item_costs c ON c.stock_item_id = r.stock_item_id
-          WHERE r.product_id = p.id AND c.stock_item_id IS NULL))
     ), ranked AS (
       SELECT *, row_number() OVER (PARTITION BY key ORDER BY occurred_at NULLS LAST, label, record_id, branch_id) AS position
       FROM events

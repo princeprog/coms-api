@@ -27,7 +27,6 @@ const ATTENTION_PERMISSION: Record<AttentionKey, PermissionKey> = {
   reports_to_review: 'daily_reports.read',
   reports_returned: 'daily_reports.read',
   reports_missing: 'daily_reports.read',
-  products_incomplete_costs: 'costs.read',
 };
 
 function percentChange(current: string | number, previous: string | number) {
