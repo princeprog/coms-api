@@ -388,12 +388,14 @@ describe('notifications (disposable database)', () => {
       ),
     ).toBe(false);
     expect((await inbox(reader)).total).toBe(0);
-    // Super Admin only receives review items.
+    // Super Admin sends most dispatches, so it hears back too.
     expect(
-      (await inbox(userId)).items.some(
-        (item: { kind: string }) => item.kind === 'DISPATCH_RECEIVED',
+      (await inbox(userId)).items.filter(
+        (item: { kind: string; dispatch_id: string }) =>
+          item.kind === 'DISPATCH_RECEIVED' &&
+          item.dispatch_id === sent.body.id,
       ),
-    ).toBe(false);
+    ).toHaveLength(1);
   });
   it('supports individual and bulk read states without crossing users', async () => {
     const [item] = (await inbox(receiverId)).items;

@@ -38,11 +38,11 @@ export const notificationPolicy: Record<
     review: false,
   },
   DISPATCH_SENT: { module: 'dispatches', actions: ['receive'], review: false },
-  // Clean counts go to the commissary team that sends dispatches.
+  // Clean counts go to the sending team and Super Admin, who usually sends.
   DISPATCH_RECEIVED: {
     module: 'dispatches',
     actions: ['dispatch'],
-    review: false,
+    review: true,
   },
   DISPATCH_DISCREPANCY: {
     module: 'dispatches',

@@ -5,13 +5,13 @@ Notification events and recipients are written in the same transaction as the so
 | Event | Eligible recipients |
 | --- | --- |
 | DISPATCH_SENT | dispatches.read + dispatches.receive |
-| DISPATCH_RECEIVED | dispatches.read + dispatches.dispatch (the sending team), when a branch count posts with no differences; not Super Admin |
+| DISPATCH_RECEIVED | dispatches.read + dispatches.dispatch (the sending team) and protected Super Admin, when a branch count posts with no differences |
 | DISPATCH_DISCREPANCY | dispatches.read + dispatches.shortage_close; protected Super Admin |
 | DISPATCH_RESOLVED | dispatches.read + dispatches.receive |
 | REPORT_SUBMITTED | daily_reports.read + approve or return; protected Super Admin |
 | REPORT_RETURNED / REPORT_APPROVED | daily_reports.read + update or submit |
 
-Ordinary recipients need an active account/role and an active assignment to the affected branch. The acting user is excluded. Super Admin receives only the two review types, without requiring branch assignment. Other role names have no special meaning. No eligible recipients does not block the operation.
+Ordinary recipients need an active account/role and an active assignment to the affected branch. The acting user is excluded. Super Admin receives review types and Delivery received (it usually sends dispatches), without requiring branch assignment. Other role names have no special meaning. No eligible recipients does not block the operation.
 
 GET `/notifications` accepts `status=all|unread`, `type=all|dispatches|reports`, `page` (default 1), and `page_size=10|30|50` (default 10). Returns `{items,total,page,page_size}` newest first with a stable tie-breaker. Item data contains a recipient ID, kind, branch identity/name, dispatch/report target, report business date, creation time, and read time; it does not expose quantities, reasons or financial totals. GET `/notifications/unread-count` returns `{unread_count}`.
 
