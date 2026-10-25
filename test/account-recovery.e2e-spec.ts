@@ -262,7 +262,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
 
     it('creates staff with a rotating admin default and gates their first sign-in', async () => {
       const endpoint = '/staff/default-password';
-      const firstPassword = 'Synthetic onboarding default 1!';
+      const firstPassword = 'x';
       const nextPassword = 'Synthetic onboarding default 2!';
       const input = {
         email: 'new-staff@recovery.invalid',
@@ -284,7 +284,14 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       expect((await as(manager).get(endpoint)).body.configured).toBe(false);
       expect((await as(cashier).get(endpoint)).status).toBe(403);
       expect(
-        (await as(superAdmin).put(endpoint).send({ password: 'short' })).status,
+        (await as(superAdmin).put(endpoint).send({ password: '' })).status,
+      ).toBe(400);
+      expect(
+        (
+          await as(superAdmin)
+            .put(endpoint)
+            .send({ password: 'x'.repeat(129) })
+        ).status,
       ).toBe(400);
       const setting = await as(superAdmin)
         .put(endpoint)
@@ -308,6 +315,11 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const id = created.body.id;
       expect((await flags(id)).must_change_password).toBe(true);
       const auth = app.get(AuthService);
+      const loginResponse = await as(id)
+        .post('/auth/login')
+        .send({ email: input.email, password: firstPassword });
+      expect(loginResponse.status).toBe(200);
+      expect(loginResponse.body.user.must_change_password).toBe(true);
       const session = await auth.login({
         email: input.email,
         password: firstPassword,
@@ -401,7 +413,13 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .execute();
       expect(audit).toHaveLength(2);
       const serialized = JSON.stringify(audit);
-      expect(serialized).not.toContain(firstPassword);
+      expect(
+        audit.every(
+          (event) =>
+            JSON.stringify(event.metadata) === '{}' &&
+            JSON.stringify(event.changes) === '{}',
+        ),
+      ).toBe(true);
       expect(serialized).not.toContain(nextPassword);
       expect(serialized).not.toContain(stored.hashed_password);
     });

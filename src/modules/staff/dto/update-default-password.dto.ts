@@ -2,7 +2,7 @@ import { IsString, MinLength, MaxLength } from 'class-validator';
 
 export class UpdateDefaultPasswordDto {
   @IsString()
-  @MinLength(12)
+  @MinLength(1)
   @MaxLength(128)
   password!: string;
 }

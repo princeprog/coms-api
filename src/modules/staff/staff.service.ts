@@ -111,8 +111,8 @@ export class StaffService {
   }
 
   async setDefaultPassword(password: string) {
-    if (password.length < 12 || password.length > 128)
-      throw new BadRequestException('Password must be 12 to 128 characters');
+    if (password.length < 1 || password.length > 128)
+      throw new BadRequestException('Password must be 1 to 128 characters');
     return this.repository.setDefaultPassword(await hashPassword(password));
   }
 
