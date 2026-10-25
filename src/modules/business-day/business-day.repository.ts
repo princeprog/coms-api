@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { sql, type Kysely } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import type { DB } from '../../database/db';
+import { crossesDayStart, timeRange } from '../schedules/schedule-policy';
 
 type Rule = { start_time: string; effective_from: string };
 
@@ -57,6 +58,36 @@ export class BusinessDayRepository {
         throw new ConflictException(
           'Choose a date after the current business day so the new start time is still in the future',
         );
+      // Every branch shift must stay inside one business day.
+      const crossing = (
+        await sql<{
+          name: string;
+          branch_name: string;
+          start_time: string;
+          end_time: string;
+        }>`
+          SELECT t.name, b.branch_name, to_char(t.start_time, 'HH24:MI') AS start_time,
+            to_char(t.end_time, 'HH24:MI') AS end_time
+          FROM branch_shift_templates t JOIN branches b ON b.id = t.branch_id
+          WHERE t.is_active AND b.status = 'active'
+          ORDER BY b.branch_name, t.start_time
+        `.execute(transaction)
+      ).rows.filter((shift) =>
+        crossesDayStart(shift.start_time, shift.end_time, startTime),
+      );
+      if (crossing.length)
+        throw new ConflictException({
+          code: 'SHIFT_TEMPLATES_CROSS_DAY_START',
+          message: `These shifts would run past a ${startTime} day start: ${crossing
+            .map(
+              (shift) =>
+                `${shift.name} ${timeRange(shift.start_time, shift.end_time)} (${shift.branch_name})`,
+            )
+            .join(', ')}. Change them first.`,
+          shifts: crossing.map(
+            (shift) => `${shift.branch_name}: ${shift.name}`,
+          ),
+        });
       await sql`DELETE FROM business_day_rules WHERE effective_from > coms_business_date(now())`.execute(
         transaction,
       );

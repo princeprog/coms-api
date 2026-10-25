@@ -2,7 +2,11 @@ import { sql, type Kysely, type RawBuilder } from 'kysely';
 import type { DB } from '../../database/db';
 import { receivingStatus } from '../dispatches/receiving-policy';
 import { onTheWaySql } from '../inventory/stock-position';
+import { scheduledShiftsSql } from '../schedules/schedule-occurrences';
 import type { AttentionKey } from './dashboard-today.repository';
+
+/** A scheduled shift may start this late before its closed register is flagged. */
+const REGISTER_GRACE_MINUTES = 15;
 
 export type AttentionSummary = {
   key: AttentionKey;
@@ -101,6 +105,25 @@ export async function attentionSummary(
           AND s.created_at < coms_business_day_end(day.today - 1))
         AND NOT EXISTS (SELECT 1 FROM daily_branch_reports r
           WHERE r.branch_id = b.id AND r.business_date = day.today - 1)
+      UNION ALL
+      SELECT * FROM (
+        SELECT DISTINCT ON (o.branch_id) 'register_not_opened', o.branch_id, b.branch_name,
+          o.template_id, o.template_name || ' ' || o.start_time || '–' || o.end_time,
+          o.starts_at, NULL::numeric, NULL::text, NULL::numeric
+        FROM (${scheduledShiftsSql({ from: sql`(SELECT today FROM day)`, to: sql`(SELECT today FROM day)` })}) AS o
+        JOIN scope b ON b.id = o.branch_id AND b.status = 'active'
+        WHERE o.starts_at + make_interval(mins => ${REGISTER_GRACE_MINUTES}) <= now()
+          AND now() < o.ends_at
+          AND NOT EXISTS (SELECT 1 FROM register_shifts rs
+            WHERE rs.branch_id = o.branch_id AND rs.status = 'OPEN')
+        ORDER BY o.branch_id, o.starts_at
+      ) AS not_opened
+      UNION ALL
+      SELECT 'register_opened_unscheduled', rs.branch_id, b.branch_name, rs.id,
+        u.full_name, rs.opened_at, NULL, NULL, NULL
+      FROM register_shifts rs JOIN scope b ON b.id = rs.branch_id
+      JOIN coms_auth.users u ON u.id = rs.opened_by_user_id, day
+      WHERE rs.business_date = day.today AND rs.schedule_status = 'UNSCHEDULED'
     ), ranked AS (
       SELECT *, row_number() OVER (PARTITION BY key ORDER BY occurred_at NULLS LAST, label, record_id, branch_id) AS position
       FROM events

@@ -19,6 +19,8 @@ describe('role-scoped operations permission catalog', () => {
     expect(permissionKeys).toContain('costs.read');
     expect(permissionKeys).toContain('costs.global_read');
     expect(permissionKeys).not.toContain('costs.manage');
+    expect(permissionKeys).toContain('schedules.read');
+    expect(permissionKeys).toContain('schedules.manage');
   });
 
   it('exposes direct supplier receiving and no retired request or receipt-post permissions', () => {

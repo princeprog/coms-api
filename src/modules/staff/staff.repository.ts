@@ -15,6 +15,7 @@ import {
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { DATABASE } from '../../database/database.module';
 import { listDiff, recordAudit } from '../audit/audit-recorder';
+import { clearStaffSchedules } from '../schedules/schedule-support';
 import type { DB } from '../../database/db';
 
 type Connection = Kysely<DB> | Transaction<DB>;
@@ -297,6 +298,7 @@ export class StaffRepository {
         previous.map(({ branch_id }) => branch_id),
         assignedBranchIds,
       );
+      await clearStaffSchedules(trx, id, removed);
       if (added.length || removed.length) {
         const names = new Map(
           (
@@ -337,6 +339,7 @@ export class StaffRepository {
         .returning(['id'])
         .executeTakeFirst();
       if (!member) throw new NotFoundException('Staff account not found');
+      await clearStaffSchedules(trx, id);
       await this.revokeSessions(trx, id);
       return this.findById(id, trx);
     });

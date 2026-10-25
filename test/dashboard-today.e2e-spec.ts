@@ -391,6 +391,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         shifts_to_review: 1,
         dispatches_draft: 1,
         deliveries_in_transit: 1,
+        register_not_opened: 0,
+        register_opened_unscheduled: 0,
       });
       const a = body.branches.find(
         (b: { branch_id: string }) => b.branch_id === branchA,

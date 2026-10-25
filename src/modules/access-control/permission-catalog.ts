@@ -331,6 +331,16 @@ export const PERMISSION_CATALOG = [
     description: 'Review and force-close register shifts',
   },
   {
+    module_key: 'schedules',
+    action_key: 'read',
+    description: 'View branch work schedules',
+  },
+  {
+    module_key: 'schedules',
+    action_key: 'manage',
+    description: 'Set up branch shifts and assign staff to them',
+  },
+  {
     module_key: 'costs',
     action_key: 'read',
     description: 'View costs and profit for assigned branches',

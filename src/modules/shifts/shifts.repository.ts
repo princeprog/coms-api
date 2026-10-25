@@ -16,6 +16,7 @@ import {
 import { NotificationWriterRepository } from '../notifications/notification-writer.repository';
 import type { ShiftQueryDto } from './dto/shift.dto';
 import { salePaymentKind, shiftTotals } from './shift-register';
+import { scheduleStatusForOpen } from '../schedules/schedule-support';
 
 type Executor = Kysely<DB> | Transaction<DB>;
 
@@ -85,6 +86,8 @@ export class ShiftsRepository {
         'reviewer.full_name as reviewed_by_name',
         'shift.reviewed_at',
         'shift.review_note',
+        'shift.schedule_status',
+        'shift.scheduled_shift_name',
         sql<Date>`coms_business_day_end(shift.business_date)`.as(
           'business_day_ends_at',
         ),
@@ -278,18 +281,25 @@ export class ShiftsRepository {
           .limit(1)
           .executeTakeFirst();
         const expected = previous?.left_in_drawer ?? null;
+        // Recorded for the Dashboard and history; opening is never blocked.
+        const schedule = await scheduleStatusForOpen(
+          transaction,
+          input.branchId,
+          input.actorUserId,
+        );
         const inserted = await sql<{ id: string }>`
           WITH day AS (SELECT coms_business_date(now()) AS d)
           INSERT INTO register_shifts (
             branch_id, business_date, shift_number, opened_by_user_id,
-            opening_float, expected_opening_float, opening_difference, open_idempotency_key
+            opening_float, expected_opening_float, opening_difference, open_idempotency_key,
+            schedule_status, scheduled_shift_name
           )
           SELECT ${input.branchId}::uuid, day.d,
             coalesce((SELECT max(shift_number) FROM register_shifts
               WHERE branch_id = ${input.branchId}::uuid AND business_date = day.d), 0) + 1,
             ${input.actorUserId}::uuid, ${input.openingFloat}::numeric, ${expected}::numeric,
             ${input.openingFloat}::numeric - ${expected}::numeric,
-            ${input.idempotencyKey}::uuid
+            ${input.idempotencyKey}::uuid, ${schedule.status}, ${schedule.shiftName}
           FROM day
           RETURNING id
         `.execute(transaction);

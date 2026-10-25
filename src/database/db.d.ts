@@ -86,6 +86,20 @@ export interface BranchProducts {
   updated_at: Generated<Timestamp>;
 }
 
+export interface BranchShiftTemplates {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  end_time: string;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  name: string;
+  revision: Generated<number>;
+  start_time: string;
+  updated_at: Generated<Timestamp>;
+  weekdays: number[];
+}
+
 export interface BusinessDayRules {
   created_at: Generated<Timestamp>;
   created_by_user_id: string | null;
@@ -629,6 +643,8 @@ export interface RegisterShifts {
   reviewed_at: Timestamp | null;
   reviewed_by_user_id: string | null;
   sales_count: number | null;
+  schedule_status: string | null;
+  scheduled_shift_name: string | null;
   shift_number: number;
   status: Generated<string>;
   updated_at: Generated<Timestamp>;
@@ -682,6 +698,28 @@ export interface Sales {
   status: string;
   tender_method: string;
   total_amount: Numeric;
+}
+
+export interface StaffShiftAssignments {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  template_id: string;
+  user_id: string;
+  weekday: number;
+}
+
+export interface StaffShiftExceptions {
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  kind: string;
+  reason: string | null;
+  template_id: string;
+  user_id: string;
+  work_date: Timestamp;
 }
 
 export interface StockItemCosts {
@@ -786,6 +824,7 @@ export interface DB {
   branch_inventory: BranchInventory;
   branch_product_prices: BranchProductPrices;
   branch_products: BranchProducts;
+  branch_shift_templates: BranchShiftTemplates;
   branches: Branches;
   business_day_rules: BusinessDayRules;
   commissary_inventory: CommissaryInventory;
@@ -841,6 +880,8 @@ export interface DB {
   sale_item_consumptions: SaleItemConsumptions;
   sale_items: SaleItems;
   sales: Sales;
+  staff_shift_assignments: StaffShiftAssignments;
+  staff_shift_exceptions: StaffShiftExceptions;
   stock_item_costs: StockItemCosts;
   stock_items: StockItems;
   stock_levels: StockLevels;
