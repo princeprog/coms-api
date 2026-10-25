@@ -141,6 +141,8 @@ COMS keeps its accounts, roles, permissions, branch assignments, sessions, refre
 
 ## Staff onboarding default password
 
+Sign-in and personal password changes recheck the verified password hash under the account row lock. If an admin reset or another password change wins the race, the stale request is rejected before changing credentials, issuing a new session, or clearing the forced-change flag. Admin reset credentials and their required first-login change remain authoritative.
+
 - Apply migration 20261025235255_staff_default_password before deploying the new API and frontend together. It creates a singleton coms_auth.staff_onboarding_settings table, with no seeded credential and no changes to existing users. Super Admin must configure the default once before POST /staff succeeds.
 - GET /staff/default-password requires staff.create and returns only configured and updated_at. PUT /staff/default-password is protected Super Admin only and accepts { password } (1–128 characters); both responses exclude plaintext and hashes.
 - The setting stores only an Argon2id verifier. Creation copies that verifier into the new account and sets must_change_password=true in the same transaction as role and branch assignment. This deliberately shares the verifier for accounts using the same onboarding secret; no recoverable credential or encryption key is introduced. The personal password receives a fresh random salt through the existing password-change flow.

@@ -13,7 +13,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { AuthGatewayGuard } from '../src/common/guards/auth-gateway.guard';
 import { AuthGuard } from '../src/common/guards/auth.guard';
@@ -21,6 +21,7 @@ import { getAuthConfig } from '../src/config/auth.config';
 import { DATABASE } from '../src/database/database.module';
 import type { DB } from '../src/database/db';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { AuthRepository } from '../src/modules/auth/auth.repository';
 import {
   hashPassword,
   verifyPassword,
@@ -231,6 +232,95 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         (await as(cashier).get('/reports/sales')).body.code,
       ).toBeUndefined();
     });
+
+    it.each(['password change', 'sign-in'] as const)(
+      'rejects a stale %s when an admin resets the password after its credential read',
+      async (operation) => {
+        const originalPassword = 'Original race password 1!';
+        const email = `${randomUUID()}@recovery.invalid`;
+        const user = await db
+          .insertInto('coms_auth.users')
+          .values({
+            email,
+            full_name: 'Concurrent recovery account',
+            contact_number: randomUUID().slice(0, 20),
+            hashed_password: await hashPassword(originalPassword),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await family(user.id);
+        const auth = app.get(AuthService);
+        const repository = app.get(AuthRepository);
+        let temporaryPassword = '';
+        const reset = async () => {
+          const response = await as(superAdmin).post(
+            `/staff/${user.id}/password-reset`,
+          );
+          expect(response.status).toBe(201);
+          temporaryPassword = response.body.temporary_password;
+        };
+        // Keep the real database reads and row lock, but deterministically finish
+        // an actual admin reset between the initial credential read and the lock.
+        const findSession = repository.findUserForSession.bind(repository);
+        const findEmail = repository.findByEmail.bind(repository);
+        const read =
+          operation === 'password change'
+            ? vi
+                .spyOn(repository, 'findUserForSession')
+                .mockImplementationOnce(async (...args) => {
+                  const snapshot = await findSession(...args);
+                  await reset();
+                  return snapshot;
+                })
+            : vi
+                .spyOn(repository, 'findByEmail')
+                .mockImplementationOnce(async (...args) => {
+                  const snapshot = await findEmail(...args);
+                  await reset();
+                  return snapshot;
+                });
+        try {
+          if (operation === 'password change') {
+            const response = await as(user.id).post('/auth/password').send({
+              current_password: originalPassword,
+              new_password: 'Stale replacement password 2!',
+            });
+            expect(response.status).toBe(400);
+            expect(response.headers['set-cookie']).toBeUndefined();
+          } else {
+            const status = await auth
+              .login({ email, password: originalPassword })
+              .then(
+                () => 200,
+                (error: { status: number }) => error.status,
+              );
+            expect(status).toBe(401);
+          }
+          const stored = await db
+            .selectFrom('coms_auth.users')
+            .select(['hashed_password', 'must_change_password'])
+            .where('id', '=', user.id)
+            .executeTakeFirstOrThrow();
+          expect(
+            await verifyPassword(stored.hashed_password, temporaryPassword),
+          ).toBe(true);
+          expect(stored.must_change_password).toBe(true);
+          expect(await openFamilies(user.id)).toBe(0);
+          const events = await db
+            .selectFrom('audit_events')
+            .select('id')
+            .where('entity_id', '=', user.id)
+            .where('action', 'in', ['auth.password_changed', 'auth.signed_in'])
+            .execute();
+          expect(events).toHaveLength(0);
+          await expect(
+            auth.login({ email, password: temporaryPassword }),
+          ).resolves.toMatchObject({ user: { must_change_password: true } });
+        } finally {
+          read.mockRestore();
+        }
+      },
+    );
 
     it('protects self-resets and Super Admin accounts', async () => {
       expect(

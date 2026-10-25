@@ -90,7 +90,12 @@ export class AuthService {
         trx,
         true,
       );
-      if (!currentUser?.is_active)
+      // A reset or another password change may have completed during hashing.
+      // Only the credential verified above can authorize this new session.
+      if (
+        !currentUser?.is_active ||
+        currentUser.hashed_password !== user.hashed_password
+      )
         throw new UnauthorizedException('Invalid email or password');
       const family = await this.repository.createFamily(
         trx,
@@ -224,6 +229,10 @@ export class AuthService {
       );
       if (!locked?.is_active)
         throw new UnauthorizedException('Authentication required');
+      if (locked.hashed_password !== user.hashed_password)
+        throw new BadRequestException(
+          'Your password changed during this request. Sign in again with your current password.',
+        );
       await this.repository.updatePassword(trx, userId, hash);
       await this.repository.revokeUserFamilies(trx, userId);
       await this.repository.audit(

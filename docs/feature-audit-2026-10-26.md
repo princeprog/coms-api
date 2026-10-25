@@ -2,6 +2,8 @@
 
 Reviewed API `0862765` and frontend `27286db` on `dev`. This is an audit, not a bug-fix release. No application behavior or business records were changed. Tests used disposable PostgreSQL databases and synthetic loopback browser fixtures.
 
+**Follow-up — 2026-10-26:** The two confirmed bugs below have now been fixed in a separate implementation change. Sign-in and password changes reject credentials superseded before acquiring the account lock; CSV/PDF buttons are disabled while the selected sales report is still represented by previous-query data. Both regressions failed before the fixes and passed afterward. Six recovery/onboarding database scenarios and twelve authentication database tests passed, as did the sales-report/export tests and a delayed-response production-browser check. The remaining workflow gaps and test-maintenance findings are unchanged. The original findings and audit results below are retained as historical evidence.
+
 ## Findings requiring implementation work
 
 ### P1 — A password change can overwrite a concurrent admin reset
