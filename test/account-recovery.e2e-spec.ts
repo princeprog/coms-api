@@ -20,7 +20,11 @@ import { AuthGuard } from '../src/common/guards/auth.guard';
 import { getAuthConfig } from '../src/config/auth.config';
 import { DATABASE } from '../src/database/database.module';
 import type { DB } from '../src/database/db';
-import { hashPassword } from '../src/modules/auth/password-hashing';
+import { AuthService } from '../src/modules/auth/auth.service';
+import {
+  hashPassword,
+  verifyPassword,
+} from '../src/modules/auth/password-hashing';
 
 describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
   'account recovery',
@@ -38,6 +42,8 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
     const as = (actor: string) => ({
       get: (path: string) =>
         request(app.getHttpServer()).get(path).set('x-test-actor', actor),
+      put: (path: string) =>
+        request(app.getHttpServer()).put(path).set('x-test-actor', actor),
       post: (path: string) =>
         request(app.getHttpServer())
           .post(path)
@@ -112,7 +118,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       ).id;
       await sql`INSERT INTO coms_auth.role_permissions (role_id, permission_id)
         SELECT ${resetter}, id FROM coms_auth.permissions
-        WHERE (module_key, action_key) IN (('staff','read'),('staff','password_reset'))`.execute(
+        WHERE (module_key, action_key) IN (('staff','read'),('staff','password_reset'),('staff','create'))`.execute(
         db,
       );
       const hash = await hashPassword('original-password-1');
@@ -252,6 +258,152 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         (await as(superAdmin).post(`/staff/${otherAdmin}/password-reset`))
           .status,
       ).toBe(201);
+    });
+
+    it('creates staff with a rotating admin default and gates their first sign-in', async () => {
+      const endpoint = '/staff/default-password';
+      const firstPassword = 'Synthetic onboarding default 1!';
+      const nextPassword = 'Synthetic onboarding default 2!';
+      const input = {
+        email: 'new-staff@recovery.invalid',
+        full_name: 'New Staff',
+        contact_number: '09171234567',
+        branch_ids: [branch],
+      };
+      expect((await as(superAdmin).get(endpoint)).body).toEqual({
+        configured: false,
+        updated_at: null,
+      });
+      expect((await as(superAdmin).post('/staff').send(input)).status).toBe(
+        409,
+      );
+      expect(
+        (await as(manager).put(endpoint).send({ password: firstPassword }))
+          .status,
+      ).toBe(403);
+      expect((await as(manager).get(endpoint)).body.configured).toBe(false);
+      expect((await as(cashier).get(endpoint)).status).toBe(403);
+      expect(
+        (await as(superAdmin).put(endpoint).send({ password: 'short' })).status,
+      ).toBe(400);
+      const setting = await as(superAdmin)
+        .put(endpoint)
+        .send({ password: firstPassword });
+      expect(setting.status).toBe(200);
+      expect(Object.keys(setting.body).sort()).toEqual([
+        'configured',
+        'updated_at',
+      ]);
+      expect(setting.body.configured).toBe(true);
+      expect(
+        (
+          await as(superAdmin)
+            .post('/staff')
+            .send({ ...input, password: firstPassword })
+        ).status,
+      ).toBe(400);
+      const created = await as(manager).post('/staff').send(input);
+      expect(created.status).toBe(201);
+      expect(created.body).not.toHaveProperty('hashed_password');
+      const id = created.body.id;
+      expect((await flags(id)).must_change_password).toBe(true);
+      const auth = app.get(AuthService);
+      const session = await auth.login({
+        email: input.email,
+        password: firstPassword,
+      });
+      expect(session.user.must_change_password).toBe(true);
+      // Unassigned staff must also be able to finish onboarding.
+      expect((await as(id).get('/auth/me')).status).toBe(200);
+      for (const path of [
+        '/staff',
+        '/branches',
+        '/reports/sales',
+        '/staff/default-password',
+      ]) {
+        const blocked = await as(id).get(path);
+        expect(blocked.status).toBe(403);
+        expect(blocked.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+      }
+      expect(
+        (await as(id).put(endpoint).send({ password: nextPassword })).status,
+      ).toBe(403);
+      expect(
+        (await as(superAdmin).put(endpoint).send({ password: nextPassword }))
+          .status,
+      ).toBe(200);
+      await expect(
+        auth.login({ email: input.email, password: firstPassword }),
+      ).resolves.toBeTruthy();
+      await expect(
+        auth.login({ email: input.email, password: nextPassword }),
+      ).rejects.toMatchObject({ status: 401 });
+      const second = await as(superAdmin)
+        .post('/staff')
+        .send({
+          ...input,
+          email: 'second-staff@recovery.invalid',
+          contact_number: '09171234568',
+        });
+      expect(second.status).toBe(201);
+      await expect(
+        auth.login({
+          email: 'second-staff@recovery.invalid',
+          password: nextPassword,
+        }),
+      ).resolves.toMatchObject({ user: { must_change_password: true } });
+      expect(
+        (
+          await as(id).post('/auth/password').send({
+            current_password: firstPassword,
+            new_password: firstPassword,
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await as(id).post('/auth/password').send({
+            current_password: 'incorrect',
+            new_password: 'Personal password only 1!',
+          })
+        ).status,
+      ).toBe(400);
+      const changed = await as(id).post('/auth/password').send({
+        current_password: firstPassword,
+        new_password: 'Personal password only 1!',
+      });
+      expect(changed.status).toBe(200);
+      expect(changed.body.user.must_change_password).toBe(false);
+      expect(
+        await auth.authenticateAccess(session.tokens.accessToken),
+      ).toBeNull();
+      await expect(
+        auth.login({ email: input.email, password: firstPassword }),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        auth.login({
+          email: input.email,
+          password: 'Personal password only 1!',
+        }),
+      ).resolves.toMatchObject({ user: { must_change_password: false } });
+      const stored = await db
+        .selectFrom('coms_auth.staff_onboarding_settings')
+        .selectAll()
+        .executeTakeFirstOrThrow();
+      expect(stored.hashed_password).not.toBe(nextPassword);
+      expect(await verifyPassword(stored.hashed_password, nextPassword)).toBe(
+        true,
+      );
+      const audit = await db
+        .selectFrom('audit_events')
+        .selectAll()
+        .where('action', '=', 'staff.default_password_updated')
+        .execute();
+      expect(audit).toHaveLength(2);
+      const serialized = JSON.stringify(audit);
+      expect(serialized).not.toContain(firstPassword);
+      expect(serialized).not.toContain(nextPassword);
+      expect(serialized).not.toContain(stored.hashed_password);
     });
 
     it('resets a locked-out account from the command line', () => {

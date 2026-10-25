@@ -147,12 +147,22 @@ export class StaffRepository {
     email: string;
     full_name: string;
     contact_number: string;
-    hashed_password: string;
     role_id: string | null;
     branch_ids: string[];
   }) {
     try {
       return await this.db.transaction().execute(async (trx) => {
+        // Lock the selected version until creation commits. Rotation affects future accounts only.
+        const setting = await trx
+          .selectFrom('coms_auth.staff_onboarding_settings')
+          .select('hashed_password')
+          .where('id', '=', true)
+          .forShare()
+          .executeTakeFirst();
+        if (!setting)
+          throw new ConflictException(
+            'Ask a Super Admin to set the default password on the Staff page before creating staff.',
+          );
         if (input.role_id !== null)
           await this.assertAssignableRole(trx, input.role_id);
         await this.assertActiveBranches(trx, input.branch_ids);
@@ -162,7 +172,8 @@ export class StaffRepository {
             email: input.email,
             full_name: input.full_name,
             contact_number: input.contact_number,
-            hashed_password: input.hashed_password,
+            hashed_password: setting.hashed_password,
+            must_change_password: true,
             role_id: input.role_id,
             is_active: true,
           })
@@ -198,6 +209,41 @@ export class StaffRepository {
         );
       throw error;
     }
+  }
+
+  async defaultPasswordStatus() {
+    const setting = await this.db
+      .selectFrom('coms_auth.staff_onboarding_settings')
+      .select('updated_at')
+      .where('id', '=', true)
+      .executeTakeFirst();
+    return {
+      configured: Boolean(setting),
+      updated_at: setting?.updated_at ?? null,
+    };
+  }
+
+  async setDefaultPassword(hash: string) {
+    return this.db.transaction().execute(async (trx) => {
+      const setting = await trx
+        .insertInto('coms_auth.staff_onboarding_settings')
+        .values({ id: true, hashed_password: hash })
+        .onConflict((oc) =>
+          oc.column('id').doUpdateSet({
+            hashed_password: hash,
+            updated_at: sql<Date>`now()`,
+          }),
+        )
+        .returning('updated_at')
+        .executeTakeFirstOrThrow();
+      // Deliberately excludes both plaintext and hash from audit metadata.
+      await recordAudit(trx, {
+        action: 'staff.default_password_updated',
+        entityType: 'staff',
+        entityLabel: 'Staff default password',
+      });
+      return { configured: true, updated_at: setting.updated_at };
+    });
   }
 
   async update(

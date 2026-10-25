@@ -171,6 +171,12 @@ export interface ComsAuthSessions {
   user_id: string;
 }
 
+export interface ComsAuthStaffOnboardingSettings {
+  hashed_password: string;
+  id: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface ComsAuthTokenFamilies {
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
@@ -835,6 +841,7 @@ export interface DB {
   'coms_auth.role_permissions': ComsAuthRolePermissions;
   'coms_auth.roles': ComsAuthRoles;
   'coms_auth.sessions': ComsAuthSessions;
+  'coms_auth.staff_onboarding_settings': ComsAuthStaffOnboardingSettings;
   'coms_auth.token_families': ComsAuthTokenFamilies;
   'coms_auth.users': ComsAuthUsers;
   daily_branch_report_events: DailyBranchReportEvents;

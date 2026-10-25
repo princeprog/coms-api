@@ -26,11 +26,6 @@ export class CreateStaffDto {
   })
   contact_number!: string;
 
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  password!: string;
-
   @IsOptional()
   @IsString()
   @Matches(/^[1-9]\d{0,18}$/)

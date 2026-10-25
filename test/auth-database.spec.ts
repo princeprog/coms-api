@@ -470,12 +470,12 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
       const staffRepository = new StaffRepository(db);
       const staff = new StaffService(staffRepository);
       const password = 'Database staff password 2026';
+      await staff.setDefaultPassword(password);
       const member = await staff.create(
         {
           email: 'staff.integration@example.com',
           full_name: 'Staff Integration Test',
           contact_number: '09179990000',
-          password,
           role_id: staffRole.id,
           branch_ids: [branch.id, externalBranch.id],
         },
@@ -495,7 +495,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           email: 'staff.unassigned@example.com',
           full_name: 'Staff Without Role',
           contact_number: '09179990002',
-          password,
           branch_ids: [],
         },
         [],
@@ -534,7 +533,6 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
           email: 'staff.external@example.com',
           full_name: 'External Branch Staff',
           contact_number: '09179990001',
-          password,
           role_id: staffRole.id,
           branch_ids: [externalBranch.id],
         },

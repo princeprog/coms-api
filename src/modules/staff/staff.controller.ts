@@ -14,10 +14,12 @@ import { CurrentAccessContext } from '../../common/decorators/current-access-con
 import {
   RequireBranchScope,
   RequirePermission,
+  RequireSuperAdmin,
 } from '../../common/decorators/access-policy.decorator';
 import { AccessControlGuard } from '../../common/guards/access-control.guard';
 import { AuthGatewayGuard } from '../../common/guards/auth-gateway.guard';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { UpdateDefaultPasswordDto } from './dto/update-default-password.dto';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffBranchQueryDto } from './dto/staff-branch-query.dto';
 import { AssignStaffBranchesDto } from './dto/assign-staff-branches.dto';
@@ -46,6 +48,18 @@ export class StaffController {
       access.branchIds,
       access.role?.isSystem === true && access.role.code === 'SUPER_ADMIN',
     );
+  }
+
+  @Get('default-password')
+  @RequirePermission('staff.create')
+  defaultPasswordStatus() {
+    return this.service.defaultPasswordStatus();
+  }
+
+  @Put('default-password')
+  @RequireSuperAdmin()
+  setDefaultPassword(@Body() dto: UpdateDefaultPasswordDto) {
+    return this.service.setDefaultPassword(dto.password);
   }
 
   @Get(':userId')

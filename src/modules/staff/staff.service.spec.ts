@@ -33,7 +33,7 @@ describe('StaffService', () => {
     );
   });
 
-  it('normalizes account identity and hashes the password before creation', async () => {
+  it('normalizes staff identity without accepting a per-account password', async () => {
     const repository = { create: vi.fn().mockResolvedValue({ id: 'staff-1' }) };
     const service = new StaffService(repository as never);
 
@@ -43,7 +43,6 @@ describe('StaffService', () => {
           email: ' NEW.STAFF@EXAMPLE.COM ',
           full_name: ' New Staff ',
           contact_number: ' 09170000000 ',
-          password: 'long test password',
           role_id: '4',
           branch_ids: [],
         },
@@ -55,7 +54,6 @@ describe('StaffService', () => {
       email: 'new.staff@example.com',
       full_name: 'New Staff',
       contact_number: '09170000000',
-      hashed_password: 'argon-hash',
       role_id: '4',
       branch_ids: [],
     });
@@ -72,7 +70,6 @@ describe('StaffService', () => {
             email: 'staff@example.com',
             full_name: 'Staff Member',
             contact_number: contactNumber,
-            password: 'long test password',
             branch_ids: [],
           },
           [],
@@ -172,7 +169,6 @@ describe('StaffService', () => {
           email: 'scoped.staff@example.com',
           full_name: 'Scoped Staff',
           contact_number: '09170000000',
-          password: 'long test password',
           role_id: '4',
           branch_ids: ['28af8c76-1e33-4745-a03c-7f7fa2db640a'],
         },

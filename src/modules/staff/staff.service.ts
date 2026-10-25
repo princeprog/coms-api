@@ -68,7 +68,6 @@ export class StaffService {
       email: string;
       full_name: string;
       contact_number: string;
-      password: string;
       role_id?: string | null;
       branch_ids: string[];
     },
@@ -98,16 +97,23 @@ export class StaffService {
       throw new BadRequestException(
         'Contact number must be a Philippine mobile number',
       );
-    if (input.password.length < 12 || input.password.length > 128)
-      throw new BadRequestException('Password must be 12 to 128 characters');
     return this.repository.create({
       email,
       full_name: fullName,
       contact_number: contactNumber,
-      hashed_password: await hashPassword(input.password),
       role_id: roleId,
       branch_ids: input.branch_ids,
     });
+  }
+
+  defaultPasswordStatus() {
+    return this.repository.defaultPasswordStatus();
+  }
+
+  async setDefaultPassword(password: string) {
+    if (password.length < 12 || password.length > 128)
+      throw new BadRequestException('Password must be 12 to 128 characters');
+    return this.repository.setDefaultPassword(await hashPassword(password));
   }
 
   async update(
