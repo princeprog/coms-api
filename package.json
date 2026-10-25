@@ -10,7 +10,8 @@
   },
   "type": "commonjs",
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && node scripts/migrate-deploy.cjs",
+    "migrate:deploy": "node scripts/migrate-deploy.cjs",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",

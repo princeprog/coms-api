@@ -35,6 +35,26 @@ before testing sign-in. Do not run the old migration chain directly against
 Supabase's reserved `auth` schema. Data initialization is a separate explicit
 choice; a successful API root response does not verify database readiness.
 
+## Migrations on deploy
+
+Production deployments apply pending migrations automatically. Vercel runs
+`pnpm run build` (set in `vercel.json`), which is `nest build` followed by
+`scripts/migrate-deploy.cjs`. The script runs only when `VERCEL_ENV` is
+`production`, using the Production `DATABASE_URL` (Supabase session pooler).
+It applies the compiled migrations from `dist/database/migrations` in name
+order inside one transaction, under Kysely's migration lock, before the new
+API serves traffic. If any migration fails, the batch rolls back, the build
+fails and the previous deployment keeps serving. Preview and local builds skip
+migrations, and a Vercel build without `VERCEL_ENV` fails instead of skipping.
+
+Build logs list each applied migration (`[migrations] Success: …`) or report
+that the database is current. Write every schema change as a new forward
+migration; never edit one that production has already applied. To rehearse,
+restore a production backup into a disposable database and run
+`COMS_MIGRATE_ON_BUILD=true DATABASE_URL=<disposable> pnpm migrate:deploy`
+after `pnpm build`. New tables receive RLS automatically through Supabase's
+`rls_auto_enable` event trigger; confirm this after deploying new tables.
+
 Deploy the API before coms-app, then verify the API root, sign-in, protected
 pages and refresh-cookie relay. Environment changes require a new deployment.
 Keep the existing deployment protection settings when inspecting previews.
