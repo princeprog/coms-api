@@ -16,7 +16,7 @@ type Balance = {
   stock_status: string;
 };
 type Movement = {
-  created_at: Date;
+  occurred_at: Date;
   stock_item_name: string;
   unit: string;
   movement_type: string;
@@ -123,7 +123,7 @@ export class InventoryExportService {
       total: result.total,
       rows: result.items,
       columns: [
-        { header: 'Date and time', value: (row) => row.created_at },
+        { header: 'Date and time', value: (row) => row.occurred_at },
         { header: 'Stock item', value: (row) => row.stock_item_name },
         { header: 'Unit', value: (row) => row.unit },
         { header: 'Movement', value: (row) => csvLabel(row.movement_type) },

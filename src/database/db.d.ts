@@ -425,6 +425,7 @@ export interface InventoryMovements {
   idempotency_key: string | null;
   inventory_scope: string;
   movement_type: string;
+  occurred_at: Generated<Timestamp>;
   quantity_delta: Numeric;
   reason: string | null;
   reversal_of_movement_id: string | null;
@@ -556,6 +557,57 @@ export interface PaymentMethods {
   updated_at: Generated<Timestamp>;
 }
 
+export interface PosOfflineDevices {
+  approved_by: string | null;
+  branch_id: string;
+  created_at: Generated<Timestamp>;
+  id: string;
+  name: string;
+  requested_by: string;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface PosOfflineSessions {
+  branch_id: string;
+  business_date: Timestamp;
+  cashier_id: string;
+  cutoff_at: Timestamp;
+  device_id: string;
+  final_sequence: number | null;
+  finalized_at: Timestamp | null;
+  id: Generated<string>;
+  issued_at: Generated<Timestamp>;
+  last_captured_at: Timestamp | null;
+  last_sequence: Generated<number>;
+  protocol_version: Generated<number>;
+  shift_id: string;
+  status: Generated<string>;
+}
+
+export interface PosOfflineSnapshots {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  payload: Json;
+  session_id: string;
+}
+
+export interface PosOfflineTransactions {
+  fingerprint: string;
+  id: string;
+  payload: Json;
+  reason: string | null;
+  received_at: Generated<Timestamp>;
+  review_reason: string | null;
+  reviewed_at: Timestamp | null;
+  reviewed_by: string | null;
+  sale_id: string | null;
+  sequence: number;
+  session_id: string;
+  snapshot_id: string;
+  status: string;
+}
+
 export interface ProductCategories {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
@@ -663,6 +715,7 @@ export interface SaleEvents {
   event_type: string;
   id: Generated<string>;
   idempotency_key: string | null;
+  occurred_at: Generated<Timestamp>;
   reason: string | null;
   refund_shift_id: string | null;
   sale_id: string;
@@ -696,6 +749,7 @@ export interface Sales {
   id: Generated<string>;
   idempotency_key: string;
   inventory_deducted: Generated<boolean>;
+  occurred_at: Generated<Timestamp>;
   payment_kind: string | null;
   payment_method_id: string | null;
   sale_number: Generated<Int8>;
@@ -876,6 +930,10 @@ export interface DB {
   notification_events: NotificationEvents;
   notification_recipients: NotificationRecipients;
   payment_methods: PaymentMethods;
+  pos_offline_devices: PosOfflineDevices;
+  pos_offline_sessions: PosOfflineSessions;
+  pos_offline_snapshots: PosOfflineSnapshots;
+  pos_offline_transactions: PosOfflineTransactions;
   product_categories: ProductCategories;
   product_ingredients: ProductIngredients;
   product_setup_operations: ProductSetupOperations;

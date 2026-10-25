@@ -42,11 +42,11 @@ export class SalesReportRepository {
       scope AS (SELECT id, branch_name, code, status FROM branches WHERE ${branchFilter}),
       sales_in AS (
         SELECT s.id, s.branch_id, s.status, s.total_amount, s.tender_method,
-          s.service_type, coms_business_date(s.created_at) AS business_date
+          s.service_type, coms_business_date(s.occurred_at) AS business_date
         FROM sales s
         JOIN scope b ON b.id = s.branch_id
-        WHERE s.created_at >= coms_business_day_start(${range.from}::date)
-          AND s.created_at < coms_business_day_end(${range.to}::date)
+        WHERE s.occurred_at >= coms_business_day_start(${range.from}::date)
+          AND s.occurred_at < coms_business_day_end(${range.to}::date)
       ),
       completed AS (SELECT * FROM sales_in WHERE status = 'COMPLETED'),
       lines AS (

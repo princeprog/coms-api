@@ -400,6 +400,18 @@ export class ShiftsRepository {
         throw new BadRequestException(
           'Cash left in the drawer cannot be more than the counted cash',
         );
+      const offline = await transaction
+        .selectFrom('pos_offline_sessions')
+        .select('id')
+        .where('shift_id', '=', input.shiftId)
+        .where('status', '=', 'OPEN')
+        .executeTakeFirst();
+      if (offline)
+        throw new ConflictException({
+          code: 'OFFLINE_SYNC_REQUIRED',
+          message:
+            'Synchronize all offline sales and finish this register session before closing the shift.',
+        });
       const totals = await shiftTotals(transaction, input.shiftId);
       const closed = await transaction
         .updateTable('register_shifts')

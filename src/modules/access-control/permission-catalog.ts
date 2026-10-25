@@ -1,5 +1,15 @@
 export const PERMISSION_CATALOG = [
   {
+    module_key: 'pos_offline',
+    action_key: 'devices_manage',
+    description: 'Approve and manage branch register devices',
+  },
+  {
+    module_key: 'pos_offline',
+    action_key: 'review',
+    description: 'Review and recover offline sales',
+  },
+  {
     module_key: 'roles',
     action_key: 'read',
     description: 'View roles and permissions',

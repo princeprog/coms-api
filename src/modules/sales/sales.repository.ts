@@ -27,6 +27,7 @@ type CreateSaleInput = {
   actorUserId: string;
   tenderMethod: string;
   paymentMethodId?: string;
+  registerDeviceId?: string;
   serviceType: 'DINE_IN' | 'TAKEAWAY';
   idempotencyKey: string;
   items: { productId: string; quantity: string; priceRevision: number }[];
@@ -70,13 +71,13 @@ export class SalesRepository {
           );
         if (query.date_from)
           filtered = filtered.where(
-            's.created_at',
+            sql<Date>`s.occurred_at`,
             '>=',
             sql<Date>`coms_business_day_start(${query.date_from}::date)`,
           );
         if (query.date_to)
           filtered = filtered.where(
-            's.created_at',
+            sql<Date>`s.occurred_at`,
             '<',
             sql<Date>`coms_business_day_end(${query.date_to}::date)`,
           );
@@ -102,7 +103,7 @@ export class SalesRepository {
               'cashier_name',
             ),
           )
-          .orderBy('s.created_at', 'desc')
+          .orderBy(sql<Date>`s.occurred_at`, 'desc')
           .orderBy('s.id', 'desc')
           .limit(query.page_size)
           .offset(paginationOffset(query));
@@ -225,7 +226,7 @@ export class SalesRepository {
           WHERE branch_id = ${sale.branch_id}
             AND business_date = COALESCE(
               (SELECT business_date FROM register_shifts WHERE id = ${sale.shift_id}::uuid),
-              coms_business_date(${sale.created_at}::timestamptz))
+              (SELECT coms_business_date(occurred_at) FROM sales WHERE id = ${sale.id}::uuid))
           FOR SHARE
         `.execute(transaction);
         if (dailyReport.rows[0]?.status === 'APPROVED')
@@ -352,7 +353,7 @@ export class SalesRepository {
               'Sale inventory balance is missing',
             );
 
-          const restoredByStockItem = await this.sumQuantities(
+          const restoredByStockItem = await sumQuantities(
             transaction,
             originalMovements.map((movement) => ({
               stock_item_id: movement.stock_item_id,
@@ -467,6 +468,12 @@ export class SalesRepository {
       transaction,
       input.branchId,
       input.actorUserId,
+    );
+    await requireOrdinarySaleReservation(
+      transaction,
+      input.branchId,
+      paymentMethod.kind,
+      input.registerDeviceId,
     );
 
     const productIds = input.items.map(({ productId }) => productId).sort();
@@ -613,11 +620,19 @@ export class SalesRepository {
       )
       .returningAll()
       .execute();
-    await this.deductRecipeStock(
+    const unitCosts = recipeConsumption.length
+      ? await currentUnitCosts(transaction, [
+          ...new Set(recipeConsumption.map((line) => line.stock_item_id)),
+        ])
+      : new Map<string, string>();
+    await deductSaleRecipeStock(
       transaction,
       input,
       saleItems,
-      recipeConsumption,
+      recipeConsumption.map((line) => ({
+        ...line,
+        unit_cost: unitCosts.get(line.stock_item_id) ?? null,
+      })),
     );
     await transaction
       .insertInto('sale_events')
@@ -657,126 +672,6 @@ export class SalesRepository {
       ORDER BY recipe.stock_item_id, requested.product_id
     `.execute(transaction);
     return result.rows;
-  }
-
-  // A sale never waits on stock records: balances may go below zero and the
-  // daily physical count corrects them.
-  private async deductRecipeStock(
-    transaction: Transaction<DB>,
-    input: CreateSaleInput,
-    saleItems: { id: string; product_id: string }[],
-    recipeConsumption: RecipeConsumption[],
-  ) {
-    if (!recipeConsumption.length) return;
-    // Snapshot today's average cost so later cost changes never rewrite profit.
-    const unitCosts = await currentUnitCosts(transaction, [
-      ...new Set(recipeConsumption.map((line) => line.stock_item_id)),
-    ]);
-    const saleItemIdByProduct = new Map(
-      saleItems.map(({ id, product_id }) => [product_id, id]),
-    );
-    const consumptions = await transaction
-      .insertInto('sale_item_consumptions')
-      .values(
-        recipeConsumption.map((line) => {
-          const saleItemId = saleItemIdByProduct.get(line.product_id);
-          if (!saleItemId)
-            throw new InternalServerErrorException(
-              'Sale recipe snapshot could not be created',
-            );
-          return {
-            sale_item_id: saleItemId,
-            stock_item_id: line.stock_item_id,
-            quantity_consumed: line.quantity_consumed,
-            unit_cost: unitCosts.get(line.stock_item_id) ?? null,
-          };
-        }),
-      )
-      .returningAll()
-      .execute();
-    const requiredByStockItem = await this.sumQuantities(
-      transaction,
-      consumptions.map(({ stock_item_id, quantity_consumed }) => ({
-        stock_item_id,
-        quantity: quantity_consumed,
-      })),
-    );
-    const stockItemIds = requiredByStockItem.map(
-      ({ stock_item_id }) => stock_item_id,
-    );
-
-    await transaction
-      .insertInto('branch_inventory')
-      .values(
-        stockItemIds.map((stockItemId) => ({
-          branch_id: input.branchId,
-          stock_item_id: stockItemId,
-          quantity_on_hand: '0',
-        })),
-      )
-      .onConflict((conflict) =>
-        conflict.columns(['branch_id', 'stock_item_id']).doNothing(),
-      )
-      .execute();
-    const balances = await transaction
-      .selectFrom('branch_inventory')
-      .select('stock_item_id')
-      .where('branch_id', '=', input.branchId)
-      .where('stock_item_id', 'in', stockItemIds)
-      .orderBy('stock_item_id')
-      .forUpdate()
-      .execute();
-    if (balances.length !== stockItemIds.length)
-      throw new InternalServerErrorException(
-        'Sale inventory balances could not be locked',
-      );
-
-    for (const required of requiredByStockItem)
-      await transaction
-        .updateTable('branch_inventory')
-        .set({
-          quantity_on_hand: sql`quantity_on_hand - ${required.quantity}::numeric`,
-          updated_at: sql<Date>`now()`,
-        })
-        .where('branch_id', '=', input.branchId)
-        .where('stock_item_id', '=', required.stock_item_id)
-        .executeTakeFirstOrThrow();
-
-    await transaction
-      .insertInto('inventory_movements')
-      .values(
-        consumptions.map((consumption) => ({
-          inventory_scope: 'BRANCH',
-          branch_id: input.branchId,
-          stock_item_id: consumption.stock_item_id,
-          movement_type: 'SALE',
-          quantity_delta: `-${consumption.quantity_consumed}`,
-          actor_user_id: input.actorUserId,
-          sale_item_consumption_id: consumption.id,
-        })),
-      )
-      .execute();
-  }
-
-  private async sumQuantities(
-    executor: DbExecutor,
-    values: QuantityByStockItem[],
-  ): Promise<QuantityByStockItem[]> {
-    const groupedValues = sql.join(
-      values.map(
-        ({ stock_item_id, quantity }) =>
-          sql`(${stock_item_id}::uuid, ${quantity}::numeric)`,
-      ),
-    );
-    const grouped = await sql<QuantityByStockItem>`
-      SELECT
-        stock_item_id::text AS stock_item_id,
-        trim_scale(sum(quantity))::text AS quantity
-      FROM (VALUES ${groupedValues}) AS quantities(stock_item_id, quantity)
-      GROUP BY stock_item_id
-      ORDER BY stock_item_id
-    `.execute(executor);
-    return grouped.rows;
   }
 
   private async returnCreateRetry(
@@ -863,9 +758,10 @@ export class SalesRepository {
           'u.full_name as actor_name',
           'e.reason',
           'e.created_at',
+          sql<Date>`e.occurred_at`.as('occurred_at'),
         ])
         .where('e.sale_id', '=', saleId)
-        .orderBy('e.created_at')
+        .orderBy(sql<Date>`e.occurred_at`)
         .orderBy('e.id')
         .execute(),
     ]);
@@ -920,6 +816,148 @@ export class SalesRepository {
   }
 }
 
-function saleReference(number: string) {
+export function saleReference(number: string) {
   return 'S-' + number.padStart(6, '0');
+}
+
+/** Caller holds the branch and selling shift locks before checking reservations. */
+export async function requireOrdinarySaleReservation(
+  transaction: Transaction<DB>,
+  branchId: string,
+  paymentKind: string,
+  registerDeviceId?: string,
+): Promise<void> {
+  const result = await sql<{ device_id: string }>`
+    SELECT device_id FROM pos_offline_sessions
+    WHERE branch_id = ${branchId}::uuid AND status = 'OPEN'
+    FOR SHARE
+  `.execute(transaction);
+  const reservation = result.rows[0];
+  if (!reservation) return;
+  if (paymentKind === 'NON_CASH' && registerDeviceId === reservation.device_id)
+    return;
+  throw new ConflictException({
+    code: 'REGISTER_RESERVED_OFFLINE',
+    message:
+      paymentKind === 'CASH' && registerDeviceId === reservation.device_id
+        ? 'Save cash sales through this register’s offline outbox.'
+        : 'This branch register is reserved by an offline session. Use the reserved device.',
+  });
+}
+
+// Stock insufficiency never blocks a sale: balances may go below zero and the
+// daily physical count corrects them. Both online and offline sales use this writer.
+export async function deductSaleRecipeStock(
+  transaction: Transaction<DB>,
+  input: { branchId: string; actorUserId: string; occurredAt?: string },
+  saleItems: { id: string; product_id: string }[],
+  recipeConsumption: (RecipeConsumption & { unit_cost: string | null })[],
+) {
+  if (!recipeConsumption.length) return;
+  const saleItemIdByProduct = new Map(
+    saleItems.map(({ id, product_id }) => [product_id, id]),
+  );
+  const consumptions = await transaction
+    .insertInto('sale_item_consumptions')
+    .values(
+      recipeConsumption.map((line) => {
+        const saleItemId = saleItemIdByProduct.get(line.product_id);
+        if (!saleItemId)
+          throw new InternalServerErrorException(
+            'Sale recipe snapshot could not be created',
+          );
+        return {
+          sale_item_id: saleItemId,
+          stock_item_id: line.stock_item_id,
+          quantity_consumed: line.quantity_consumed,
+          unit_cost: line.unit_cost,
+        };
+      }),
+    )
+    .returningAll()
+    .execute();
+  const requiredByStockItem = await sumQuantities(
+    transaction,
+    consumptions.map(({ stock_item_id, quantity_consumed }) => ({
+      stock_item_id,
+      quantity: quantity_consumed,
+    })),
+  );
+  const stockItemIds = requiredByStockItem.map(
+    ({ stock_item_id }) => stock_item_id,
+  );
+
+  await transaction
+    .insertInto('branch_inventory')
+    .values(
+      stockItemIds.map((stockItemId) => ({
+        branch_id: input.branchId,
+        stock_item_id: stockItemId,
+        quantity_on_hand: '0',
+      })),
+    )
+    .onConflict((conflict) =>
+      conflict.columns(['branch_id', 'stock_item_id']).doNothing(),
+    )
+    .execute();
+  const balances = await transaction
+    .selectFrom('branch_inventory')
+    .select('stock_item_id')
+    .where('branch_id', '=', input.branchId)
+    .where('stock_item_id', 'in', stockItemIds)
+    .orderBy('stock_item_id')
+    .forUpdate()
+    .execute();
+  if (balances.length !== stockItemIds.length)
+    throw new InternalServerErrorException(
+      'Sale inventory balances could not be locked',
+    );
+
+  for (const required of requiredByStockItem)
+    await transaction
+      .updateTable('branch_inventory')
+      .set({
+        quantity_on_hand: sql`quantity_on_hand - ${required.quantity}::numeric`,
+        updated_at: sql<Date>`now()`,
+      })
+      .where('branch_id', '=', input.branchId)
+      .where('stock_item_id', '=', required.stock_item_id)
+      .executeTakeFirstOrThrow();
+
+  await transaction
+    .insertInto('inventory_movements')
+    .values(
+      consumptions.map((consumption) => ({
+        inventory_scope: 'BRANCH',
+        branch_id: input.branchId,
+        stock_item_id: consumption.stock_item_id,
+        movement_type: 'SALE',
+        quantity_delta: `-${consumption.quantity_consumed}`,
+        actor_user_id: input.actorUserId,
+        sale_item_consumption_id: consumption.id,
+        ...(input.occurredAt ? { occurred_at: input.occurredAt } : {}),
+      })),
+    )
+    .execute();
+}
+
+async function sumQuantities(
+  executor: DbExecutor,
+  values: QuantityByStockItem[],
+): Promise<QuantityByStockItem[]> {
+  const groupedValues = sql.join(
+    values.map(
+      ({ stock_item_id, quantity }) =>
+        sql`(${stock_item_id}::uuid, ${quantity}::numeric)`,
+    ),
+  );
+  const grouped = await sql<QuantityByStockItem>`
+    SELECT
+      stock_item_id::text AS stock_item_id,
+      trim_scale(sum(quantity))::text AS quantity
+    FROM (VALUES ${groupedValues}) AS quantities(stock_item_id, quantity)
+    GROUP BY stock_item_id
+    ORDER BY stock_item_id
+  `.execute(executor);
+  return grouped.rows;
 }

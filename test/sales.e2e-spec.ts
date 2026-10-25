@@ -389,6 +389,16 @@ describe('sales routes (e2e)', () => {
       ])
       .returning(['id', 'sale_number'])
       .execute();
+    // History filters by when the sale happened; keep the fixture's occurrence aligned.
+    await db
+      .updateTable('sales')
+      .set({ occurred_at: sql<Date>`created_at` })
+      .where(
+        'id',
+        'in',
+        rows.map((row) => row.id),
+      )
+      .execute();
     const url = `/branches/${branchId}/sales`;
     const filters = {
       date_from: '2026-10-20',

@@ -1,4 +1,5 @@
 import './config/load-env';
+import { PosOfflineModule } from './modules/pos-offline/pos-offline.module';
 import { BusinessDayModule } from './modules/business-day/business-day.module';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -37,6 +38,7 @@ export const ObserveInstrument = observe?.ObserveInstrument;
 
 @Module({
   imports: [
+    PosOfflineModule,
     BusinessDayModule,
     ShiftsModule,
     NotificationsModule,

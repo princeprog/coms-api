@@ -71,12 +71,12 @@ export class DashboardExceptionsRepository {
         GROUP BY 1, 2
       ),
       voids AS (
-        SELECT s.branch_id, (coms_business_date(s.created_at) - range.start) / 7 AS week,
+        SELECT s.branch_id, (coms_business_date(s.occurred_at) - range.start) / 7 AS week,
           count(*)::int AS voids, sum(s.total_amount) AS amount
         FROM sales s CROSS JOIN range JOIN scope b ON b.id = s.branch_id
         WHERE s.status = 'VOIDED'
-          AND s.created_at >= coms_business_day_start(range.start)
-          AND s.created_at < coms_business_day_start(range.stop)
+          AND s.occurred_at >= coms_business_day_start(range.start)
+          AND s.occurred_at < coms_business_day_start(range.stop)
         GROUP BY 1, 2
       )
       SELECT b.id AS branch_id, b.branch_name, b.status AS branch_status,
@@ -129,8 +129,8 @@ export class DashboardExceptionsRepository {
       sold AS (
         SELECT s.cashier_user_id AS user_id, b.branch_name, s.status, s.total_amount
         FROM sales s CROSS JOIN range JOIN scope b ON b.id = s.branch_id
-        WHERE s.created_at >= coms_business_day_start(range.start)
-          AND s.created_at < coms_business_day_start(range.stop)
+        WHERE s.occurred_at >= coms_business_day_start(range.start)
+          AND s.occurred_at < coms_business_day_start(range.stop)
       ),
       shift_totals AS (
         SELECT user_id, count(*)::int AS shifts,

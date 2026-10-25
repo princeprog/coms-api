@@ -253,7 +253,7 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')('sales report', () => {
     ).toBe(201);
     // Yesterday: one 150 meal.
     const earlier = await sell(meal, '1', 'DINE_IN', 'Cash');
-    await sql`UPDATE sales SET created_at = created_at - interval '1 day' WHERE id = ${earlier}::uuid`.execute(
+    await sql`UPDATE sales SET occurred_at = occurred_at - interval '1 day' WHERE id = ${earlier}::uuid`.execute(
       db,
     );
     await sql`UPDATE register_shifts SET status = 'CLOSED', closed_at = now(),

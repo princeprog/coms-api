@@ -101,8 +101,8 @@ export async function attentionSummary(
         coms_business_day_end(day.today - 1), NULL, NULL, NULL
       FROM scope b, day WHERE b.status = 'active'
         AND EXISTS (SELECT 1 FROM sales s WHERE s.branch_id = b.id AND s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 1)
-          AND s.created_at < coms_business_day_end(day.today - 1))
+          AND s.occurred_at >= coms_business_day_start(day.today - 1)
+          AND s.occurred_at < coms_business_day_end(day.today - 1))
         AND NOT EXISTS (SELECT 1 FROM daily_branch_reports r
           WHERE r.branch_id = b.id AND r.business_date = day.today - 1)
       UNION ALL

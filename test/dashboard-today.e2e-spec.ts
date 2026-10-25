@@ -253,12 +253,12 @@ describe.skipIf(process.env.COMS_RUN_DB_TESTS !== '1')(
         .send({ reason: 'Wrong order' });
       // Branch A yesterday at this time: 150.
       const earlier = await sell(cashierA, branchA, meal, '1', 'DINE_IN');
-      await sql`UPDATE sales SET created_at = created_at - interval '1 day' WHERE id = ${earlier}::uuid`.execute(
+      await sql`UPDATE sales SET occurred_at = occurred_at - interval '1 day' WHERE id = ${earlier}::uuid`.execute(
         db,
       );
       // Branch A on the same weekday last week, at this time: 150.
       const lastWeek = await sell(cashierA, branchA, meal, '1', 'DINE_IN');
-      await sql`UPDATE sales SET created_at = created_at - interval '7 days' WHERE id = ${lastWeek}::uuid`.execute(
+      await sql`UPDATE sales SET occurred_at = occurred_at - interval '7 days' WHERE id = ${lastWeek}::uuid`.execute(
         db,
       );
       // Branch B today: 100; its shift is then left open from two days ago.

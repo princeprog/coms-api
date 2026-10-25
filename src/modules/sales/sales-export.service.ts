@@ -26,7 +26,7 @@ export class SalesExportService {
       rows: result.items,
       columns: [
         { header: 'Sale', value: (sale) => sale.sale_reference },
-        { header: 'Date and time', value: (sale) => sale.created_at },
+        { header: 'Date and time', value: (sale) => sale.occurred_at },
         { header: 'Cashier', value: (sale) => sale.cashier_name },
         {
           header: 'Service type',

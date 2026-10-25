@@ -127,7 +127,7 @@ export class InventoryRepository {
             greatest(-coalesce(sum(im.quantity_delta), 0), 0) / 14, 2))::text
           FROM inventory_movements im
           WHERE im.stock_item_id = si.id AND ${usage}
-            AND im.created_at >= now() - interval '14 days')`.as(
+            AND im.occurred_at >= now() - interval '14 days')`.as(
           'avg_daily_use',
         ),
         stockStatusSql({
@@ -197,9 +197,10 @@ export class InventoryRepository {
         'im.actor_user_id',
         'im.idempotency_key',
         'im.created_at',
+        'im.occurred_at',
       ])
       .where('im.inventory_scope', '=', scope)
-      .orderBy('im.created_at', 'desc')
+      .orderBy('im.occurred_at', 'desc')
       .orderBy('im.id', 'desc')
       .limit(query.page_size)
       .offset(paginationOffset(query));

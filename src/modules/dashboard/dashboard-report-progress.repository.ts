@@ -54,8 +54,8 @@ export async function reportProgress(
       WHERE lc.status = 'PENDING' GROUP BY d.branch_id, dates.date
     ), sales_days AS (
       SELECT s.branch_id, dates.date FROM sales s JOIN scope b ON b.id = s.branch_id
-      JOIN dates ON s.created_at >= coms_business_day_start(dates.date)
-        AND s.created_at < coms_business_day_end(dates.date)
+      JOIN dates ON s.occurred_at >= coms_business_day_start(dates.date)
+        AND s.occurred_at < coms_business_day_end(dates.date)
       WHERE s.status = 'COMPLETED' GROUP BY s.branch_id, dates.date
     )
     SELECT b.id AS branch_id, dates.period, dates.date::text AS business_date,

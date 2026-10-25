@@ -6,6 +6,7 @@ import {
   validateReportDeliveries,
 } from './report-deliveries';
 import type { DeliveryExceptionDto } from './dto/submit-daily-report.dto';
+import { requireFinalizedOfflineSessions } from './report-offline-sessions';
 import {
   paginatedResult,
   paginationOffset,
@@ -357,11 +358,21 @@ export class DailyReportsRepository {
     exceptions: DeliveryExceptionDto[] = [],
   ) {
     return this.db.transaction().execute(async (transaction) => {
-      const report = await this.lockReport(transaction, branchId, reportId);
+      const report = await this.lockReport(
+        transaction,
+        branchId,
+        reportId,
+        true,
+      );
       if (report.status === 'SUBMITTED' || report.status === 'APPROVED')
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'DRAFT' && report.status !== 'RETURNED')
         throw new ConflictException('This report cannot be submitted');
+      await requireFinalizedOfflineSessions(
+        transaction,
+        branchId,
+        report.business_date,
+      );
       const bypassChecklist = process.env.NODE_ENV === 'development';
       const deliveryExceptions = bypassChecklist
         ? []
@@ -528,11 +539,21 @@ export class DailyReportsRepository {
     allowInactiveBranch = false,
   ) {
     return this.db.transaction().execute(async (transaction) => {
-      const report = await this.lockReport(transaction, branchId, reportId);
+      const report = await this.lockReport(
+        transaction,
+        branchId,
+        reportId,
+        true,
+      );
       if (report.status === 'APPROVED')
         return this.findDetails(transaction, branchId, reportId);
       if (report.status !== 'SUBMITTED')
         throw new ConflictException('Only submitted reports can be approved');
+      await requireFinalizedOfflineSessions(
+        transaction,
+        branchId,
+        report.business_date,
+      );
       const held = await transaction
         .selectFrom('dispatch_late_counts as lc')
         .innerJoin('dispatches as d', 'd.id', 'lc.dispatch_id')
@@ -709,8 +730,8 @@ export class DailyReportsRepository {
         JOIN sales AS sale ON sale.id = event.sale_id
         CROSS JOIN bounds
         WHERE sale.branch_id = ${branchId}
-          AND event.created_at >= bounds.day_start
-          AND event.created_at < bounds.day_end
+          AND event.occurred_at >= bounds.day_start
+          AND event.occurred_at < bounds.day_end
       )
       UPDATE daily_branch_reports AS report
       SET completed_sales_amount = summary.completed_amount,
@@ -818,22 +839,22 @@ export class DailyReportsRepository {
               (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date < bounds.business_date)
               OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-                AND coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) < bounds.day_start)), 0)::text
+                AND coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) < bounds.day_start)), 0)::text
             AS opening_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) >= bounds.day_start
               AND movement.movement_type IN ('TRANSFER_IN', 'RECEIPT')), 0)::text
             AS receipt_quantity,
           COALESCE(SUM(-movement.quantity_delta)
-            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) >= bounds.day_start
               AND movement.movement_type = 'SALE'), 0)::text
             AS sale_consumption_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) >= bounds.day_start
               AND movement.movement_type = 'SALE_VOID'), 0)::text
             AS sale_void_reversal_quantity,
           COALESCE(SUM(movement.quantity_delta)
-            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) >= bounds.day_start
+            FILTER (WHERE coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) >= bounds.day_start
               AND movement.movement_type = 'ADJUSTMENT'
               OR (movement.movement_type = 'REPORT_ADJUSTMENT'
                 AND source_report.business_date = bounds.business_date)), 0)::text
@@ -853,7 +874,7 @@ export class DailyReportsRepository {
             (movement.movement_type = 'REPORT_ADJUSTMENT'
               AND source_report.business_date < bounds.business_date + 1)
             OR (movement.movement_type <> 'REPORT_ADJUSTMENT'
-              AND coalesce(coms_business_day_start(receipt.delivery_date), movement.created_at) < bounds.day_end)
+              AND coalesce(coms_business_day_start(receipt.delivery_date), movement.occurred_at) < bounds.day_end)
           )
         GROUP BY movement.stock_item_id
       )
@@ -1006,8 +1027,21 @@ export class DailyReportsRepository {
     transaction: Transaction<DB>,
     branchId: string,
     reportId: string,
+    lockOfflineWriters = false,
   ) {
     await lockReceivingBranch(transaction, branchId);
+    if (lockOfflineWriters) {
+      // Offline preparation/sync holds FOR SHARE on this row before shift/session
+      // locks. Acquire the exclusive lock before reading the report or sessions;
+      // keep the receiving advisory lock first to match receiving workflows.
+      const branch = await transaction
+        .selectFrom('branches')
+        .select('id')
+        .where('id', '=', branchId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!branch) throw new NotFoundException('Branch not found');
+    }
     const report = await transaction
       .selectFrom('daily_branch_reports')
       .select([

@@ -52,6 +52,9 @@ export class SalesService {
       branchId,
       actorUserId,
       tenderMethod,
+      ...(input.register_device_id
+        ? { registerDeviceId: input.register_device_id }
+        : {}),
       ...(input.payment_method_id
         ? { paymentMethodId: input.payment_method_id }
         : {}),

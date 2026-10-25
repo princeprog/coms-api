@@ -33,6 +33,10 @@ export class CreateSaleItemDto {
 export class CreateSaleDto {
   @IsOptional()
   @IsUUID()
+  register_device_id?: string;
+
+  @IsOptional()
+  @IsUUID()
   payment_method_id?: string;
 
   @IsIn(['DINE_IN', 'TAKEAWAY'])

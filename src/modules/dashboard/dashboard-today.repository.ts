@@ -85,8 +85,8 @@ export class DashboardTodayRepository {
       today_sales AS (
         SELECT s.id, s.status, s.total_amount FROM sales s
         JOIN scope b ON b.id = s.branch_id, day
-        WHERE s.created_at >= coms_business_day_start(day.today)
-          AND s.created_at < coms_business_day_end(day.today)
+        WHERE s.occurred_at >= coms_business_day_start(day.today)
+          AND s.occurred_at < coms_business_day_end(day.today)
       ),
       completed AS (SELECT * FROM today_sales WHERE status = 'COMPLETED'),
       lines AS (
@@ -102,15 +102,15 @@ export class DashboardTodayRepository {
         SELECT s.total_amount FROM sales s
         JOIN scope b ON b.id = s.branch_id, day
         WHERE s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 1)
-          AND s.created_at < least(now() - interval '1 day', coms_business_day_end(day.today - 1))
+          AND s.occurred_at >= coms_business_day_start(day.today - 1)
+          AND s.occurred_at < least(now() - interval '1 day', coms_business_day_end(day.today - 1))
       ),
       last_week AS (
         SELECT s.total_amount FROM sales s
         JOIN scope b ON b.id = s.branch_id, day
         WHERE s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 7)
-          AND s.created_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
+          AND s.occurred_at >= coms_business_day_start(day.today - 7)
+          AND s.occurred_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
       ),
       sums AS (
         SELECT
@@ -175,16 +175,16 @@ export class DashboardTodayRepository {
     }>`
       WITH ${this.scope(scope)},
       today_sales AS (
-        SELECT s.branch_id, s.status, s.total_amount, s.created_at FROM sales s
+        SELECT s.branch_id, s.status, s.total_amount, s.occurred_at FROM sales s
         JOIN scope b ON b.id = s.branch_id, day
-        WHERE s.created_at >= coms_business_day_start(day.today)
-          AND s.created_at < coms_business_day_end(day.today)
+        WHERE s.occurred_at >= coms_business_day_start(day.today)
+          AND s.occurred_at < coms_business_day_end(day.today)
       ),
       per_branch AS (
         SELECT branch_id,
           count(*) FILTER (WHERE status = 'COMPLETED')::int AS sales_count,
           coalesce(sum(total_amount) FILTER (WHERE status = 'COMPLETED'), 0) AS net_sales,
-          max(created_at) AS last_sale_at
+          max(occurred_at) AS last_sale_at
         FROM today_sales GROUP BY branch_id
       ),
       -- Same weekday last week, up to this moment, as in the summary cards.
@@ -192,8 +192,8 @@ export class DashboardTodayRepository {
         SELECT s.branch_id, sum(s.total_amount) AS net_sales
         FROM sales s JOIN scope b ON b.id = s.branch_id, day
         WHERE s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 7)
-          AND s.created_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
+          AND s.occurred_at >= coms_business_day_start(day.today - 7)
+          AND s.occurred_at < least(now() - interval '7 days', coms_business_day_end(day.today - 7))
         GROUP BY s.branch_id
       )
       SELECT b.id AS branch_id, b.branch_name, b.status,
@@ -205,8 +205,8 @@ export class DashboardTodayRepository {
         (SELECT r.status FROM daily_branch_reports r, day
           WHERE r.branch_id = b.id AND r.business_date = day.today - 1) AS yesterday_report_status,
         (SELECT count(*)::int FROM sales s, day WHERE s.branch_id = b.id AND s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 1)
-          AND s.created_at < coms_business_day_end(day.today - 1)) AS yesterday_sales_count
+          AND s.occurred_at >= coms_business_day_start(day.today - 1)
+          AND s.occurred_at < coms_business_day_end(day.today - 1)) AS yesterday_sales_count
       FROM scope b
       LEFT JOIN per_branch p ON p.branch_id = b.id
       LEFT JOIN last_week lw ON lw.branch_id = b.id
@@ -243,15 +243,15 @@ export class DashboardTodayRepository {
         FROM day
       ),
       completed AS (
-        SELECT date_trunc('hour', s.created_at AT TIME ZONE 'Asia/Manila') AS local_hour,
+        SELECT date_trunc('hour', s.occurred_at AT TIME ZONE 'Asia/Manila') AS local_hour,
           s.total_amount
         FROM sales s JOIN scope b ON b.id = s.branch_id, day
         WHERE s.status = 'COMPLETED'
           AND (
-            (s.created_at >= coms_business_day_start(day.today)
-              AND s.created_at < coms_business_day_end(day.today))
-            OR (s.created_at >= coms_business_day_start(day.today - 7)
-              AND s.created_at < coms_business_day_end(day.today - 7))
+            (s.occurred_at >= coms_business_day_start(day.today)
+              AND s.occurred_at < coms_business_day_end(day.today))
+            OR (s.occurred_at >= coms_business_day_start(day.today - 7)
+              AND s.occurred_at < coms_business_day_end(day.today - 7))
           )
       )
       SELECT to_char(h.local_hour, 'HH24:MI') AS hour,
@@ -277,11 +277,11 @@ export class DashboardTodayRepository {
         SELECT (day.today - offs)::date AS business_date FROM day, generate_series(0, 6) AS offs
       ),
       completed AS (
-        SELECT s.id, s.total_amount, coms_business_date(s.created_at) AS business_date
+        SELECT s.id, s.total_amount, coms_business_date(s.occurred_at) AS business_date
         FROM sales s JOIN scope b ON b.id = s.branch_id, day
         WHERE s.status = 'COMPLETED'
-          AND s.created_at >= coms_business_day_start(day.today - 6)
-          AND s.created_at < coms_business_day_end(day.today)
+          AND s.occurred_at >= coms_business_day_start(day.today - 6)
+          AND s.occurred_at < coms_business_day_end(day.today)
       ),
       per_sale AS (
         SELECT business_date, count(*)::int AS sales_count, sum(total_amount) AS net_sales
@@ -315,14 +315,14 @@ export class DashboardTodayRepository {
     }>`
       WITH ${this.scope(scope)}
       SELECT si.product_id,
-        (array_agg(si.product_name_snapshot ORDER BY s.created_at DESC))[1] AS name,
+        (array_agg(si.product_name_snapshot ORDER BY s.occurred_at DESC))[1] AS name,
         trim_scale(sum(si.quantity))::text AS quantity,
         ${money(sql`sum(si.line_total)`)} AS net_sales
       FROM sales s JOIN scope b ON b.id = s.branch_id
       JOIN sale_items si ON si.sale_id = s.id, day
       WHERE s.status = 'COMPLETED'
-        AND s.created_at >= coms_business_day_start(day.today)
-        AND s.created_at < coms_business_day_end(day.today)
+        AND s.occurred_at >= coms_business_day_start(day.today)
+        AND s.occurred_at < coms_business_day_end(day.today)
       GROUP BY si.product_id
       ORDER BY sum(si.line_total) DESC, name
       LIMIT 5

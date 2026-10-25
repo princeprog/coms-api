@@ -106,12 +106,12 @@ export async function reportBacklog(
   }>`
     WITH ${scope},
     sales_days AS (
-      SELECT s.branch_id, coms_business_date(s.created_at) AS business_date
+      SELECT s.branch_id, coms_business_date(s.occurred_at) AS business_date
       FROM sales s CROSS JOIN day
       JOIN scope b ON b.id = s.branch_id AND b.status = 'active'
       WHERE s.status = 'COMPLETED'
-        AND s.created_at >= coms_business_day_start(day.today - ${MISSING_REPORT_LOOKBACK_DAYS}::int)
-        AND s.created_at < coms_business_day_end(day.today - 2)
+        AND s.occurred_at >= coms_business_day_start(day.today - ${MISSING_REPORT_LOOKBACK_DAYS}::int)
+        AND s.occurred_at < coms_business_day_end(day.today - 2)
       GROUP BY 1, 2
     ),
     outstanding AS (

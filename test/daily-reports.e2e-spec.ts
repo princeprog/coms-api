@@ -116,7 +116,7 @@ describe('daily report routes (e2e)', () => {
         quantity_delta: quantityDelta,
         reason: reason ?? null,
         actor_user_id: reporterId,
-        created_at: new Date(createdAt),
+        occurred_at: new Date(createdAt),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -345,7 +345,7 @@ describe('daily report routes (e2e)', () => {
         sale_id: sale.id,
         event_type: 'COMPLETED',
         actor_user_id: reporterId,
-        created_at: new Date('2026-09-23T06:00:00.000Z'),
+        occurred_at: new Date('2026-09-23T06:00:00.000Z'),
       })
       .execute();
     const saleMovement = await db
@@ -358,7 +358,7 @@ describe('daily report routes (e2e)', () => {
         quantity_delta: '-2.0000',
         actor_user_id: reporterId,
         sale_item_consumption_id: saleConsumption.id,
-        created_at: new Date('2026-09-23T06:00:00.000Z'),
+        occurred_at: new Date('2026-09-23T06:00:00.000Z'),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -371,7 +371,7 @@ describe('daily report routes (e2e)', () => {
         actor_user_id: reporterId,
         reason: 'Voided earlier sale',
         idempotency_key: randomUUID(),
-        created_at: new Date('2026-09-23T06:10:00.000Z'),
+        occurred_at: new Date('2026-09-23T06:10:00.000Z'),
       })
       .execute();
     const saleVoidMovement = await db
@@ -385,7 +385,7 @@ describe('daily report routes (e2e)', () => {
         reason: 'Voided earlier sale',
         actor_user_id: reporterId,
         reversal_of_movement_id: saleMovement.id,
-        created_at: new Date('2026-09-23T06:10:00.000Z'),
+        occurred_at: new Date('2026-09-23T06:10:00.000Z'),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -432,7 +432,7 @@ describe('daily report routes (e2e)', () => {
         sale_id: laterSale.id,
         event_type: 'COMPLETED',
         actor_user_id: reporterId,
-        created_at: new Date('2026-09-24T08:00:00.000Z'),
+        occurred_at: new Date('2026-09-24T08:00:00.000Z'),
       })
       .execute();
     const laterSaleMovement = await db
@@ -445,7 +445,7 @@ describe('daily report routes (e2e)', () => {
         quantity_delta: '-15.0000',
         actor_user_id: reporterId,
         sale_item_consumption_id: laterConsumption.id,
-        created_at: new Date('2026-09-23T20:00:00.000Z'),
+        occurred_at: new Date('2026-09-23T20:00:00.000Z'),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -1380,7 +1380,7 @@ describe('daily report routes (e2e)', () => {
       .executeTakeFirstOrThrow();
     await db
       .updateTable('inventory_movements')
-      .set({ created_at: new Date(`${businessDate}T02:00:00.000Z`) })
+      .set({ occurred_at: new Date(`${businessDate}T02:00:00.000Z`) })
       .where('id', '=', transferIn.id)
       .execute();
 

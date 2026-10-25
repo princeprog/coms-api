@@ -80,7 +80,7 @@ describe('dashboard routes (e2e)', () => {
         tender_method: 'cash',
         total_amount: amount,
         idempotency_key: randomUUID(),
-        created_at: new Date('2026-09-28T03:00:00.000Z'),
+        occurred_at: new Date('2026-09-28T03:00:00.000Z'),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -103,7 +103,7 @@ describe('dashboard routes (e2e)', () => {
         sale_id: sale.id,
         event_type: 'COMPLETED',
         actor_user_id: branchManagerId,
-        created_at: new Date('2026-09-28T03:00:00.000Z'),
+        occurred_at: new Date('2026-09-28T03:00:00.000Z'),
       })
       .execute();
     if (status === 'VOIDED')
@@ -115,7 +115,7 @@ describe('dashboard routes (e2e)', () => {
           actor_user_id: branchManagerId,
           reason: 'Test void',
           idempotency_key: randomUUID(),
-          created_at: new Date('2026-09-28T04:00:00.000Z'),
+          occurred_at: new Date('2026-09-28T04:00:00.000Z'),
         })
         .execute();
     return { saleId: sale.id, saleItemId: saleItem.id };
