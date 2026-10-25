@@ -28,6 +28,7 @@
     "account:create": "ts-node scripts/create-account.ts",
     "account:reset-password": "ts-node scripts/reset-password.ts",
     "seed:philippines": "ts-node scripts/seed-philippine-sample-data.ts",
+    "seed:today": "ts-node scripts/populate-today.ts",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",

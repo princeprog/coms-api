@@ -24,3 +24,18 @@ Product categories are required after migration `20261019235124_product_categori
 ## Product recipes
 
 Every sample product gets a recipe built from sample stock: quantities per unit sold in each stock item's unit (rice as raw weight per serving), with meal boxes, bowls, cups and utensils applied to Takeout only. Items COMS doesn't stock (noodles, tea, sago, gulaman, buko, peanut sauce) are left out. The seed only fills a product with no recipe lines, writes a recipe whole or not at all, and skips operating supplies. Sample cleaning supplies are created as operating supplies.
+
+## Today's operational sample data
+
+```powershell
+pnpm seed:today --check
+pnpm seed:today --apply
+```
+
+Adds a small operational day to **Manila - Ermita** (`PH-MNL-ERMITA`), using the database's current business date and actual creation timestamps. The day includes 30 completed sales with Cash, GCash and Maya payments; three dispatches (two received, one awaiting a count); two cashier shifts (one balanced and reviewed, one open); and a draft daily report with simulated physical counts matching the ledger. The report stays editable while the second shift and outstanding delivery remain open. These are fictional development transactions, not evidence of actual sales, deliveries or physical counts. Work schedules are not changed.
+
+Requires the existing sample catalog and sufficient commissary stock, an active Super Admin to send deliveries, an assigned branch manager with receiving/report/review permissions, and a separate assigned cashier. It creates no accounts or permission grants. An existing open register or report for today stops the operation without modifying it.
+
+The script calls the normal domain services inside one serializable transaction, including recipe deductions, delivery receipts, notification records, audit attribution, shift handover and report calculations. Remote hosts and production mode are rejected. Default/`--check` rolls back; only `--apply` commits. Checks reconcile inventory against the ledger, sale totals and dates, the closed shift's exact cash count, report counts, and preservation of existing rows. Stable keys and the final report identify a completed run; reruns add nothing and retain subsequent user edits. PostgreSQL sequences may advance during a dry run, so reference-number gaps are expected.
+
+Applied on 2026-10-25 to local `coms-db`: 30 sales totaling PHP 12,202 (18 Cash, six GCash, six Maya), two received dispatches and one in transit, one balanced reviewed shift and one open shift, and one draft report with all 26 count lines filled. The first shift reused the prior PHP 1,000 float, closed at PHP 5,336 with zero difference, and handed PHP 1,500 to the second shift. Post-commit verification matched the saved totals and a fresh dry run added nothing.
